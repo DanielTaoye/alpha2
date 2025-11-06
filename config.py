@@ -3,8 +3,8 @@ DATABASE_CONFIG = {
     'host': 'localhost',
     'port': 3306,
     'user': 'root',
-    'password': 'your_password',  # 请修改为实际密码
-    'database': 'your_database',  # 请修改为实际数据库名
+    'password': '1234',  # 本地数据库密码
+    'database': 'stock',  # 本地数据库
     'charset': 'utf8mb4'
 }
 

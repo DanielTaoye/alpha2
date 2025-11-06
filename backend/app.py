@@ -5,19 +5,18 @@ import requests
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
+import sys
+import os
+
+# 添加项目根目录到路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import DATABASE_CONFIG
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 CORS(app)
 
-# 数据库配置
-DB_CONFIG = {
-    'host': 'sh-cdb-2hxu41ka.sql.tencentcdb.com',
-    'port': 21648,
-    'user': 'root',
-    'password': 'MrEPYZus7myr',
-    'database': 'stock',  # 请修改为实际数据库名
-    'charset': 'utf8mb4'
-}
+# 使用配置文件中的数据库配置
+DB_CONFIG = DATABASE_CONFIG
 
 # 股票分组配置
 STOCK_GROUPS = {
