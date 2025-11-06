@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阿尔法策略2.0系统 - 智能股票K线分析平台</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #0a0e27;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e2a4a 0%, #2a3f5f 100%);
+            border-radius: 10px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .stock-group {
+            margin-bottom: 40px;
+        }
+
+        .group-title {
+            font-size: 24px;
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            background: #1e2a4a;
+            border-left: 4px solid #4a90e2;
+            border-radius: 5px;
+        }
+
+        .stock-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(800px, 1fr));
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .stock-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stock-card {
+            background: #151929;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .stock-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #2a3f5f;
+        }
+
+        .stock-name {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .stock-code {
+            font-size: 14px;
+            color: #888;
+        }
+
+        .period-selector {
+            display: flex;
+            gap: 10px;
+        }
+
+        .period-btn {
+            padding: 5px 15px;
+            background: #2a3f5f;
+            border: 1px solid #4a90e2;
+            border-radius: 5px;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .period-btn:hover {
+            background: #4a90e2;
+        }
+
+        .period-btn.active {
+            background: #4a90e2;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            width: 100%;
+            height: 500px;
+            margin-bottom: 15px;
+        }
+
+        .analysis-info {
+            display: flex;
+            justify-content: space-around;
+            padding: 15px;
+            background: #1e2a4a;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .info-item {
+            text-align: center;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .info-value.up {
+            color: #ef5350;
+        }
+
+        .info-value.down {
+            color: #26a69a;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            color: #888;
+        }
+
+        .error {
+            text-align: center;
+            padding: 20px;
+            color: #ef5350;
+            background: rgba(239, 83, 80, 0.1);
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .spinner {
+            border: 3px solid #2a3f5f;
+            border-top: 3px solid #4a90e2;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            padding: 30px;
+            margin-top: 40px;
+            border-top: 1px solid #2a3f5f;
+            color: #888;
+        }
+
+        .footer a {
+            color: #4a90e2;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: blink 2s infinite;
+        }
+
+        .status-indicator.online {
+            background: #26a69a;
+        }
+
+        .status-indicator.offline {
+            background: #ef5350;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔥 阿尔法策略2.0系统</h1>
+        <p>实时股票K线分析与智能策略监控平台</p>
+        <p style="font-size: 12px; margin-top: 10px;">
+            <span class="status-indicator online" id="status-indicator"></span>
+            <span id="status-text">系统初始化中...</span>
+        </p>
+    </div>
+
+    <div id="app">
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>正在加载系统...</p>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>© 2025 阿尔法策略2.0系统 | 
+           <a href="README.md" target="_blank">使用文档</a> | 
+           <a href="USAGE.md" target="_blank">详细指南</a>
+        </p>
+        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+            数据仅供参考，不构成投资建议。投资有风险，入市需谨慎。
+        </p>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        let stockGroups = {};
+        let charts = {};
+
+        // 更新状态指示器
+        function updateStatus(online, text) {
+            const indicator = document.getElementById('status-indicator');
+            const statusText = document.getElementById('status-text');
+            
+            if (indicator && statusText) {
+                indicator.className = online ? 'status-indicator online' : 'status-indicator offline';
+                statusText.textContent = text;
+            }
+        }
+
+        // 初始化应用
+        async function initApp() {
+            try {
+                updateStatus(false, '正在连接服务器...');
+                
+                // 获取股票分组
+                const response = await fetch(`${API_BASE_URL}/stock_groups`);
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    stockGroups = result.data;
+                    updateStatus(true, '系统运行正常');
+                    renderStockGroups();
+                } else {
+                    throw new Error(result.message || '获取数据失败');
+                }
+            } catch (error) {
+                console.error('初始化失败:', error);
+                updateStatus(false, '服务器连接失败');
+                document.getElementById('app').innerHTML = `
+                    <div class="error">
+                        <h2>❌ 系统初始化失败</h2>
+                        <p>${error.message}</p>
+                        <p style="margin-top: 15px; font-size: 14px;">
+                            请检查：<br>
+                            1. 后端服务是否启动（运行 start.bat）<br>
+                            2. 数据库连接是否正常<br>
+                            3. 配置是否正确
+                        </p>
+                        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 30px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 14px;">
+                            重新加载
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // 渲染股票分组
+        function renderStockGroups() {
+            const app = document.getElementById('app');
+            let html = '';
+
+            for (const [groupName, stocks] of Object.entries(stockGroups)) {
+                html += `
+                    <div class="stock-group">
+                        <div class="group-title">${groupName}策略</div>
+                        <div class="stock-grid">
+                            ${stocks.map(stock => `
+                                <div class="stock-card">
+                                    <div class="stock-header">
+                                        <div>
+                                            <div class="stock-name">${stock.name}</div>
+                                            <div class="stock-code">${stock.code}</div>
+                                        </div>
+                                        <div class="period-selector">
+                                            <button class="period-btn active" onclick="changePeriod('${stock.code}', '30min')">30分钟</button>
+                                            <button class="period-btn" onclick="changePeriod('${stock.code}', 'day')">日K线</button>
+                                            <button class="period-btn" onclick="changePeriod('${stock.code}', 'week')">周K线</button>
+                                            <button class="period-btn" onclick="changePeriod('${stock.code}', 'month')">月K线</button>
+                                        </div>
+                                    </div>
+                                    <div id="chart-${stock.code}" class="chart-container">
+                                        <div class="loading">
+                                            <div class="spinner"></div>
+                                            <p>加载K线数据中...</p>
+                                        </div>
+                                    </div>
+                                    <div class="analysis-info" id="analysis-${stock.code}">
+                                        <div class="info-item">
+                                            <div class="info-label">益损比</div>
+                                            <div class="info-value">--</div>
+                                        </div>
+                                        <div class="info-item">
+                                            <div class="info-label">支撑线</div>
+                                            <div class="info-value down">--</div>
+                                        </div>
+                                        <div class="info-item">
+                                            <div class="info-label">压力线</div>
+                                            <div class="info-value up">--</div>
+                                        </div>
+                                        <div class="info-item">
+                                            <div class="info-label">量比</div>
+                                            <div class="info-value">--</div>
+                                        </div>
+                                        <div class="info-item">
+                                            <div class="info-label">委比</div>
+                                            <div class="info-value">--</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            app.innerHTML = html;
+
+            // 初始化所有图表
+            for (const stocks of Object.values(stockGroups)) {
+                for (const stock of stocks) {
+                    loadStockData(stock.code, stock.table, '30min');
+                }
+            }
+        }
+
+        // 切换周期
+        function changePeriod(stockCode, period) {
+            // 更新按钮状态
+            const card = document.querySelector(`#chart-${stockCode}`).closest('.stock-card');
+            const buttons = card.querySelectorAll('.period-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // 获取表名
+            let tableName = '';
+            for (const stocks of Object.values(stockGroups)) {
+                const stock = stocks.find(s => s.code === stockCode);
+                if (stock) {
+                    tableName = stock.table;
+                    break;
+                }
+            }
+
+            // 重新加载数据
+            loadStockData(stockCode, tableName, period);
+        }
+
+        // 加载股票数据
+        async function loadStockData(stockCode, tableName, period) {
+            try {
+                // 加载K线数据
+                const klineResponse = await fetch(`${API_BASE_URL}/kline_data`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_name: tableName,
+                        period_type: period
+                    })
+                });
+
+                const klineResult = await klineResponse.json();
+
+                if (klineResult.code !== 200) {
+                    throw new Error(klineResult.message);
+                }
+
+                // 加载分析数据
+                const analysisResponse = await fetch(`${API_BASE_URL}/stock_analysis`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stock_code: stockCode
+                    })
+                });
+
+                const analysisResult = await analysisResponse.json();
+                const analysisData = analysisResult.code === 200 ? analysisResult.data[period] : {};
+
+                // 渲染图表
+                renderChart(stockCode, klineResult.data, analysisData, period);
+
+            } catch (error) {
+                console.error(`加载${stockCode}数据失败:`, error);
+                document.getElementById(`chart-${stockCode}`).innerHTML = `
+                    <div class="error">
+                        <p>📊 数据加载失败</p>
+                        <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
+                        <button onclick="loadStockData('${stockCode}', '${tableName}', '${period}')" 
+                                style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">
+                            重试
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // 渲染图表
+        function renderChart(stockCode, klineData, analysisData, period) {
+            const chartDom = document.getElementById(`chart-${stockCode}`);
+            
+            // 销毁旧图表
+            if (charts[stockCode]) {
+                charts[stockCode].dispose();
+            }
+
+            const chart = echarts.init(chartDom);
+            charts[stockCode] = chart;
+
+            // 准备数据
+            const dates = klineData.map(item => item.time);
+            const values = klineData.map(item => [item.open, item.close, item.low, item.high]);
+            const volumes = klineData.map(item => item.volume);
+
+            // 计算最新的量比和委比
+            const latestData = klineData[klineData.length - 1] || {};
+
+            // 支撑线和压力线数据
+            const supportLine = analysisData.supportPrice ? 
+                Array(dates.length).fill(analysisData.supportPrice) : null;
+            const pressureLine = analysisData.pressurePrice ? 
+                Array(dates.length).fill(analysisData.pressurePrice) : null;
+
+            // 配置项
+            const option = {
+                backgroundColor: 'transparent',
+                animation: true,
+                legend: {
+                    data: ['K线', '支撑线', '压力线'],
+                    textStyle: {
+                        color: '#fff'
+                    },
+                    top: 0
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: {
+                        type: 'cross'
+                    },
+                    backgroundColor: 'rgba(26, 35, 56, 0.9)',
+                    borderColor: '#4a90e2',
+                    textStyle: {
+                        color: '#fff'
+                    }
+                },
+                grid: [
+                    {
+                        left: '10%',
+                        right: '10%',
+                        top: '12%',
+                        height: '50%'
+                    },
+                    {
+                        left: '10%',
+                        right: '10%',
+                        top: '70%',
+                        height: '15%'
+                    }
+                ],
+                xAxis: [
+                    {
+                        type: 'category',
+                        data: dates,
+                        scale: true,
+                        boundaryGap: false,
+                        axisLine: { lineStyle: { color: '#4a90e2' } },
+                        axisLabel: {
+                            color: '#888',
+                            formatter: function(value) {
+                                if (period === '30min') {
+                                    return value.substring(5, 16);
+                                } else {
+                                    return value.substring(0, 10);
+                                }
+                            }
+                        },
+                        splitLine: { show: false },
+                        min: 'dataMin',
+                        max: 'dataMax'
+                    },
+                    {
+                        type: 'category',
+                        gridIndex: 1,
+                        data: dates,
+                        scale: true,
+                        boundaryGap: false,
+                        axisLine: { lineStyle: { color: '#4a90e2' } },
+                        axisLabel: { show: false },
+                        splitLine: { show: false },
+                        min: 'dataMin',
+                        max: 'dataMax'
+                    }
+                ],
+                yAxis: [
+                    {
+                        scale: true,
+                        splitArea: { show: false },
+                        axisLine: { lineStyle: { color: '#4a90e2' } },
+                        axisLabel: { color: '#888' },
+                        splitLine: {
+                            lineStyle: {
+                                color: '#2a3f5f'
+                            }
+                        }
+                    },
+                    {
+                        scale: true,
+                        gridIndex: 1,
+                        splitNumber: 2,
+                        axisLine: { lineStyle: { color: '#4a90e2' } },
+                        axisLabel: { 
+                            color: '#888',
+                            formatter: function(value) {
+                                return (value / 1000000).toFixed(0) + 'M';
+                            }
+                        },
+                        splitLine: {
+                            lineStyle: {
+                                color: '#2a3f5f'
+                            }
+                        }
+                    }
+                ],
+                dataZoom: [
+                    {
+                        type: 'inside',
+                        xAxisIndex: [0, 1],
+                        start: 70,
+                        end: 100
+                    },
+                    {
+                        show: true,
+                        xAxisIndex: [0, 1],
+                        type: 'slider',
+                        bottom: '5%',
+                        start: 70,
+                        end: 100,
+                        backgroundColor: '#1e2a4a',
+                        fillerColor: 'rgba(74, 144, 226, 0.2)',
+                        borderColor: '#4a90e2',
+                        textStyle: {
+                            color: '#888'
+                        }
+                    }
+                ],
+                series: [
+                    {
+                        name: 'K线',
+                        type: 'candlestick',
+                        data: values,
+                        itemStyle: {
+                            color: '#ef5350',
+                            color0: '#26a69a',
+                            borderColor: '#ef5350',
+                            borderColor0: '#26a69a'
+                        }
+                    },
+                    {
+                        name: '成交量',
+                        type: 'bar',
+                        xAxisIndex: 1,
+                        yAxisIndex: 1,
+                        data: volumes,
+                        itemStyle: {
+                            color: function(params) {
+                                const dataIndex = params.dataIndex;
+                                if (dataIndex === 0) return '#26a69a';
+                                return values[dataIndex][1] > values[dataIndex][0] ? '#ef5350' : '#26a69a';
+                            }
+                        }
+                    }
+                ]
+            };
+
+            // 添加支撑线
+            if (supportLine) {
+                option.series.push({
+                    name: '支撑线',
+                    type: 'line',
+                    data: supportLine,
+                    smooth: true,
+                    lineStyle: {
+                        color: '#26a69a',
+                        width: 2,
+                        type: 'dashed'
+                    },
+                    symbol: 'none'
+                });
+            }
+
+            // 添加压力线
+            if (pressureLine) {
+                option.series.push({
+                    name: '压力线',
+                    type: 'line',
+                    data: pressureLine,
+                    smooth: true,
+                    lineStyle: {
+                        color: '#ef5350',
+                        width: 2,
+                        type: 'dashed'
+                    },
+                    symbol: 'none'
+                });
+            }
+
+            chart.setOption(option);
+
+            // 更新分析信息
+            updateAnalysisInfo(stockCode, analysisData, latestData);
+
+            // 响应式
+            window.addEventListener('resize', () => {
+                chart.resize();
+            });
+        }
+
+        // 更新分析信息
+        function updateAnalysisInfo(stockCode, analysisData, latestData) {
+            const analysisDiv = document.getElementById(`analysis-${stockCode}`);
+            
+            const winLoseRatio = analysisData.winLoseRatio || '--';
+            const supportPrice = analysisData.supportPrice || '--';
+            const pressurePrice = analysisData.pressurePrice || '--';
+            const liangbi = latestData.liangbi ? latestData.liangbi.toFixed(2) : '--';
+            const weibi = latestData.weibi ? latestData.weibi.toFixed(2) : '--';
+
+            analysisDiv.innerHTML = `
+                <div class="info-item">
+                    <div class="info-label">益损比</div>
+                    <div class="info-value">${typeof winLoseRatio === 'number' ? winLoseRatio.toFixed(2) : winLoseRatio}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">支撑线</div>
+                    <div class="info-value down">${typeof supportPrice === 'number' ? supportPrice.toFixed(2) : supportPrice}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">压力线</div>
+                    <div class="info-value up">${typeof pressurePrice === 'number' ? pressurePrice.toFixed(2) : pressurePrice}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">量比</div>
+                    <div class="info-value">${liangbi}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">委比</div>
+                    <div class="info-value ${parseFloat(weibi) > 0 ? 'up' : 'down'}">${weibi}</div>
+                </div>
+            `;
+        }
+
+        // 页面加载时初始化
+        window.onload = initApp;
+    </script>
+</body>
+</html>
+
