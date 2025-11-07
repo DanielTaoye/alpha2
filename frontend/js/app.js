@@ -190,6 +190,14 @@ function renderStockView(stockCode, stockName, tableName) {
                         <span class="overlay-label">压力线:</span>
                         <span class="overlay-value pressure" id="pressureValue">--</span>
                     </div>
+                    <div class="overlay-item">
+                        <span class="overlay-label">CR点:</span>
+                        <span class="overlay-value" id="crPointsStats">--</span>
+                    </div>
+                </div>
+                <div class="chart-overlay-buttons">
+                    <button class="overlay-btn" id="analyzeCRBtn" onclick="analyzeCRPoints()">🎯 分析CR点</button>
+                    <button class="overlay-btn" id="toggleCRBtn" onclick="toggleCRPoints()">👁️ 显示CR点</button>
                 </div>
             </div>
         </div>
@@ -328,6 +336,13 @@ async function loadStockData(stockCode, tableName, period) {
             renderChart(klineResult.data, {}, period);
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
+            
+            // 自动加载CR点数据（如果是日K线）
+            if (period === 'day') {
+                loadCRPoints().catch(err => {
+                    console.error('加载CR点数据失败:', err);
+                });
+            }
         } catch (error) {
             console.error(`[${period}] K线渲染失败:`, error);
             throw error;
@@ -877,6 +892,218 @@ function updateAnalysisInfo(analysisData, latestData) {
     if (pressureEl) {
         const pressurePrice = (analysisData && analysisData.pressurePrice) || '--';
         pressureEl.textContent = typeof pressurePrice === 'number' ? pressurePrice.toFixed(2) : pressurePrice;
+    }
+}
+
+// ============ CR点分析功能 ============
+
+let crPointsData = { c_points: [], r_points: [] };
+let showCRPoints = false;
+
+// 分析CR点
+async function analyzeCRPoints() {
+    if (!currentStockCode || !currentTableName) {
+        alert('请先选择股票');
+        return;
+    }
+    
+    const stockSelect = document.getElementById('stockSelect');
+    const selectedOption = stockSelect.options[stockSelect.selectedIndex];
+    const stockName = selectedOption.dataset.name || '';
+    
+    const analyzeBtn = document.getElementById('analyzeCRBtn');
+    if (analyzeBtn) {
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = '分析中...';
+    }
+    
+    try {
+        console.log('开始分析CR点...', { stockCode: currentStockCode, stockName, tableName: currentTableName });
+        
+        const response = await fetch(`${API_BASE_URL}/cr_points/analyze`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stockCode: currentStockCode,
+                stockName: stockName,
+                tableName: currentTableName,  // 传递实际的表名
+                period: 'day'  // 目前只支持日K线
+            })
+        });
+        
+        const result = await response.json();
+        console.log('CR点分析结果:', result);
+        
+        if (result.code === 200) {
+            alert(`CR点分析完成！\n找到C点(买入点): ${result.data.c_points_count}个\n找到R点(卖出点): ${result.data.r_points_count}个`);
+            
+            // 重新加载CR点数据并显示
+            await loadCRPoints();
+        } else {
+            alert(`CR点分析失败: ${result.message}`);
+        }
+    } catch (error) {
+        console.error('分析CR点失败:', error);
+        alert(`分析CR点失败: ${error.message}`);
+    } finally {
+        if (analyzeBtn) {
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = '🎯 分析CR点';
+        }
+    }
+}
+
+// 加载CR点数据
+async function loadCRPoints() {
+    if (!currentStockCode) return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/cr_points`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stockCode: currentStockCode
+            })
+        });
+        
+        const result = await response.json();
+        console.log('CR点数据:', result);
+        
+        if (result.code === 200) {
+            // 分离C点和R点
+            crPointsData.c_points = result.data.filter(p => p.pointType === 'C');
+            crPointsData.r_points = result.data.filter(p => p.pointType === 'R');
+            
+            // 如果开关是打开的，更新图表
+            if (showCRPoints && chart) {
+                updateChartWithCRPoints();
+            }
+            
+            // 更新统计信息
+            updateCRPointsStats();
+        }
+    } catch (error) {
+        console.error('加载CR点失败:', error);
+    }
+}
+
+// 切换CR点显示
+function toggleCRPoints() {
+    showCRPoints = !showCRPoints;
+    
+    const toggleBtn = document.getElementById('toggleCRBtn');
+    if (toggleBtn) {
+        toggleBtn.textContent = showCRPoints ? '✅ 隐藏CR点' : '👁️ 显示CR点';
+        toggleBtn.style.background = showCRPoints ? '#26a69a' : '#4a90e2';
+    }
+    
+    if (chart) {
+        updateChartWithCRPoints();
+    }
+}
+
+// 更新图表显示CR点
+function updateChartWithCRPoints() {
+    if (!chart) return;
+    
+    const currentOption = chart.getOption();
+    let currentSeries = currentOption.series || [];
+    
+    // 移除旧的CR点标记系列
+    currentSeries = currentSeries.filter(s => s.name !== 'C点' && s.name !== 'R点');
+    
+    if (showCRPoints && crPointsData) {
+        const dates = currentOption.xAxis[0].data;
+        
+        // 添加C点标记
+        if (crPointsData.c_points && crPointsData.c_points.length > 0) {
+            const cPointSeries = {
+                name: 'C点',
+                type: 'scatter',
+                data: crPointsData.c_points.map(point => {
+                    const dateStr = point.triggerDate;
+                    const index = dates.indexOf(dateStr);
+                    if (index >= 0) {
+                        return {
+                            value: [index, point.lowPrice],
+                            itemStyle: {
+                                color: '#00ff00',
+                                borderColor: '#fff',
+                                borderWidth: 2
+                            },
+                            symbolSize: 15,
+                            label: {
+                                show: true,
+                                formatter: 'C',
+                                position: 'bottom',
+                                color: '#00ff00',
+                                fontSize: 12,
+                                fontWeight: 'bold'
+                            }
+                        };
+                    }
+                    return null;
+                }).filter(item => item !== null),
+                symbol: 'circle',
+                symbolSize: 15,
+                z: 100
+            };
+            currentSeries.push(cPointSeries);
+        }
+        
+        // 添加R点标记
+        if (crPointsData.r_points && crPointsData.r_points.length > 0) {
+            const rPointSeries = {
+                name: 'R点',
+                type: 'scatter',
+                data: crPointsData.r_points.map(point => {
+                    const dateStr = point.triggerDate;
+                    const index = dates.indexOf(dateStr);
+                    if (index >= 0) {
+                        return {
+                            value: [index, point.highPrice],
+                            itemStyle: {
+                                color: '#ff0000',
+                                borderColor: '#fff',
+                                borderWidth: 2
+                            },
+                            symbolSize: 15,
+                            label: {
+                                show: true,
+                                formatter: 'R',
+                                position: 'top',
+                                color: '#ff0000',
+                                fontSize: 12,
+                                fontWeight: 'bold'
+                            }
+                        };
+                    }
+                    return null;
+                }).filter(item => item !== null),
+                symbol: 'circle',
+                symbolSize: 15,
+                z: 100
+            };
+            currentSeries.push(rPointSeries);
+        }
+    }
+    
+    chart.setOption({
+        series: currentSeries
+    });
+}
+
+// 更新CR点统计信息
+function updateCRPointsStats() {
+    const statsEl = document.getElementById('crPointsStats');
+    if (statsEl) {
+        const cCount = crPointsData.c_points ? crPointsData.c_points.length : 0;
+        const rCount = crPointsData.r_points ? crPointsData.r_points.length : 0;
+        statsEl.textContent = `C点: ${cCount} | R点: ${rCount}`;
     }
 }
 

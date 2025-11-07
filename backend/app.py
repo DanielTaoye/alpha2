@@ -12,6 +12,7 @@ sys.path.insert(0, backend_dir)
 from interfaces.controllers.stock_controller import StockController
 from interfaces.controllers.kline_controller import KLineController
 from interfaces.controllers.analysis_controller import AnalysisController
+from interfaces.controllers.cr_point_controller import CRPointController
 from infrastructure.config.app_config import SERVER_CONFIG
 
 # 创建Flask应用
@@ -22,6 +23,7 @@ CORS(app)
 stock_controller = StockController()
 kline_controller = KLineController()
 analysis_controller = AnalysisController()
+cr_point_controller = CRPointController()
 
 
 # ============ 路由定义 ============
@@ -54,6 +56,18 @@ def get_kline_data():
 def get_stock_analysis():
     """获取股票分析数据（益损比、压力线、支撑线）"""
     return analysis_controller.get_stock_analysis()
+
+
+@app.route('/api/cr_points/analyze', methods=['POST'])
+def analyze_cr_points():
+    """分析股票CR点（买入卖出点）"""
+    return cr_point_controller.analyze_cr_points()
+
+
+@app.route('/api/cr_points', methods=['POST'])
+def get_cr_points():
+    """获取股票CR点列表"""
+    return cr_point_controller.get_cr_points()
 
 
 if __name__ == '__main__':
