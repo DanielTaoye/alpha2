@@ -92,8 +92,6 @@ STOCK_GROUPS = {
 
 
 
-
-
 # 周期类型映射（根据数据库实际字段值）
 PERIOD_TYPE_MAP = {
     '30min': '30min',

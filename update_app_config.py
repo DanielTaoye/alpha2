@@ -1,24 +1,26 @@
-from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
-import pymysql
-import requests
-from datetime import datetime, timedelta
-from decimal import Decimal
-import json
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+更新 backend/app.py 中的 STOCK_GROUPS 配置
+将每个股性分组从5支扩展到20支
+"""
+
 import sys
 import os
 
-# 添加项目根目录到路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DATABASE_CONFIG
+# 设置Windows控制台编码
+if sys.platform == 'win32':
+    import locale
+    # 使用更安全的方式设置编码
+    try:
+        # Python 3.7+
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
 
-app = Flask(__name__, static_folder='../frontend', static_url_path='')
-CORS(app)
-
-# 使用配置文件中的数据库配置
-DB_CONFIG = DATABASE_CONFIG
-
-# 股票分组配置
+# 新的股票分组配置（20支每组）
+NEW_STOCK_GROUPS = """# 股票分组配置
 STOCK_GROUPS = {
     '波段': [
         {'name': '国投智能', 'code': 'SZ300188', 'table': 'basic_data_sz300188'},
@@ -86,167 +88,107 @@ STOCK_GROUPS = {
         {'name': '宇通客车', 'code': 'SH600066', 'table': 'basic_data_sh600066'},
         {'name': '中远海控', 'code': 'SH601919', 'table': 'basic_data_sh601919'}
     ]
-}
+}"""
 
 
-
-
-
-
-
-# 周期类型映射（根据数据库实际字段值）
-PERIOD_TYPE_MAP = {
-    '30min': '30min',
-    'day': '1day',
-    'week': 'week',
-    'month': 'month'
-}
-
-
-def get_db_connection():
-    """获取数据库连接"""
-    return pymysql.connect(**DB_CONFIG)
-
-
-def decimal_to_float(obj):
-    """将Decimal类型转换为float"""
-    if isinstance(obj, Decimal):
-        return float(obj)
-    raise TypeError
-
-
-@app.route('/')
-def index():
-    """返回首页"""
-    return send_from_directory(app.static_folder, 'index.html')
-
-
-@app.route('/api/stock_groups', methods=['GET'])
-def get_stock_groups():
-    """获取股票分组信息"""
-    return jsonify({
-        'code': 200,
-        'data': STOCK_GROUPS,
-        'message': 'success'
-    })
-
-
-@app.route('/api/kline_data', methods=['POST'])
-def get_kline_data():
-    """获取K线数据"""
+def backup_file(file_path):
+    """备份原文件"""
+    backup_path = file_path + '.backup'
     try:
-        data = request.json
-        table_name = data.get('table_name')
-        period_type = data.get('period_type', 'day')
-        
-        # 获取3年前的日期
-        three_years_ago = datetime.now() - timedelta(days=365*3)
-        
-        # 获取周期类型代码
-        period_code = PERIOD_TYPE_MAP.get(period_type, '6')
-        
-        conn = get_db_connection()
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        query = f"""
-            SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
-                   cheng_jiao_liang, liang_bi, wei_bi
-            FROM {table_name}
-            WHERE peroid_type = %s AND shi_jian >= %s
-            ORDER BY shi_jian ASC
-        """
-        
-        cursor.execute(query, (period_code, three_years_ago))
-        results = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        # 格式化数据
-        kline_data = []
-        for row in results:
-            kline_data.append({
-                'time': row['shi_jian'].strftime('%Y-%m-%d %H:%M:%S'),
-                'open': float(row['kai_pan_jia']) if row['kai_pan_jia'] else 0,
-                'high': float(row['zui_gao_jia']) if row['zui_gao_jia'] else 0,
-                'low': float(row['zui_di_jia']) if row['zui_di_jia'] else 0,
-                'close': float(row['shou_pan_jia']) if row['shou_pan_jia'] else 0,
-                'volume': int(row['cheng_jiao_liang']) if row['cheng_jiao_liang'] else 0,
-                'liangbi': float(row['liang_bi']) if row['liang_bi'] else 0,
-                'weibi': float(row['wei_bi']) if row['wei_bi'] else 0
-            })
-        
-        return jsonify({
-            'code': 200,
-            'data': kline_data,
-            'message': 'success'
-        })
-    
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"✓ 已备份原文件到: {backup_path}")
+        return True
     except Exception as e:
-        return jsonify({
-            'code': 500,
-            'data': None,
-            'message': str(e)
-        }), 500
+        print(f"✗ 备份文件失败: {e}")
+        return False
 
 
-@app.route('/api/stock_analysis', methods=['POST'])
-def get_stock_analysis():
-    """获取股票分析数据（益损比、压力线、支撑线）"""
+def update_app_config():
+    """更新 backend/app.py 配置"""
+    app_file = 'backend/app.py'
+    
+    if not os.path.exists(app_file):
+        print(f"✗ 文件不存在: {app_file}")
+        return False
+    
+    print("=" * 70)
+    print("更新 backend/app.py 配置")
+    print("=" * 70)
+    
+    # 备份原文件
+    print("\n1. 备份原文件...")
+    if not backup_file(app_file):
+        return False
+    
+    # 读取文件
+    print("\n2. 读取配置文件...")
     try:
-        data = request.json
-        stock_code = data.get('stock_code')
-        
-        # 调用外部API
-        api_url = 'https://apiprod.mtygs.cn/api/stock/getStockAnalysis'
-        api_data = {
-            "appId": "string",
-            "circleId": "string",
-            "parameter": {
-                "stockCode": stock_code
-            },
-            "requestId": "string",
-            "token": "2025102013283854160ae6136c47da8d6c065f7919e66a_17721044150",
-            "traceId": "string"
-        }
-        
-        response = requests.post(api_url, json=api_data, timeout=10)
-        response_data = response.json()
-        
-        # 解析响应数据
-        analysis_data = {
-            '30min': {},
-            'day': {},
-            'week': {},
-            'month': {}
-        }
-        
-        if response.status_code == 200 and response_data.get('code') == 200:
-            result = response_data.get('data', {})
-            
-            # 提取不同周期的数据
-            for period in ['30min', 'day', 'week', 'month']:
-                period_data = result.get(f'minLineAnalysis_{period}', {})
-                analysis_data[period] = {
-                    'winLoseRatio': period_data.get('winLoseRatio', 0),
-                    'supportPrice': period_data.get('supportPrice', 0),
-                    'pressurePrice': period_data.get('pressurePrice', 0)
-                }
-        
-        return jsonify({
-            'code': 200,
-            'data': analysis_data,
-            'message': 'success'
-        })
-    
+        with open(app_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        print("✓ 配置文件读取成功")
     except Exception as e:
-        return jsonify({
-            'code': 500,
-            'data': None,
-            'message': str(e)
-        }), 500
+        print(f"✗ 读取配置文件失败: {e}")
+        return False
+    
+    # 查找并替换 STOCK_GROUPS
+    print("\n3. 更新股票分组配置...")
+    try:
+        # 找到 STOCK_GROUPS 的开始和结束位置
+        start_marker = "# 股票分组配置\nSTOCK_GROUPS = {"
+        end_marker = "}\n\n# 周期类型映射"
+        
+        start_pos = content.find(start_marker)
+        if start_pos == -1:
+            print("✗ 未找到 STOCK_GROUPS 配置")
+            return False
+        
+        # 找到配置块的结束位置（找到匹配的 }）
+        brace_count = 0
+        end_pos = start_pos + len(start_marker)
+        
+        for i in range(end_pos, len(content)):
+            if content[i] == '{':
+                brace_count += 1
+            elif content[i] == '}':
+                if brace_count == 0:
+                    end_pos = i + 1
+                    break
+                else:
+                    brace_count -= 1
+        
+        # 替换配置
+        new_content = content[:start_pos] + NEW_STOCK_GROUPS + "\n\n" + content[end_pos:]
+        
+        # 写入文件
+        with open(app_file, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+        
+        print("✓ 股票分组配置更新成功")
+        print("  - 波段策略: 5支 → 20支")
+        print("  - 短线策略: 5支 → 20支")
+        print("  - 中长线策略: 5支 → 20支")
+        
+    except Exception as e:
+        print(f"✗ 更新配置失败: {e}")
+        return False
+    
+    print("\n" + "=" * 70)
+    print("✓ 配置更新完成！")
+    print("=" * 70)
+    print("\n下一步：")
+    print("1. 检查更新后的配置: backend/app.py")
+    print("2. 重启应用服务器")
+    print("3. 访问 http://localhost:5000 查看新股票")
+    
+    return True
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    if update_app_config():
+        print("\n✓ 所有操作完成！")
+    else:
+        print("\n✗ 更新失败，请检查错误信息")
 

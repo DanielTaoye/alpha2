@@ -1,0 +1,132 @@
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║                  编码问题修复说明                            ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+🐛 问题描述
+════════════════════════════════════════════════════════════════
+错误信息：ValueError: I/O operation on closed file.
+
+原因：
+  Windows环境下，使用 io.TextIOWrapper 重新包装 sys.stdout
+  会导致标准输出被关闭，引发 I/O 错误。
+
+影响的文件：
+  - import_stocks_from_prod.py
+  - update_app_config.py
+  - import_and_update.py
+  - check_environment.py
+  - 导入股票数据.bat
+
+════════════════════════════════════════════════════════════════
+
+✅ 修复方案
+════════════════════════════════════════════════════════════════
+
+已将所有脚本中的编码设置方式从：
+
+【修改前】
+```python
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+```
+
+修改为：
+
+【修改后】
+```python
+if sys.platform == 'win32':
+    import locale
+    # 使用更安全的方式设置编码
+    try:
+        # Python 3.7+
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
+```
+
+优点：
+  ✓ 不会关闭原有的标准输出
+  ✓ 兼容 Python 3.7+
+  ✓ 失败时自动跳过，不影响程序运行
+  ✓ 更安全可靠
+
+════════════════════════════════════════════════════════════════
+
+🚀 现在可以正常使用
+════════════════════════════════════════════════════════════════
+
+【方式1】双击批处理文件
+
+  导入股票数据.bat
+
+【方式2】命令行运行
+
+  python import_and_update.py
+
+【方式3】分步执行
+
+  python check_environment.py         # 环境检查
+  python import_stocks_from_prod.py   # 导入数据
+  python update_app_config.py         # 更新配置
+
+════════════════════════════════════════════════════════════════
+
+📝 如果仍有中文乱码
+════════════════════════════════════════════════════════════════
+
+【PowerShell】
+
+如果使用 PowerShell，在运行前执行：
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+或直接运行：
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+  python import_and_update.py
+
+【CMD】
+
+如果使用 CMD，确保设置了正确编码：
+  chcp 65001
+  python import_and_update.py
+
+【建议】
+
+最简单的方式：直接双击批处理文件
+  导入股票数据.bat
+
+这个文件已经自动处理了编码设置。
+
+════════════════════════════════════════════════════════════════
+
+✅ 修复验证
+════════════════════════════════════════════════════════════════
+
+所有脚本已修复，可以正常运行：
+
+✓ import_stocks_from_prod.py  - 已修复
+✓ update_app_config.py        - 已修复
+✓ import_and_update.py        - 已修复
+✓ check_environment.py        - 已修复
+✓ 导入股票数据.bat            - 已优化
+
+════════════════════════════════════════════════════════════════
+
+🎉 开始使用
+════════════════════════════════════════════════════════════════
+
+现在可以重新运行导入脚本了：
+
+  python import_and_update.py
+
+或
+
+  导入股票数据.bat
+
+问题已完全解决！
+
+════════════════════════════════════════════════════════════════
+

@@ -33,55 +33,176 @@
             margin-bottom: 10px;
         }
 
-        .stock-group {
-            margin-bottom: 40px;
-        }
-
-        .group-title {
-            font-size: 24px;
-            margin-bottom: 20px;
-            padding: 10px 20px;
-            background: #1e2a4a;
-            border-left: 4px solid #4a90e2;
-            border-radius: 5px;
-        }
-
-        .stock-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(800px, 1fr));
-            gap: 20px;
-        }
-
-        @media (max-width: 900px) {
-            .stock-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .stock-card {
+        .filter-container {
             background: #151929;
             border-radius: 10px;
-            padding: 20px;
+            padding: 25px;
+            margin-bottom: 30px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
 
-        .stock-header {
+        .filter-section {
+            margin-bottom: 20px;
+        }
+
+        .filter-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .filter-label {
+            display: block;
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .strategy-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .strategy-btn {
+            flex: 1;
+            min-width: 150px;
+            padding: 12px 24px;
+            background: #2a3f5f;
+            border: 2px solid #4a90e2;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .strategy-btn:hover {
+            background: #3a4f6f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
+        }
+
+        .strategy-btn.active {
+            background: #4a90e2;
+            border-color: #6ab0ff;
+            box-shadow: 0 0 15px rgba(74, 144, 226, 0.5);
+        }
+
+        .search-box {
+            position: relative;
+            display: flex;
+            gap: 10px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 12px 40px 12px 15px;
+            background: #1e2a4a;
+            border: 2px solid #2a3f5f;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #4a90e2;
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.3);
+        }
+
+        .search-input::placeholder {
+            color: #666;
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #888;
+            pointer-events: none;
+        }
+
+        .stock-select {
+            flex: 2;
+            padding: 12px 15px;
+            background: #1e2a4a;
+            border: 2px solid #2a3f5f;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .stock-select:focus {
+            outline: none;
+            border-color: #4a90e2;
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.3);
+        }
+
+        .stock-select option {
+            background: #1e2a4a;
+            color: #fff;
+            padding: 10px;
+        }
+
+        .stock-info-bar {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #2a3f5f;
+            background: #151929;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
 
-        .stock-name {
-            font-size: 20px;
+        .stock-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .stock-name-large {
+            font-size: 28px;
+            font-weight: bold;
+            color: #4a90e2;
+        }
+
+        .stock-code-large {
+            font-size: 16px;
+            color: #888;
+            background: #1e2a4a;
+            padding: 5px 15px;
+            border-radius: 5px;
+        }
+
+        .strategy-tag {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
             font-weight: bold;
         }
 
-        .stock-code {
-            font-size: 14px;
-            color: #888;
+        .strategy-tag.波段 {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            border: 1px solid #ffc107;
+        }
+
+        .strategy-tag.短线 {
+            background: rgba(239, 83, 80, 0.2);
+            color: #ef5350;
+            border: 1px solid #ef5350;
+        }
+
+        .strategy-tag.中长线 {
+            background: rgba(38, 166, 154, 0.2);
+            color: #26a69a;
+            border: 1px solid #26a69a;
         }
 
         .period-selector {
@@ -90,51 +211,70 @@
         }
 
         .period-btn {
-            padding: 5px 15px;
+            padding: 8px 20px;
             background: #2a3f5f;
             border: 1px solid #4a90e2;
             border-radius: 5px;
             color: #fff;
             cursor: pointer;
             transition: all 0.3s;
+            font-size: 14px;
         }
 
         .period-btn:hover {
-            background: #4a90e2;
+            background: #3a4f6f;
         }
 
         .period-btn.active {
             background: #4a90e2;
             font-weight: bold;
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.5);
+        }
+
+        .chart-card {
+            background: #151929;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
         }
 
         .chart-container {
             width: 100%;
-            height: 500px;
-            margin-bottom: 15px;
+            height: 600px;
+            margin-bottom: 20px;
         }
 
         .analysis-info {
-            display: flex;
-            justify-content: space-around;
-            padding: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            padding: 20px;
             background: #1e2a4a;
-            border-radius: 5px;
-            margin-top: 10px;
+            border-radius: 8px;
         }
 
         .info-item {
             text-align: center;
+            padding: 15px;
+            background: #151929;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .info-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
         }
 
         .info-label {
             font-size: 12px;
             color: #888;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
         }
 
         .info-value {
-            font-size: 18px;
+            font-size: 22px;
             font-weight: bold;
         }
 
@@ -148,26 +288,26 @@
 
         .loading {
             text-align: center;
-            padding: 50px;
+            padding: 80px;
             font-size: 18px;
             color: #888;
         }
 
         .error {
             text-align: center;
-            padding: 20px;
+            padding: 40px;
             color: #ef5350;
             background: rgba(239, 83, 80, 0.1);
-            border-radius: 5px;
-            margin: 10px 0;
+            border-radius: 10px;
+            margin: 20px 0;
         }
 
         .spinner {
-            border: 3px solid #2a3f5f;
-            border-top: 3px solid #4a90e2;
+            border: 4px solid #2a3f5f;
+            border-top: 4px solid #4a90e2;
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            width: 50px;
+            height: 50px;
             animation: spin 1s linear infinite;
             margin: 20px auto;
         }
@@ -185,19 +325,10 @@
             color: #888;
         }
 
-        .footer a {
-            color: #4a90e2;
-            text-decoration: none;
-        }
-
-        .footer a:hover {
-            text-decoration: underline;
-        }
-
         .status-indicator {
             display: inline-block;
-            width: 8px;
-            height: 8px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
             margin-right: 5px;
             animation: blink 2s infinite;
@@ -215,6 +346,43 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
         }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #888;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 18px;
+        }
+
+        @media (max-width: 768px) {
+            .strategy-buttons {
+                flex-direction: column;
+            }
+
+            .search-box {
+                flex-direction: column;
+            }
+
+            .stock-info-bar {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .stock-info {
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
@@ -227,27 +395,61 @@
         </p>
     </div>
 
+    <!-- 筛选区域 -->
+    <div class="filter-container">
+        <div class="filter-section">
+            <label class="filter-label">📊 选择策略类型</label>
+            <div class="strategy-buttons">
+                <button class="strategy-btn active" onclick="selectStrategy('波段')">
+                    📈 波段策略
+                </button>
+                <button class="strategy-btn" onclick="selectStrategy('短线')">
+                    ⚡ 短线策略
+                </button>
+                <button class="strategy-btn" onclick="selectStrategy('中长线')">
+                    📊 中长线策略
+                </button>
+            </div>
+        </div>
+
+        <div class="filter-section">
+            <label class="filter-label">🔍 搜索并选择股票</label>
+            <div class="search-box">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="searchInput"
+                    placeholder="搜索股票名称或代码..."
+                    oninput="filterStocks()"
+                >
+                <select class="stock-select" id="stockSelect" onchange="selectStock()">
+                    <option value="">-- 请选择股票 --</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主内容区 -->
     <div id="app">
-        <div class="loading">
-            <div class="spinner"></div>
-            <p>正在加载系统...</p>
+        <div class="empty-state">
+            <div class="empty-state-icon">📈</div>
+            <div class="empty-state-text">请选择股票策略类型和具体股票</div>
         </div>
     </div>
 
     <div class="footer">
-        <p>© 2025 阿尔法策略2.0系统 | 
-           <a href="README.md" target="_blank">使用文档</a> | 
-           <a href="USAGE.md" target="_blank">详细指南</a>
-        </p>
+        <p>© 2025 阿尔法策略2.0系统 | 数据仅供参考，不构成投资建议</p>
         <p style="font-size: 12px; color: #666; margin-top: 10px;">
-            数据仅供参考，不构成投资建议。投资有风险，入市需谨慎。
+            投资有风险，入市需谨慎
         </p>
     </div>
 
     <script>
         const API_BASE_URL = 'http://localhost:5000/api';
-        let stockGroups = {};
-        let charts = {};
+        let allStockGroups = {};
+        let currentStrategy = '波段';
+        let currentStockCode = '';
+        let chart = null;
 
         // 更新状态指示器
         function updateStatus(online, text) {
@@ -270,9 +472,9 @@
                 const result = await response.json();
                 
                 if (result.code === 200) {
-                    stockGroups = result.data;
-                    updateStatus(true, '系统运行正常');
-                    renderStockGroups();
+                    allStockGroups = result.data;
+                    updateStatus(true, `系统运行正常 - 已加载 ${getTotalStockCount()} 支股票`);
+                    updateStockList();
                 } else {
                     throw new Error(result.message || '获取数据失败');
                 }
@@ -297,100 +499,198 @@
             }
         }
 
-        // 渲染股票分组
-        function renderStockGroups() {
-            const app = document.getElementById('app');
-            let html = '';
-
-            for (const [groupName, stocks] of Object.entries(stockGroups)) {
-                html += `
-                    <div class="stock-group">
-                        <div class="group-title">${groupName}策略</div>
-                        <div class="stock-grid">
-                            ${stocks.map(stock => `
-                                <div class="stock-card">
-                                    <div class="stock-header">
-                                        <div>
-                                            <div class="stock-name">${stock.name}</div>
-                                            <div class="stock-code">${stock.code}</div>
-                                        </div>
-                                        <div class="period-selector">
-                                            <button class="period-btn active" onclick="changePeriod('${stock.code}', '30min')">30分钟</button>
-                                            <button class="period-btn" onclick="changePeriod('${stock.code}', 'day')">日K线</button>
-                                            <button class="period-btn" onclick="changePeriod('${stock.code}', 'week')">周K线</button>
-                                            <button class="period-btn" onclick="changePeriod('${stock.code}', 'month')">月K线</button>
-                                        </div>
-                                    </div>
-                                    <div id="chart-${stock.code}" class="chart-container">
-                                        <div class="loading">
-                                            <div class="spinner"></div>
-                                            <p>加载K线数据中...</p>
-                                        </div>
-                                    </div>
-                                    <div class="analysis-info" id="analysis-${stock.code}">
-                                        <div class="info-item">
-                                            <div class="info-label">益损比</div>
-                                            <div class="info-value">--</div>
-                                        </div>
-                                        <div class="info-item">
-                                            <div class="info-label">支撑线</div>
-                                            <div class="info-value down">--</div>
-                                        </div>
-                                        <div class="info-item">
-                                            <div class="info-label">压力线</div>
-                                            <div class="info-value up">--</div>
-                                        </div>
-                                        <div class="info-item">
-                                            <div class="info-label">量比</div>
-                                            <div class="info-value">--</div>
-                                        </div>
-                                        <div class="info-item">
-                                            <div class="info-label">委比</div>
-                                            <div class="info-value">--</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
+        // 获取总股票数
+        function getTotalStockCount() {
+            let count = 0;
+            for (const stocks of Object.values(allStockGroups)) {
+                count += stocks.length;
             }
+            return count;
+        }
 
-            app.innerHTML = html;
-
-            // 初始化所有图表
-            for (const stocks of Object.values(stockGroups)) {
-                for (const stock of stocks) {
-                    loadStockData(stock.code, stock.table, '30min');
+        // 选择策略
+        function selectStrategy(strategy) {
+            currentStrategy = strategy;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.strategy-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.textContent.includes(strategy)) {
+                    btn.classList.add('active');
                 }
+            });
+
+            // 更新股票列表
+            updateStockList();
+
+            // 清空当前选择
+            document.getElementById('stockSelect').value = '';
+            document.getElementById('searchInput').value = '';
+            
+            // 清空显示
+            showEmptyState();
+        }
+
+        // 更新股票列表
+        function updateStockList() {
+            const stockSelect = document.getElementById('stockSelect');
+            const stocks = allStockGroups[currentStrategy] || [];
+            
+            // 清空并重新填充
+            stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
+            
+            stocks.forEach(stock => {
+                const option = document.createElement('option');
+                option.value = stock.code;
+                option.textContent = `${stock.name} (${stock.code})`;
+                option.dataset.name = stock.name;
+                option.dataset.table = stock.table;
+                stockSelect.appendChild(option);
+            });
+        }
+
+        // 筛选股票（搜索功能）
+        function filterStocks() {
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+            const stockSelect = document.getElementById('stockSelect');
+            const options = stockSelect.querySelectorAll('option');
+            
+            options.forEach((option, index) => {
+                if (index === 0) return; // 跳过第一个空选项
+                
+                const text = option.textContent.toLowerCase();
+                if (text.includes(searchText)) {
+                    option.style.display = '';
+                } else {
+                    option.style.display = 'none';
+                }
+            });
+
+            // 如果搜索框为空，重置选择框
+            if (!searchText) {
+                stockSelect.value = '';
             }
         }
 
-        // 切换周期
-        function changePeriod(stockCode, period) {
-            // 更新按钮状态
-            const card = document.querySelector(`#chart-${stockCode}`).closest('.stock-card');
-            const buttons = card.querySelectorAll('.period-btn');
-            buttons.forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-
-            // 获取表名
-            let tableName = '';
-            for (const stocks of Object.values(stockGroups)) {
-                const stock = stocks.find(s => s.code === stockCode);
-                if (stock) {
-                    tableName = stock.table;
-                    break;
-                }
+        // 选择股票
+        function selectStock() {
+            const stockSelect = document.getElementById('stockSelect');
+            const selectedOption = stockSelect.options[stockSelect.selectedIndex];
+            
+            if (!stockSelect.value) {
+                showEmptyState();
+                return;
             }
 
+            currentStockCode = stockSelect.value;
+            const stockName = selectedOption.dataset.name;
+            const tableName = selectedOption.dataset.table;
+
+            // 显示股票信息和图表
+            renderStockView(currentStockCode, stockName, tableName);
+            
+            // 加载数据（默认日K线）
+            loadStockData(currentStockCode, tableName, 'day');
+        }
+
+        // 显示空状态
+        function showEmptyState() {
+            document.getElementById('app').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📈</div>
+                    <div class="empty-state-text">请选择股票策略类型和具体股票</div>
+                </div>
+            `;
+        }
+
+        // 渲染股票视图
+        function renderStockView(stockCode, stockName, tableName) {
+            const app = document.getElementById('app');
+            
+            app.innerHTML = `
+                <!-- 股票信息栏 -->
+                <div class="stock-info-bar">
+                    <div class="stock-info">
+                        <div class="stock-name-large">${stockName}</div>
+                        <div class="stock-code-large">${stockCode}</div>
+                        <div class="strategy-tag ${currentStrategy}">${currentStrategy}</div>
+                    </div>
+                    <div class="period-selector">
+                        <button class="period-btn" onclick="changePeriod('30min')">30分钟</button>
+                        <button class="period-btn active" onclick="changePeriod('day')">日K线</button>
+                        <button class="period-btn" onclick="changePeriod('week')">周K线</button>
+                        <button class="period-btn" onclick="changePeriod('month')">月K线</button>
+                    </div>
+                </div>
+
+                <!-- 图表卡片 -->
+                <div class="chart-card">
+                    <div id="mainChart" class="chart-container">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>加载K线数据中...</p>
+                        </div>
+                    </div>
+                    <div class="analysis-info" id="analysisInfo">
+                        <div class="info-item">
+                            <div class="info-label">益损比</div>
+                            <div class="info-value">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">支撑线</div>
+                            <div class="info-value down">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">压力线</div>
+                            <div class="info-value up">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">量比</div>
+                            <div class="info-value">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">委比</div>
+                            <div class="info-value">--</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 切换周期
+        function changePeriod(period) {
+            // 更新按钮状态
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.textContent.includes(period) || 
+                    (period === '30min' && btn.textContent === '30分钟') ||
+                    (period === 'day' && btn.textContent === '日K线') ||
+                    (period === 'week' && btn.textContent === '周K线') ||
+                    (period === 'month' && btn.textContent === '月K线')) {
+                    btn.classList.add('active');
+                }
+            });
+
+            // 获取当前股票信息
+            const stockSelect = document.getElementById('stockSelect');
+            const selectedOption = stockSelect.options[stockSelect.selectedIndex];
+            const tableName = selectedOption.dataset.table;
+
             // 重新加载数据
-            loadStockData(stockCode, tableName, period);
+            loadStockData(currentStockCode, tableName, period);
         }
 
         // 加载股票数据
         async function loadStockData(stockCode, tableName, period) {
             try {
+                // 显示加载状态
+                document.getElementById('mainChart').innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>加载K线数据中...</p>
+                    </div>
+                `;
+
                 // 加载K线数据
                 const klineResponse = await fetch(`${API_BASE_URL}/kline_data`, {
                     method: 'POST',
@@ -424,15 +724,15 @@
                 const analysisData = analysisResult.code === 200 ? analysisResult.data[period] : {};
 
                 // 渲染图表
-                renderChart(stockCode, klineResult.data, analysisData, period);
+                renderChart(klineResult.data, analysisData, period);
 
             } catch (error) {
                 console.error(`加载${stockCode}数据失败:`, error);
-                document.getElementById(`chart-${stockCode}`).innerHTML = `
+                document.getElementById('mainChart').innerHTML = `
                     <div class="error">
                         <p>📊 数据加载失败</p>
                         <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
-                        <button onclick="loadStockData('${stockCode}', '${tableName}', '${period}')" 
+                        <button onclick="selectStock()" 
                                 style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">
                             重试
                         </button>
@@ -441,17 +741,54 @@
             }
         }
 
+        // 计算默认显示的数据范围
+        function calculateStartPercent(totalDataPoints, period) {
+            // 根据周期类型设置默认显示的数据点数
+            let targetPoints;
+            switch(period) {
+                case '30min':
+                    // 30分钟K线：最近1个月
+                    // 每天8小时交易=16根，约20个交易日
+                    targetPoints = 20 * 16; // 约320根
+                    break;
+                case 'day':
+                    // 日K线：最近半年
+                    // 考虑交易日约120根
+                    targetPoints = 120;
+                    break;
+                case 'week':
+                    // 周K线：最近2年
+                    // 每年约52周，2年约104周
+                    targetPoints = 104;
+                    break;
+                case 'month':
+                    // 月K线：最近3年
+                    // 3年=36个月
+                    targetPoints = 36;
+                    break;
+                default:
+                    targetPoints = 120;
+            }
+            
+            // 计算起始百分比
+            if (totalDataPoints <= targetPoints) {
+                return 0; // 如果总数据点少于目标，显示全部
+            }
+            
+            const startPercent = ((totalDataPoints - targetPoints) / totalDataPoints) * 100;
+            return Math.max(0, startPercent);
+        }
+
         // 渲染图表
-        function renderChart(stockCode, klineData, analysisData, period) {
-            const chartDom = document.getElementById(`chart-${stockCode}`);
+        function renderChart(klineData, analysisData, period) {
+            const chartDom = document.getElementById('mainChart');
             
             // 销毁旧图表
-            if (charts[stockCode]) {
-                charts[stockCode].dispose();
+            if (chart) {
+                chart.dispose();
             }
 
-            const chart = echarts.init(chartDom);
-            charts[stockCode] = chart;
+            chart = echarts.init(chartDom);
 
             // 准备数据
             const dates = klineData.map(item => item.time);
@@ -472,7 +809,7 @@
                 backgroundColor: 'transparent',
                 animation: true,
                 legend: {
-                    data: ['K线', '支撑线', '压力线'],
+                    data: ['支撑线', '压力线'],
                     textStyle: {
                         color: '#fff'
                     },
@@ -483,24 +820,42 @@
                     axisPointer: {
                         type: 'cross'
                     },
-                    backgroundColor: 'rgba(26, 35, 56, 0.9)',
+                    backgroundColor: 'rgba(26, 35, 56, 0.95)',
                     borderColor: '#4a90e2',
+                    borderWidth: 2,
                     textStyle: {
-                        color: '#fff'
+                        color: '#fff',
+                        fontSize: 13
+                    },
+                    formatter: function(params) {
+                        let result = params[0].name + '<br/>';
+                        params.forEach(param => {
+                            if (param.seriesName === 'K线') {
+                                result += `开盘: ${param.value[1]}<br/>`;
+                                result += `收盘: ${param.value[2]}<br/>`;
+                                result += `最低: ${param.value[3]}<br/>`;
+                                result += `最高: ${param.value[4]}<br/>`;
+                            } else if (param.seriesName === '成交量') {
+                                result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
+                            } else {
+                                result += `${param.seriesName}: ${param.value}<br/>`;
+                            }
+                        });
+                        return result;
                     }
                 },
                 grid: [
                     {
-                        left: '10%',
-                        right: '10%',
+                        left: '8%',
+                        right: '8%',
                         top: '12%',
-                        height: '50%'
+                        height: '52%'
                     },
                     {
-                        left: '10%',
-                        right: '10%',
-                        top: '70%',
-                        height: '15%'
+                        left: '8%',
+                        right: '8%',
+                        top: '72%',
+                        height: '18%'
                     }
                 ],
                 xAxis: [
@@ -555,10 +910,7 @@
                         splitNumber: 2,
                         axisLine: { lineStyle: { color: '#4a90e2' } },
                         axisLabel: { 
-                            color: '#888',
-                            formatter: function(value) {
-                                return (value / 1000000).toFixed(0) + 'M';
-                            }
+                            show: false  // 隐藏成交量Y轴标签
                         },
                         splitLine: {
                             lineStyle: {
@@ -571,21 +923,24 @@
                     {
                         type: 'inside',
                         xAxisIndex: [0, 1],
-                        start: 70,
+                        start: calculateStartPercent(dates.length, period),
                         end: 100
                     },
                     {
                         show: true,
                         xAxisIndex: [0, 1],
                         type: 'slider',
-                        bottom: '5%',
-                        start: 70,
+                        bottom: '2%',
+                        start: calculateStartPercent(dates.length, period),
                         end: 100,
                         backgroundColor: '#1e2a4a',
-                        fillerColor: 'rgba(74, 144, 226, 0.2)',
+                        fillerColor: 'rgba(74, 144, 226, 0.25)',
                         borderColor: '#4a90e2',
                         textStyle: {
                             color: '#888'
+                        },
+                        handleStyle: {
+                            color: '#4a90e2'
                         }
                     }
                 ],
@@ -599,6 +954,11 @@
                             color0: '#26a69a',
                             borderColor: '#ef5350',
                             borderColor0: '#26a69a'
+                        },
+                        emphasis: {
+                            itemStyle: {
+                                borderWidth: 2
+                            }
                         }
                     },
                     {
@@ -630,7 +990,8 @@
                         width: 2,
                         type: 'dashed'
                     },
-                    symbol: 'none'
+                    symbol: 'none',
+                    z: 10
                 });
             }
 
@@ -646,24 +1007,27 @@
                         width: 2,
                         type: 'dashed'
                     },
-                    symbol: 'none'
+                    symbol: 'none',
+                    z: 10
                 });
             }
 
             chart.setOption(option);
 
             // 更新分析信息
-            updateAnalysisInfo(stockCode, analysisData, latestData);
+            updateAnalysisInfo(analysisData, latestData);
 
             // 响应式
             window.addEventListener('resize', () => {
-                chart.resize();
+                if (chart) {
+                    chart.resize();
+                }
             });
         }
 
         // 更新分析信息
-        function updateAnalysisInfo(stockCode, analysisData, latestData) {
-            const analysisDiv = document.getElementById(`analysis-${stockCode}`);
+        function updateAnalysisInfo(analysisData, latestData) {
+            const analysisDiv = document.getElementById('analysisInfo');
             
             const winLoseRatio = analysisData.winLoseRatio || '--';
             const supportPrice = analysisData.supportPrice || '--';
@@ -700,4 +1064,3 @@
     </script>
 </body>
 </html>
-
