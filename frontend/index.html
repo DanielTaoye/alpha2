@@ -375,6 +375,52 @@
             font-size: 18px;
         }
 
+        /* K线图左上角浮动信息 */
+        .chart-overlay-info {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(21, 25, 41, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(74, 144, 226, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .overlay-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .overlay-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .overlay-label {
+            font-size: 13px;
+            color: #888;
+            font-weight: 500;
+        }
+
+        .overlay-value {
+            font-size: 15px;
+            font-weight: bold;
+            color: #fff;
+            min-width: 60px;
+        }
+
+        .overlay-value.support {
+            color: #26a69a;
+        }
+
+        .overlay-value.pressure {
+            color: #ef5350;
+        }
+
         @media (max-width: 768px) {
             .strategy-buttons {
                 flex-direction: column;
@@ -393,6 +439,19 @@
                 flex-direction: column;
                 gap: 10px;
                 text-align: center;
+            }
+
+            .chart-overlay-info {
+                font-size: 12px;
+                padding: 8px 12px;
+            }
+
+            .overlay-label {
+                font-size: 11px;
+            }
+
+            .overlay-value {
+                font-size: 13px;
             }
         }
     </style>
@@ -644,32 +703,27 @@
 
                 <!-- 图表卡片 -->
                 <div class="chart-card">
-                    <div id="mainChart" class="chart-container">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            <p>加载K线数据中...</p>
+                    <div style="position: relative;">
+                        <div id="mainChart" class="chart-container">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                <p>加载K线数据中...</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="analysis-info" id="analysisInfo">
-                        <div class="info-item">
-                            <div class="info-label">益损比</div>
-                            <div class="info-value">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">支撑线</div>
-                            <div class="info-value down">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">压力线</div>
-                            <div class="info-value up">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">量比</div>
-                            <div class="info-value">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">委比</div>
-                            <div class="info-value">--</div>
+                        <!-- 左上角分析信息 -->
+                        <div id="analysisInfo" class="chart-overlay-info">
+                            <div class="overlay-item">
+                                <span class="overlay-label">益损比:</span>
+                                <span class="overlay-value" id="winLoseRatioValue">--</span>
+                            </div>
+                            <div class="overlay-item">
+                                <span class="overlay-label">支撑线:</span>
+                                <span class="overlay-value support" id="supportValue">--</span>
+                            </div>
+                            <div class="overlay-item">
+                                <span class="overlay-label">压力线:</span>
+                                <span class="overlay-value pressure" id="pressureValue">--</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -915,52 +969,70 @@
             }
         }
 
-        // 更新图表添加分析线
+        // 更新图表添加分析线（黄色横线）
         function updateChartWithAnalysis(analysisData, dataLength) {
             if (!chart) return;
 
-            const series = [];
+            // 获取当前的 option
+            const currentOption = chart.getOption();
+            let currentSeries = currentOption.series || [];
             
-            // 添加支撑线
+            // 查找是否已存在支撑线和压力线
+            let supportIndex = currentSeries.findIndex(s => s.name === '支撑线');
+            let pressureIndex = currentSeries.findIndex(s => s.name === '压力线');
+            
+            // 准备支撑线
+            const supportLine = {
+                name: '支撑线',
+                type: 'line',
+                data: Array(dataLength).fill(analysisData.supportPrice || 0),
+                smooth: false,
+                lineStyle: {
+                    color: '#FFD700',
+                    width: 2,
+                    type: 'solid'
+                },
+                symbol: 'none',
+                z: 10
+            };
+            
+            // 准备压力线
+            const pressureLine = {
+                name: '压力线',
+                type: 'line',
+                data: Array(dataLength).fill(analysisData.pressurePrice || 0),
+                smooth: false,
+                lineStyle: {
+                    color: '#FFD700',
+                    width: 2,
+                    type: 'solid'
+                },
+                symbol: 'none',
+                z: 10
+            };
+            
+            // 更新或添加支撑线
             if (analysisData.supportPrice) {
-                series.push({
-                    name: '支撑线',
-                    type: 'line',
-                    data: Array(dataLength).fill(analysisData.supportPrice),
-                    smooth: true,
-                    lineStyle: {
-                        color: '#26a69a',
-                        width: 2,
-                        type: 'dashed'
-                    },
-                    symbol: 'none',
-                    z: 10
-                });
+                if (supportIndex >= 0) {
+                    currentSeries[supportIndex] = supportLine;
+                } else {
+                    currentSeries.push(supportLine);
+                }
             }
-
-            // 添加压力线
+            
+            // 更新或添加压力线
             if (analysisData.pressurePrice) {
-                series.push({
-                    name: '压力线',
-                    type: 'line',
-                    data: Array(dataLength).fill(analysisData.pressurePrice),
-                    smooth: true,
-                    lineStyle: {
-                        color: '#ef5350',
-                        width: 2,
-                        type: 'dashed'
-                    },
-                    symbol: 'none',
-                    z: 10
-                });
+                if (pressureIndex >= 0) {
+                    currentSeries[pressureIndex] = pressureLine;
+                } else {
+                    currentSeries.push(pressureLine);
+                }
             }
-
-            // 追加series到图表
-            if (series.length > 0) {
-                chart.setOption({
-                    series: series
-                });
-            }
+            
+            // 更新图表
+            chart.setOption({
+                series: currentSeries
+            });
         }
 
         // 检查可用的周期类型
@@ -1142,11 +1214,7 @@
                 backgroundColor: 'transparent',
                 animation: false,  // 禁用动画，提升性能
                 legend: {
-                    data: ['支撑线', '压力线'],
-                    textStyle: {
-                        color: '#fff'
-                    },
-                    top: 0
+                    show: false  // 隐藏图例
                 },
                 tooltip: {
                     trigger: 'axis',
@@ -1311,34 +1379,34 @@
                 ]
             };
 
-            // 添加支撑线
+            // 添加支撑线（黄色横线）
             if (supportLine) {
                 option.series.push({
                     name: '支撑线',
                     type: 'line',
                     data: supportLine,
-                    smooth: true,
+                    smooth: false,  // 不平滑，直线
                     lineStyle: {
-                        color: '#26a69a',
+                        color: '#FFD700',  // 金黄色
                         width: 2,
-                        type: 'dashed'
+                        type: 'solid'  // 实线
                     },
                     symbol: 'none',
                     z: 10
                 });
             }
 
-            // 添加压力线
+            // 添加压力线（黄色横线）
             if (pressureLine) {
                 option.series.push({
                     name: '压力线',
                     type: 'line',
                     data: pressureLine,
-                    smooth: true,
+                    smooth: false,  // 不平滑，直线
                     lineStyle: {
-                        color: '#ef5350',
+                        color: '#FFD700',  // 金黄色
                         width: 2,
-                        type: 'dashed'
+                        type: 'solid'  // 实线
                     },
                     symbol: 'none',
                     z: 10
@@ -1380,38 +1448,26 @@
 
         // 更新分析信息
         function updateAnalysisInfo(analysisData, latestData) {
-            const analysisDiv = document.getElementById('analysisInfo');
-            if (!analysisDiv) return;
+            // 更新益损比
+            const winLoseRatioEl = document.getElementById('winLoseRatioValue');
+            if (winLoseRatioEl) {
+                const winLoseRatio = (analysisData && analysisData.winLoseRatio) || '--';
+                winLoseRatioEl.textContent = typeof winLoseRatio === 'number' ? winLoseRatio.toFixed(2) : winLoseRatio;
+            }
             
-            // 安全获取值
-            const winLoseRatio = (analysisData && analysisData.winLoseRatio) || '--';
-            const supportPrice = (analysisData && analysisData.supportPrice) || '--';
-            const pressurePrice = (analysisData && analysisData.pressurePrice) || '--';
-            const liangbi = (latestData && latestData.liangbi) ? latestData.liangbi.toFixed(2) : '--';
-            const weibi = (latestData && latestData.weibi) ? latestData.weibi.toFixed(2) : '--';
-
-            analysisDiv.innerHTML = `
-                <div class="info-item">
-                    <div class="info-label">益损比</div>
-                    <div class="info-value">${typeof winLoseRatio === 'number' ? winLoseRatio.toFixed(2) : winLoseRatio}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">支撑线</div>
-                    <div class="info-value down">${typeof supportPrice === 'number' ? supportPrice.toFixed(2) : supportPrice}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">压力线</div>
-                    <div class="info-value up">${typeof pressurePrice === 'number' ? pressurePrice.toFixed(2) : pressurePrice}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">量比</div>
-                    <div class="info-value">${liangbi}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">委比</div>
-                    <div class="info-value ${parseFloat(weibi) > 0 ? 'up' : 'down'}">${weibi}</div>
-                </div>
-            `;
+            // 更新支撑线
+            const supportEl = document.getElementById('supportValue');
+            if (supportEl) {
+                const supportPrice = (analysisData && analysisData.supportPrice) || '--';
+                supportEl.textContent = typeof supportPrice === 'number' ? supportPrice.toFixed(2) : supportPrice;
+            }
+            
+            // 更新压力线
+            const pressureEl = document.getElementById('pressureValue');
+            if (pressureEl) {
+                const pressurePrice = (analysisData && analysisData.pressurePrice) || '--';
+                pressureEl.textContent = typeof pressurePrice === 'number' ? pressurePrice.toFixed(2) : pressurePrice;
+            }
         }
 
         // 页面加载时初始化

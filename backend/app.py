@@ -286,18 +286,38 @@ def get_stock_analysis():
             response = requests.post(api_url, json=api_data, timeout=15)
             response_data = response.json()
             
-            # 解析响应数据
-            if response.status_code == 200 and response_data.get('code') == 200:
-                result = response_data.get('data', {})
+            print(f"[分析接口] 股票 {stock_code} 响应: success={response_data.get('success')}")
+            
+            # 解析响应数据（注意：接口返回的是 success 和 result，不是 code 和 data）
+            if response.status_code == 200 and response_data.get('success') == True:
+                result = response_data.get('result', {})
                 
                 # 提取不同周期的数据
-                for period in ['30min', 'day', 'week', 'month']:
-                    period_data = result.get(f'minLineAnalysis_{period}', {})
-                    analysis_data[period] = {
-                        'winLoseRatio': period_data.get('winLoseRatio', 0),
-                        'supportPrice': period_data.get('supportPrice', 0),
-                        'pressurePrice': period_data.get('pressurePrice', 0)
-                    }
+                # 30分钟: minLineAnalysis
+                # 日K: dayLineAnalysis
+                # 周K: weekLineAnalysis
+                # 月K: monthLineAnalysis
+                period_mapping = {
+                    '30min': 'minLineAnalysis',
+                    'day': 'dayLineAnalysis',
+                    'week': 'weekLineAnalysis',
+                    'month': 'monthLineAnalysis'
+                }
+                
+                for frontend_period, api_field in period_mapping.items():
+                    period_data = result.get(api_field, {})
+                    if period_data:
+                        analysis_data[frontend_period] = {
+                            'winLoseRatio': period_data.get('winLoseRatio', 0),
+                            'supportPrice': period_data.get('supportPrice', 0),
+                            'pressurePrice': period_data.get('pressurePrice', 0)
+                        }
+                        print(f"[分析接口] {frontend_period} 数据: 益损比={period_data.get('winLoseRatio')}, "
+                              f"支撑线={period_data.get('supportPrice')}, 压力线={period_data.get('pressurePrice')}")
+                    else:
+                        print(f"[分析接口] {frontend_period} 无数据")
+            else:
+                print(f"[分析接口] 请求失败: status={response.status_code}, success={response_data.get('success')}")
         except requests.Timeout:
             # 超时不影响返回，返回空数据
             print(f"分析接口超时: {stock_code}")
