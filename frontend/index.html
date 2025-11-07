@@ -231,6 +231,18 @@
             box-shadow: 0 0 10px rgba(74, 144, 226, 0.5);
         }
 
+        .period-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background: #1a1f2e;
+            border-color: #2a3f5f;
+        }
+
+        .period-btn:disabled:hover {
+            background: #1a1f2e;
+            transform: none;
+        }
+
         .chart-card {
             background: #151929;
             border-radius: 10px;
@@ -449,7 +461,10 @@
         let allStockGroups = {};
         let currentStrategy = '波段';
         let currentStockCode = '';
+        let currentTableName = '';
+        let availablePeriods = {};
         let chart = null;
+        let currentAnalysisController = null; // 当前分析请求的控制器
 
         // 更新状态指示器
         function updateStatus(online, text) {
@@ -573,7 +588,7 @@
         }
 
         // 选择股票
-        function selectStock() {
+        async function selectStock() {
             const stockSelect = document.getElementById('stockSelect');
             const selectedOption = stockSelect.options[stockSelect.selectedIndex];
             
@@ -584,13 +599,17 @@
 
             currentStockCode = stockSelect.value;
             const stockName = selectedOption.dataset.name;
-            const tableName = selectedOption.dataset.table;
+            currentTableName = selectedOption.dataset.table;
 
             // 显示股票信息和图表
-            renderStockView(currentStockCode, stockName, tableName);
+            renderStockView(currentStockCode, stockName, currentTableName);
             
-            // 加载数据（默认日K线）
-            loadStockData(currentStockCode, tableName, 'day');
+            // 先获取可用的周期类型
+            await checkAvailablePeriods(currentTableName);
+            
+            // 选择一个可用的周期加载数据
+            const defaultPeriod = selectDefaultPeriod();
+            loadStockData(currentStockCode, currentTableName, defaultPeriod);
         }
 
         // 显示空状态
@@ -617,7 +636,7 @@
                     </div>
                     <div class="period-selector">
                         <button class="period-btn" onclick="changePeriod('30min')">30分钟</button>
-                        <button class="period-btn active" onclick="changePeriod('day')">日K线</button>
+                        <button class="period-btn" onclick="changePeriod('day')">日K线</button>
                         <button class="period-btn" onclick="changePeriod('week')">周K线</button>
                         <button class="period-btn" onclick="changePeriod('month')">月K线</button>
                     </div>
@@ -658,38 +677,96 @@
         }
 
         // 切换周期
-        function changePeriod(period) {
-            // 更新按钮状态
-            document.querySelectorAll('.period-btn').forEach(btn => {
-                btn.classList.remove('active');
-                if (btn.textContent.includes(period) || 
-                    (period === '30min' && btn.textContent === '30分钟') ||
-                    (period === 'day' && btn.textContent === '日K线') ||
-                    (period === 'week' && btn.textContent === '周K线') ||
-                    (period === 'month' && btn.textContent === '月K线')) {
-                    btn.classList.add('active');
+        async function changePeriod(period) {
+            try {
+                // 检查是否已选择股票
+                if (!currentStockCode || !currentTableName) {
+                    console.error('未选择股票，无法切换周期');
+                    alert('请先选择股票');
+                    return;
                 }
-            });
 
-            // 获取当前股票信息
-            const stockSelect = document.getElementById('stockSelect');
-            const selectedOption = stockSelect.options[stockSelect.selectedIndex];
-            const tableName = selectedOption.dataset.table;
+                // 检查该周期是否有数据
+                if (!availablePeriods[period]) {
+                    alert(`该股票暂无${getPeriodName(period)}数据，请选择其他周期`);
+                    return;
+                }
 
-            // 重新加载数据
-            loadStockData(currentStockCode, tableName, period);
+                console.log(`切换周期: ${period}, 股票: ${currentStockCode}, 表: ${currentTableName}`);
+
+                // 更新按钮状态
+                document.querySelectorAll('.period-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                    if (btn.textContent.includes(period) || 
+                        (period === '30min' && btn.textContent === '30分钟') ||
+                        (period === 'day' && btn.textContent === '日K线') ||
+                        (period === 'week' && btn.textContent === '周K线') ||
+                        (period === 'month' && btn.textContent === '月K线')) {
+                        btn.classList.add('active');
+                    }
+                });
+
+                // 重新加载数据（await确保异常被捕获）
+                await loadStockData(currentStockCode, currentTableName, period);
+                
+            } catch (error) {
+                console.error('切换周期失败:', error);
+                const chartDom = document.getElementById('mainChart');
+                if (chartDom) {
+                    chartDom.innerHTML = `
+                        <div class="error">
+                            <p>📊 切换周期失败</p>
+                            <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
+                            <button onclick="changePeriod('${period}')" 
+                                    style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">
+                                重试
+                            </button>
+                        </div>
+                    `;
+                }
+            }
         }
 
-        // 加载股票数据
+        // 加载股票数据（优化版：先显示K线，再加载分析）
         async function loadStockData(stockCode, tableName, period) {
+            console.log(`=== 开始加载股票数据 ===`);
+            console.log(`股票代码: ${stockCode}`);
+            console.log(`表名: ${tableName}`);
+            console.log(`周期: ${period}`);
+            
             try {
+                // 检查参数
+                if (!stockCode || !tableName || !period) {
+                    throw new Error(`参数不完整: stockCode=${stockCode}, tableName=${tableName}, period=${period}`);
+                }
+
+                // 先销毁旧图表（在清空DOM之前）
+                if (chart) {
+                    try {
+                        console.log(`[${period}] 在加载前销毁旧图表...`);
+                        chart.dispose();
+                        chart = null;
+                        console.log(`[${period}] 旧图表已销毁`);
+                    } catch (error) {
+                        console.warn(`[${period}] 销毁旧图表失败:`, error);
+                        chart = null;
+                    }
+                }
+
                 // 显示加载状态
-                document.getElementById('mainChart').innerHTML = `
+                const chartDom = document.getElementById('mainChart');
+                if (!chartDom) {
+                    throw new Error('找不到图表容器 mainChart');
+                }
+                
+                chartDom.innerHTML = `
                     <div class="loading">
                         <div class="spinner"></div>
-                        <p>加载K线数据中...</p>
+                        <p>加载${getPeriodName(period)}数据中...</p>
                     </div>
                 `;
+
+                console.log(`[${period}] 开始请求K线数据...`);
 
                 // 加载K线数据
                 const klineResponse = await fetch(`${API_BASE_URL}/kline_data`, {
@@ -703,28 +780,49 @@
                     })
                 });
 
+                console.log(`[${period}] K线数据响应状态: ${klineResponse.status}`);
+
+                if (!klineResponse.ok) {
+                    throw new Error(`HTTP错误: ${klineResponse.status}`);
+                }
+
                 const klineResult = await klineResponse.json();
+                console.log(`[${period}] K线数据结果:`, klineResult);
 
                 if (klineResult.code !== 200) {
                     throw new Error(klineResult.message);
                 }
 
-                // 加载分析数据
-                const analysisResponse = await fetch(`${API_BASE_URL}/stock_analysis`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        stock_code: stockCode
-                    })
+                // 检查是否有数据
+                if (!klineResult.data || klineResult.data.length === 0) {
+                    document.getElementById('mainChart').innerHTML = `
+                        <div class="error">
+                            <p>📊 暂无${getPeriodName(period)}数据</p>
+                            <p style="font-size: 14px; margin-top: 10px;">
+                                该股票可能没有${getPeriodName(period)}的K线数据<br>
+                                请尝试切换其他周期
+                            </p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // 先启动分析数据加载（不等K线渲染完成）
+                console.log(`[${period}] ✅ 立即启动分析数据加载（并行）`);
+                const analysisPromise = loadAnalysisData(stockCode, period, klineResult.data).catch(err => {
+                    console.error(`[${period}] 分析数据加载异常:`, err);
                 });
 
-                const analysisResult = await analysisResponse.json();
-                const analysisData = analysisResult.code === 200 ? analysisResult.data[period] : {};
-
-                // 渲染图表
-                renderChart(klineResult.data, analysisData, period);
+                // 渲染K线图
+                console.log(`[${period}] 开始渲染K线，数据点数: ${klineResult.data.length}`);
+                try {
+                    renderChart(klineResult.data, {}, period);
+                    updateActivePeriodButton(period);
+                    console.log(`[${period}] K线渲染成功`);
+                } catch (error) {
+                    console.error(`[${period}] K线渲染失败:`, error);
+                    throw error;
+                }
 
             } catch (error) {
                 console.error(`加载${stockCode}数据失败:`, error);
@@ -739,6 +837,237 @@
                     </div>
                 `;
             }
+        }
+
+        // 异步加载分析数据（不阻塞K线显示）
+        async function loadAnalysisData(stockCode, period, klineData) {
+            console.log(`[${period}] 🔵 loadAnalysisData 函数被调用，股票代码: ${stockCode}`);
+            try {
+                // 取消之前的请求（防止快速切换周期时的冲突）
+                if (currentAnalysisController) {
+                    console.log(`[${period}] ⚠️ 取消之前的分析请求`);
+                    currentAnalysisController.abort();
+                }
+                
+                console.log(`[${period}] 🚀 准备发送 stock_analysis 请求...`);
+                
+                // 创建新的控制器
+                currentAnalysisController = new AbortController();
+                const controller = currentAnalysisController;
+                
+                // 设置超时控制：20秒，给足够的响应时间
+                const timeoutId = setTimeout(() => {
+                    if (controller === currentAnalysisController) {
+                        controller.abort();
+                    }
+                }, 20000);
+                
+                console.log(`[${period}] 📡 正在发送 stock_analysis 请求到: ${API_BASE_URL}/stock_analysis`);
+                const analysisResponse = await fetch(`${API_BASE_URL}/stock_analysis`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stock_code: stockCode
+                    }),
+                    signal: controller.signal
+                });
+                console.log(`[${period}] ✅ stock_analysis 请求已发送，等待响应...`);
+
+                clearTimeout(timeoutId);
+
+                // 检查是否已被新请求取消
+                if (controller !== currentAnalysisController) {
+                    console.log(`[${period}] 请求已被新请求取消，忽略结果`);
+                    return;
+                }
+
+                const analysisResult = await analysisResponse.json();
+                console.log(`[${period}] 分析数据返回:`, analysisResult);
+                
+                const analysisData = (analysisResult.code === 200 && analysisResult.data && analysisResult.data[period]) 
+                    ? analysisResult.data[period] : {};
+
+                // 再次检查是否已被新请求取消
+                if (controller !== currentAnalysisController) {
+                    console.log(`[${period}] 请求已被新请求取消，忽略更新`);
+                    return;
+                }
+
+                // 更新图表（添加分析线）
+                if (chart && analysisData && Object.keys(analysisData).length > 0) {
+                    console.log(`[${period}] 更新分析线...`);
+                    updateChartWithAnalysis(analysisData, klineData.length);
+                    updateAnalysisInfo(analysisData, klineData[klineData.length - 1] || {});
+                    console.log(`[${period}] 分析数据更新完成`);
+                } else {
+                    console.log(`[${period}] 分析数据为空，跳过更新`);
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    console.warn(`[${period}] 分析数据加载已取消或超时`);
+                } else {
+                    console.error(`[${period}] 加载分析数据失败:`, error);
+                }
+                // 分析数据加载失败不影响K线显示
+                // K线图已经显示，这里不做任何处理
+            }
+        }
+
+        // 更新图表添加分析线
+        function updateChartWithAnalysis(analysisData, dataLength) {
+            if (!chart) return;
+
+            const series = [];
+            
+            // 添加支撑线
+            if (analysisData.supportPrice) {
+                series.push({
+                    name: '支撑线',
+                    type: 'line',
+                    data: Array(dataLength).fill(analysisData.supportPrice),
+                    smooth: true,
+                    lineStyle: {
+                        color: '#26a69a',
+                        width: 2,
+                        type: 'dashed'
+                    },
+                    symbol: 'none',
+                    z: 10
+                });
+            }
+
+            // 添加压力线
+            if (analysisData.pressurePrice) {
+                series.push({
+                    name: '压力线',
+                    type: 'line',
+                    data: Array(dataLength).fill(analysisData.pressurePrice),
+                    smooth: true,
+                    lineStyle: {
+                        color: '#ef5350',
+                        width: 2,
+                        type: 'dashed'
+                    },
+                    symbol: 'none',
+                    z: 10
+                });
+            }
+
+            // 追加series到图表
+            if (series.length > 0) {
+                chart.setOption({
+                    series: series
+                });
+            }
+        }
+
+        // 检查可用的周期类型
+        async function checkAvailablePeriods(tableName) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/available_periods`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_name: tableName
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    availablePeriods = result.data;
+                    updatePeriodButtons();
+                } else {
+                    // 如果获取失败，假设所有周期都可用
+                    availablePeriods = {
+                        '30min': 1,
+                        'day': 1,
+                        'week': 1,
+                        'month': 1
+                    };
+                }
+            } catch (error) {
+                console.error('获取可用周期失败:', error);
+                // 出错时假设所有周期都可用
+                availablePeriods = {
+                    '30min': 1,
+                    'day': 1,
+                    'week': 1,
+                    'month': 1
+                };
+            }
+        }
+
+        // 更新周期按钮状态
+        function updatePeriodButtons() {
+            const periodButtons = document.querySelectorAll('.period-btn');
+            
+            periodButtons.forEach(btn => {
+                const btnText = btn.textContent;
+                let period = '';
+                
+                if (btnText.includes('30分钟')) period = '30min';
+                else if (btnText.includes('日K线')) period = 'day';
+                else if (btnText.includes('周K线')) period = 'week';
+                else if (btnText.includes('月K线')) period = 'month';
+                
+                if (period && !availablePeriods[period]) {
+                    // 没有数据，禁用按钮
+                    btn.disabled = true;
+                    btn.style.opacity = '0.3';
+                    btn.style.cursor = 'not-allowed';
+                    btn.title = `暂无${btnText}数据`;
+                } else {
+                    // 有数据，启用按钮
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                    btn.title = '';
+                }
+            });
+        }
+
+        // 选择默认周期（优先级：day > 30min > week > month）
+        function selectDefaultPeriod() {
+            const priorities = ['day', '30min', 'week', 'month'];
+            
+            for (const period of priorities) {
+                if (availablePeriods[period]) {
+                    return period;
+                }
+            }
+            
+            // 如果都没有，返回第一个可用的
+            const available = Object.keys(availablePeriods);
+            return available.length > 0 ? available[0] : 'day';
+        }
+
+        // 更新激活的周期按钮
+        function updateActivePeriodButton(period) {
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if ((period === '30min' && btn.textContent === '30分钟') ||
+                    (period === 'day' && btn.textContent === '日K线') ||
+                    (period === 'week' && btn.textContent === '周K线') ||
+                    (period === 'month' && btn.textContent === '月K线')) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+
+        // 获取周期名称
+        function getPeriodName(period) {
+            const names = {
+                '30min': '30分钟',
+                'day': '日K线',
+                'week': '周K线',
+                'month': '月K线'
+            };
+            return names[period] || period;
         }
 
         // 计算默认显示的数据范围
@@ -781,33 +1110,37 @@
 
         // 渲染图表
         function renderChart(klineData, analysisData, period) {
-            const chartDom = document.getElementById('mainChart');
-            
-            // 销毁旧图表
-            if (chart) {
-                chart.dispose();
-            }
+            try {
+                const chartDom = document.getElementById('mainChart');
+                if (!chartDom) {
+                    console.error('找不到图表容器 mainChart');
+                    return;
+                }
+                
+                // 初始化新图表（旧图表已在 loadStockData 中销毁）
+                chart = echarts.init(chartDom);
+                console.log(`[${period}] ECharts实例已初始化`);
 
-            chart = echarts.init(chartDom);
-
-            // 准备数据
-            const dates = klineData.map(item => item.time);
-            const values = klineData.map(item => [item.open, item.close, item.low, item.high]);
-            const volumes = klineData.map(item => item.volume);
+                // 准备数据
+                const dates = klineData.map(item => item.time);
+                const values = klineData.map(item => [item.open, item.close, item.low, item.high]);
+                const volumes = klineData.map(item => item.volume);
+                
+                console.log(`[${period}] 数据准备完成 - 日期数:${dates.length}, K线数:${values.length}, 成交量数:${volumes.length}`);
 
             // 计算最新的量比和委比
             const latestData = klineData[klineData.length - 1] || {};
 
-            // 支撑线和压力线数据
-            const supportLine = analysisData.supportPrice ? 
+            // 支撑线和压力线数据（确保analysisData存在）
+            const supportLine = (analysisData && analysisData.supportPrice) ? 
                 Array(dates.length).fill(analysisData.supportPrice) : null;
-            const pressureLine = analysisData.pressurePrice ? 
+            const pressureLine = (analysisData && analysisData.pressurePrice) ? 
                 Array(dates.length).fill(analysisData.pressurePrice) : null;
 
             // 配置项
             const option = {
                 backgroundColor: 'transparent',
-                animation: true,
+                animation: false,  // 禁用动画，提升性能
                 legend: {
                     data: ['支撑线', '压力线'],
                     textStyle: {
@@ -1012,28 +1345,50 @@
                 });
             }
 
-            chart.setOption(option);
+            // 设置图表配置
+            try {
+                chart.setOption(option, true);  // true = 不合并，完全替换
+            } catch (error) {
+                console.error('设置图表配置失败:', error);
+                throw error;
+            }
 
-            // 更新分析信息
-            updateAnalysisInfo(analysisData, latestData);
+            // 如果有分析数据，更新分析信息
+            if (analysisData && Object.keys(analysisData).length > 0) {
+                updateAnalysisInfo(analysisData, latestData);
+            } else {
+                // 没有分析数据时，显示默认值
+                updateAnalysisInfo({}, latestData);
+            }
 
-            // 响应式
-            window.addEventListener('resize', () => {
+            // 响应式（确保不重复绑定）
+            const resizeHandler = () => {
                 if (chart) {
                     chart.resize();
                 }
-            });
+            };
+            
+            // 移除旧的监听器再添加新的
+            window.removeEventListener('resize', resizeHandler);
+            window.addEventListener('resize', resizeHandler);
+            
+            } catch (error) {
+                console.error(`[${period}] renderChart异常:`, error);
+                throw error;
+            }
         }
 
         // 更新分析信息
         function updateAnalysisInfo(analysisData, latestData) {
             const analysisDiv = document.getElementById('analysisInfo');
+            if (!analysisDiv) return;
             
-            const winLoseRatio = analysisData.winLoseRatio || '--';
-            const supportPrice = analysisData.supportPrice || '--';
-            const pressurePrice = analysisData.pressurePrice || '--';
-            const liangbi = latestData.liangbi ? latestData.liangbi.toFixed(2) : '--';
-            const weibi = latestData.weibi ? latestData.weibi.toFixed(2) : '--';
+            // 安全获取值
+            const winLoseRatio = (analysisData && analysisData.winLoseRatio) || '--';
+            const supportPrice = (analysisData && analysisData.supportPrice) || '--';
+            const pressurePrice = (analysisData && analysisData.pressurePrice) || '--';
+            const liangbi = (latestData && latestData.liangbi) ? latestData.liangbi.toFixed(2) : '--';
+            const weibi = (latestData && latestData.weibi) ? latestData.weibi.toFixed(2) : '--';
 
             analysisDiv.innerHTML = `
                 <div class="info-item">

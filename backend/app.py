@@ -95,9 +95,10 @@ STOCK_GROUPS = {
 
 
 # 周期类型映射（根据数据库实际字段值）
+# 数据库中使用字符串存储周期类型
 PERIOD_TYPE_MAP = {
     '30min': '30min',
-    'day': '1day',
+    'day': '1day',      # 注意：数据库中是 '1day' 不是 'day'
     'week': 'week',
     'month': 'month'
 }
@@ -131,6 +132,56 @@ def get_stock_groups():
     })
 
 
+@app.route('/api/available_periods', methods=['POST'])
+def get_available_periods():
+    """获取股票可用的周期类型"""
+    try:
+        data = request.json
+        table_name = data.get('table_name')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 查询该表中有哪些周期类型的数据
+        query = f"""
+            SELECT DISTINCT peroid_type, COUNT(*) as count
+            FROM {table_name}
+            GROUP BY peroid_type
+        """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        # 构建可用周期列表
+        available_periods = {}
+        period_map_reverse = {v: k for k, v in PERIOD_TYPE_MAP.items()}
+        
+        for row in results:
+            db_period = row[0]
+            count = row[1]
+            
+            # 反向映射，找到前端使用的周期名称
+            frontend_period = period_map_reverse.get(db_period)
+            if frontend_period and count > 0:
+                available_periods[frontend_period] = count
+        
+        return jsonify({
+            'code': 200,
+            'data': available_periods,
+            'message': 'success'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'code': 500,
+            'data': {},
+            'message': str(e)
+        }), 500
+
+
 @app.route('/api/kline_data', methods=['POST'])
 def get_kline_data():
     """获取K线数据"""
@@ -139,25 +190,37 @@ def get_kline_data():
         table_name = data.get('table_name')
         period_type = data.get('period_type', 'day')
         
-        # 获取3年前的日期
-        three_years_ago = datetime.now() - timedelta(days=365*3)
+        # 根据周期类型设置合理的时间范围，减少数据量
+        time_ranges = {
+            '30min': 90,    # 30分钟K线：最近3个月
+            'day': 730,     # 日K线：最近2年
+            'week': 1095,   # 周K线：最近3年
+            'month': 1825   # 月K线：最近5年
+        }
+        days = time_ranges.get(period_type, 730)
+        start_date = datetime.now() - timedelta(days=days)
         
         # 获取周期类型代码
-        period_code = PERIOD_TYPE_MAP.get(period_type, '6')
+        period_code = PERIOD_TYPE_MAP.get(period_type, '1day')
         
         conn = get_db_connection()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
+        # 优化查询：只查询必要字段，添加限制
         query = f"""
             SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
                    cheng_jiao_liang, liang_bi, wei_bi
             FROM {table_name}
             WHERE peroid_type = %s AND shi_jian >= %s
-            ORDER BY shi_jian ASC
+            ORDER BY shi_jian DESC
+            LIMIT 2000
         """
         
-        cursor.execute(query, (period_code, three_years_ago))
+        cursor.execute(query, (period_code, start_date))
         results = cursor.fetchall()
+        
+        # 反转顺序，从旧到新
+        results.reverse()
         
         cursor.close()
         conn.close()
@@ -197,23 +260,7 @@ def get_stock_analysis():
         data = request.json
         stock_code = data.get('stock_code')
         
-        # 调用外部API
-        api_url = 'https://apiprod.mtygs.cn/api/stock/getStockAnalysis'
-        api_data = {
-            "appId": "string",
-            "circleId": "string",
-            "parameter": {
-                "stockCode": stock_code
-            },
-            "requestId": "string",
-            "token": "2025102013283854160ae6136c47da8d6c065f7919e66a_17721044150",
-            "traceId": "string"
-        }
-        
-        response = requests.post(api_url, json=api_data, timeout=10)
-        response_data = response.json()
-        
-        # 解析响应数据
+        # 默认空数据结构
         analysis_data = {
             '30min': {},
             'day': {},
@@ -221,18 +268,47 @@ def get_stock_analysis():
             'month': {}
         }
         
-        if response.status_code == 200 and response_data.get('code') == 200:
-            result = response_data.get('data', {})
+        try:
+            # 调用外部API（设置短超时，避免阻塞）
+            api_url = 'https://apiprod.mtygs.cn/api/stock/getStockAnalysis'
+            api_data = {
+                "appId": "string",
+                "circleId": "string",
+                "parameter": {
+                    "stockCode": stock_code
+                },
+                "requestId": "string",
+                "token": "2025102013283854160ae6136c47da8d6c065f7919e66a_17721044150",
+                "traceId": "string"
+            }
             
-            # 提取不同周期的数据
-            for period in ['30min', 'day', 'week', 'month']:
-                period_data = result.get(f'minLineAnalysis_{period}', {})
-                analysis_data[period] = {
-                    'winLoseRatio': period_data.get('winLoseRatio', 0),
-                    'supportPrice': period_data.get('supportPrice', 0),
-                    'pressurePrice': period_data.get('pressurePrice', 0)
-                }
+            # 超时设置：15秒，给足够的响应时间
+            response = requests.post(api_url, json=api_data, timeout=15)
+            response_data = response.json()
+            
+            # 解析响应数据
+            if response.status_code == 200 and response_data.get('code') == 200:
+                result = response_data.get('data', {})
+                
+                # 提取不同周期的数据
+                for period in ['30min', 'day', 'week', 'month']:
+                    period_data = result.get(f'minLineAnalysis_{period}', {})
+                    analysis_data[period] = {
+                        'winLoseRatio': period_data.get('winLoseRatio', 0),
+                        'supportPrice': period_data.get('supportPrice', 0),
+                        'pressurePrice': period_data.get('pressurePrice', 0)
+                    }
+        except requests.Timeout:
+            # 超时不影响返回，返回空数据
+            print(f"分析接口超时: {stock_code}")
+        except requests.RequestException as e:
+            # 网络错误不影响返回
+            print(f"分析接口请求失败: {stock_code}, 错误: {e}")
+        except Exception as e:
+            # 其他错误也不影响返回
+            print(f"分析接口异常: {stock_code}, 错误: {e}")
         
+        # 总是返回成功，即使分析数据为空
         return jsonify({
             'code': 200,
             'data': analysis_data,
@@ -240,11 +316,17 @@ def get_stock_analysis():
         })
     
     except Exception as e:
+        # 最外层异常，返回空数据而不是500错误
         return jsonify({
-            'code': 500,
-            'data': None,
-            'message': str(e)
-        }), 500
+            'code': 200,
+            'data': {
+                '30min': {},
+                'day': {},
+                'week': {},
+                'month': {}
+            },
+            'message': f'Analysis failed: {str(e)}'
+        })
 
 
 if __name__ == '__main__':
