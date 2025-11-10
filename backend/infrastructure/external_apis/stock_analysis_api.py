@@ -2,6 +2,9 @@
 import requests
 from typing import Dict, Any
 from infrastructure.config.api_config import EXTERNAL_API_CONFIG
+from infrastructure.logging.logger import get_external_api_logger
+
+logger = get_external_api_logger()
 
 
 class StockAnalysisApiClient:
@@ -42,10 +45,11 @@ class StockAnalysisApiClient:
                 "traceId": "string"
             }
             
+            logger.info(f"调用外部API: 获取股票分析, 股票代码={stock_code}")
             response = requests.post(self.api_url, json=api_data, timeout=self.timeout)
             response_data = response.json()
             
-            print(f"[分析接口] 股票 {stock_code} 响应: success={response_data.get('success')}")
+            logger.info(f"外部API响应: 股票 {stock_code}, success={response_data.get('success')}, status={response.status_code}")
             
             if response.status_code == 200 and response_data.get('success') == True:
                 api_result = response_data.get('result', {})
@@ -66,19 +70,21 @@ class StockAnalysisApiClient:
                             'supportPrice': period_data.get('supportPrice', 0),
                             'pressurePrice': period_data.get('pressurePrice', 0)
                         }
-                        print(f"[分析接口] {frontend_period} 数据: 益损比={period_data.get('winLoseRatio')}, "
-                              f"支撑线={period_data.get('supportPrice')}, 压力线={period_data.get('pressurePrice')}")
+                        logger.debug(f"解析 {frontend_period} 数据: 益损比={period_data.get('winLoseRatio')}, "
+                                   f"支撑线={period_data.get('supportPrice')}, 压力线={period_data.get('pressurePrice')}")
                     else:
-                        print(f"[分析接口] {frontend_period} 无数据")
+                        logger.debug(f"{frontend_period} 无数据")
+                
+                logger.info(f"成功获取股票分析数据: {stock_code}")
             else:
-                print(f"[分析接口] 请求失败: status={response.status_code}, success={response_data.get('success')}")
+                logger.warning(f"外部API请求失败: 股票={stock_code}, status={response.status_code}, success={response_data.get('success')}")
                 
         except requests.Timeout:
-            print(f"分析接口超时: {stock_code}")
+            logger.warning(f"外部API超时: {stock_code}, 超时时间={self.timeout}秒")
         except requests.RequestException as e:
-            print(f"分析接口请求失败: {stock_code}, 错误: {e}")
+            logger.error(f"外部API请求异常: 股票={stock_code}, 错误={str(e)}")
         except Exception as e:
-            print(f"分析接口异常: {stock_code}, 错误: {e}")
+            logger.error(f"外部API处理异常: 股票={stock_code}, 错误={str(e)}", exc_info=True)
         
         return result
 
