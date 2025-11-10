@@ -195,10 +195,6 @@ function renderStockView(stockCode, stockName, tableName) {
                         <span class="overlay-value" id="crPointsStats">--</span>
                     </div>
                 </div>
-                <div class="chart-overlay-buttons">
-                    <button class="overlay-btn" id="analyzeCRBtn" onclick="analyzeCRPoints()">🎯 分析CR点</button>
-                    <button class="overlay-btn" id="toggleCRBtn" onclick="toggleCRPoints()">👁️ 显示CR点</button>
-                </div>
             </div>
         </div>
     `;
@@ -337,12 +333,10 @@ async function loadStockData(stockCode, tableName, period) {
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
             
-            // 自动加载CR点数据（如果是日K线）
-            if (period === 'day') {
-                loadCRPoints().catch(err => {
-                    console.error('加载CR点数据失败:', err);
-                });
-            }
+            // 自动加载CR点数据并显示（所有周期都支持）
+            loadCRPoints().catch(err => {
+                console.error('加载CR点数据失败:', err);
+            });
         } catch (error) {
             console.error(`[${period}] K线渲染失败:`, error);
             throw error;
@@ -898,7 +892,7 @@ function updateAnalysisInfo(analysisData, latestData) {
 // ============ CR点分析功能 ============
 
 let crPointsData = { c_points: [], r_points: [] };
-let showCRPoints = false;
+let showCRPoints = true; // 默认显示CR点
 
 // 分析CR点
 async function analyzeCRPoints() {
@@ -978,8 +972,8 @@ async function loadCRPoints() {
             crPointsData.c_points = result.data.filter(p => p.pointType === 'C');
             crPointsData.r_points = result.data.filter(p => p.pointType === 'R');
             
-            // 如果开关是打开的，更新图表
-            if (showCRPoints && chart) {
+            // 默认显示CR点，更新图表
+            if (chart) {
                 updateChartWithCRPoints();
             }
             
@@ -1019,76 +1013,94 @@ function updateChartWithCRPoints() {
     if (showCRPoints && crPointsData) {
         const dates = currentOption.xAxis[0].data;
         
-        // 添加C点标记
+        // 创建一个日期映射，将K线的日期转换为日期字符串（去掉时间部分）用于匹配
+        const dateMap = new Map();
+        dates.forEach((dateStr, index) => {
+            // K线日期格式可能是 '2024-01-01 00:00:00' 或 '2024-01-01'
+            const dateOnly = dateStr.substring(0, 10); // 取前10个字符 'YYYY-MM-DD'
+            if (!dateMap.has(dateOnly)) {
+                dateMap.set(dateOnly, index);
+            }
+        });
+        
+        // 添加C点标记（红色，在K线下方）
         if (crPointsData.c_points && crPointsData.c_points.length > 0) {
-            const cPointSeries = {
-                name: 'C点',
-                type: 'scatter',
-                data: crPointsData.c_points.map(point => {
-                    const dateStr = point.triggerDate;
-                    const index = dates.indexOf(dateStr);
-                    if (index >= 0) {
-                        return {
-                            value: [index, point.lowPrice],
-                            itemStyle: {
-                                color: '#00ff00',
-                                borderColor: '#fff',
-                                borderWidth: 2
-                            },
-                            symbolSize: 15,
-                            label: {
-                                show: true,
-                                formatter: 'C',
-                                position: 'bottom',
-                                color: '#00ff00',
-                                fontSize: 12,
-                                fontWeight: 'bold'
-                            }
-                        };
-                    }
-                    return null;
-                }).filter(item => item !== null),
-                symbol: 'circle',
-                symbolSize: 15,
-                z: 100
-            };
-            currentSeries.push(cPointSeries);
+            const cPointData = crPointsData.c_points.map(point => {
+                const dateStr = point.triggerDate; // CR点日期格式是 'YYYY-MM-DD'
+                const index = dateMap.get(dateStr);
+                if (index !== undefined && index >= 0) {
+                    return {
+                        value: [index, point.lowPrice],
+                        itemStyle: {
+                            color: '#ff0000',
+                            borderColor: '#fff',
+                            borderWidth: 2
+                        },
+                        symbolSize: 25,
+                        label: {
+                            show: true,
+                            formatter: 'C',
+                            position: 'inside',
+                            color: '#ffffff',
+                            fontSize: 14,
+                            fontWeight: 'bold'
+                        }
+                    };
+                }
+                return null;
+            }).filter(item => item !== null);
+            
+            if (cPointData.length > 0) {
+                const cPointSeries = {
+                    name: 'C点',
+                    type: 'scatter',
+                    data: cPointData,
+                    symbol: 'circle',
+                    symbolSize: 25,
+                    z: 100
+                };
+                currentSeries.push(cPointSeries);
+            }
         }
         
-        // 添加R点标记
+        // 添加R点标记（绿色，在K线上方）
         if (crPointsData.r_points && crPointsData.r_points.length > 0) {
-            const rPointSeries = {
-                name: 'R点',
-                type: 'scatter',
-                data: crPointsData.r_points.map(point => {
-                    const dateStr = point.triggerDate;
-                    const index = dates.indexOf(dateStr);
-                    if (index >= 0) {
-                        return {
-                            value: [index, point.highPrice],
-                            itemStyle: {
-                                color: '#ff0000',
-                                borderColor: '#fff',
-                                borderWidth: 2
-                            },
-                            symbolSize: 15,
-                            label: {
-                                show: true,
-                                formatter: 'R',
-                                position: 'top',
-                                color: '#ff0000',
-                                fontSize: 12,
-                                fontWeight: 'bold'
-                            }
-                        };
-                    }
-                    return null;
-                }).filter(item => item !== null),
-                symbol: 'circle',
-                symbolSize: 15,
-                z: 100
-            };
-            currentSeries.push(rPointSeries);
+            const rPointData = crPointsData.r_points.map(point => {
+                const dateStr = point.triggerDate; // CR点日期格式是 'YYYY-MM-DD'
+                const index = dateMap.get(dateStr);
+                if (index !== undefined && index >= 0) {
+                    return {
+                        value: [index, point.highPrice],
+                        itemStyle: {
+                            color: '#00ff00',
+                            borderColor: '#fff',
+                            borderWidth: 2
+                        },
+                        symbolSize: 25,
+                        label: {
+                            show: true,
+                            formatter: 'R',
+                            position: 'inside',
+                            color: '#ffffff',
+                            fontSize: 14,
+                            fontWeight: 'bold'
+                        }
+                    };
+                }
+                return null;
+            }).filter(item => item !== null);
+            
+            if (rPointData.length > 0) {
+                const rPointSeries = {
+                    name: 'R点',
+                    type: 'scatter',
+                    data: rPointData,
+                    symbol: 'circle',
+                    symbolSize: 25,
+                    z: 100
+                };
+                currentSeries.push(rPointSeries);
+            }
         }
     }
     
