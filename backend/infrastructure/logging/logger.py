@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 """日志配置模块"""
 import logging
 import os
@@ -154,5 +154,5 @@ def get_external_api_logger():
     log_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'logs')
     log_file = os.path.join(log_dir, 'external_api.log')
     return LoggerManager.setup_logger('external_api', log_file, logging.INFO)
->>>>>>> 242e3e9ad5d4f5513ca27fd1db20031f9cc0152b
+
 
