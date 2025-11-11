@@ -23,9 +23,9 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     INSERT INTO daily_chance (
                         stock_code, stock_name, stock_nature, date, chance,
                         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
-                        support_price, pressure_price
+                        support_price, pressure_price, volume_type
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     ) ON DUPLICATE KEY UPDATE
                         stock_name = VALUES(stock_name),
                         stock_nature = VALUES(stock_nature),
@@ -34,7 +34,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                         week_win_ratio_score = VALUES(week_win_ratio_score),
                         total_win_ratio_score = VALUES(total_win_ratio_score),
                         support_price = VALUES(support_price),
-                        pressure_price = VALUES(pressure_price)
+                        pressure_price = VALUES(pressure_price),
+                        volume_type = VALUES(volume_type)
                 """
                 
                 cursor.execute(sql, (
@@ -47,7 +48,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     daily_chance.week_win_ratio_score,
                     daily_chance.total_win_ratio_score,
                     daily_chance.support_price,
-                    daily_chance.pressure_price
+                    daily_chance.pressure_price,
+                    daily_chance.volume_type
                 ))
                 
                 logger.debug(f"保存每日机会数据成功: {daily_chance.stock_code} {daily_chance.date}")
@@ -70,9 +72,9 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     INSERT INTO daily_chance (
                         stock_code, stock_name, stock_nature, date, chance,
                         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
-                        support_price, pressure_price
+                        support_price, pressure_price, volume_type
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     ) ON DUPLICATE KEY UPDATE
                         stock_name = VALUES(stock_name),
                         stock_nature = VALUES(stock_nature),
@@ -81,7 +83,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                         week_win_ratio_score = VALUES(week_win_ratio_score),
                         total_win_ratio_score = VALUES(total_win_ratio_score),
                         support_price = VALUES(support_price),
-                        pressure_price = VALUES(pressure_price)
+                        pressure_price = VALUES(pressure_price),
+                        volume_type = VALUES(volume_type)
                 """
                 
                 values = []
@@ -96,7 +99,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                         dc.week_win_ratio_score,
                         dc.total_win_ratio_score,
                         dc.support_price,
-                        dc.pressure_price
+                        dc.pressure_price,
+                        dc.volume_type
                     ))
                 
                 cursor.executemany(sql, values)
@@ -185,6 +189,65 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             logger.error(f"查询最新日期失败: {e}", exc_info=True)
             return None
     
+    def update_volume_type(self, stock_code: str, date: str, volume_type: str) -> bool:
+        """更新成交量类型"""
+        try:
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                
+                sql = """
+                    UPDATE daily_chance 
+                    SET volume_type = %s
+                    WHERE stock_code = %s AND date = %s
+                """
+                
+                cursor.execute(sql, (volume_type, stock_code, date))
+                updated_count = cursor.rowcount
+                
+                if updated_count > 0:
+                    logger.debug(f"更新成交量类型成功: {stock_code} {date} -> {volume_type}")
+                    return True
+                else:
+                    logger.warning(f"未找到要更新的记录: {stock_code} {date}")
+                    return False
+                
+        except Exception as e:
+            logger.error(f"更新成交量类型失败: {e}", exc_info=True)
+            return False
+    
+    def update_volume_type_batch(self, updates: List[tuple]) -> int:
+        """
+        批量更新成交量类型
+        
+        Args:
+            updates: 更新列表，每个元素为 (stock_code, date, volume_type)
+            
+        Returns:
+            更新的记录数
+        """
+        if not updates:
+            return 0
+        
+        try:
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                
+                sql = """
+                    UPDATE daily_chance 
+                    SET volume_type = %s
+                    WHERE stock_code = %s AND date = %s
+                """
+                
+                cursor.executemany(sql, [(vt, sc, d) for sc, d, vt in updates])
+                updated_count = cursor.rowcount
+                
+                logger.info(f"批量更新成交量类型成功: {updated_count} 条记录")
+                return updated_count
+                
+        except Exception as e:
+            logger.error(f"批量更新成交量类型失败: {e}", exc_info=True)
+            return 0
+    
     def _row_to_daily_chance(self, row: dict) -> DailyChance:
         """将数据库行转换为DailyChance对象"""
         return DailyChance(
@@ -199,6 +262,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             total_win_ratio_score=float(row['total_win_ratio_score']),
             support_price=float(row['support_price']) if row['support_price'] else None,
             pressure_price=float(row['pressure_price']) if row['pressure_price'] else None,
+            volume_type=row.get('volume_type'),
             created_at=row['created_at']
         )
 

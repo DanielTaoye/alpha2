@@ -31,4 +31,14 @@ class IDailyChanceRepository(ABC):
     def find_latest_date(self, stock_code: str) -> Optional[str]:
         """获取股票最新的数据日期"""
         pass
+    
+    @abstractmethod
+    def update_volume_type(self, stock_code: str, date: str, volume_type: str) -> bool:
+        """更新成交量类型"""
+        pass
+    
+    @abstractmethod
+    def update_volume_type_batch(self, updates: List[tuple]) -> int:
+        """批量更新成交量类型"""
+        pass
 
