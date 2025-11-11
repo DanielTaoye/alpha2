@@ -16,6 +16,7 @@ from interfaces.controllers.stock_controller import StockController
 from interfaces.controllers.kline_controller import KLineController
 from interfaces.controllers.analysis_controller import AnalysisController
 from interfaces.controllers.cr_point_controller import CRPointController
+from interfaces.controllers.daily_chance_controller import DailyChanceController
 from infrastructure.config.app_config import SERVER_CONFIG
 
 # 初始化日志
@@ -30,6 +31,7 @@ stock_controller = StockController()
 kline_controller = KLineController()
 analysis_controller = AnalysisController()
 cr_point_controller = CRPointController()
+daily_chance_controller = DailyChanceController()
 
 
 # ============ 路由定义 ============
@@ -74,6 +76,24 @@ def analyze_cr_points():
 def get_cr_points():
     """获取股票CR点列表"""
     return cr_point_controller.get_cr_points()
+
+
+@app.route('/api/daily_chance/sync_all', methods=['POST'])
+def sync_all_daily_chance():
+    """同步所有股票的每日机会数据"""
+    return daily_chance_controller.sync_all_stocks()
+
+
+@app.route('/api/daily_chance/sync', methods=['POST'])
+def sync_daily_chance():
+    """同步单个股票的每日机会数据"""
+    return daily_chance_controller.sync_stock()
+
+
+@app.route('/api/daily_chance', methods=['POST'])
+def get_daily_chance():
+    """获取每日机会数据"""
+    return daily_chance_controller.get_daily_chance()
 
 
 if __name__ == '__main__':
