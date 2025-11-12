@@ -7,6 +7,7 @@ let currentTableName = '';
 let availablePeriods = {};
 let chart = null;
 let currentAnalysisController = null;
+let volumeTypeMap = {}; // 存储成交量类型数据，key为日期字符串，value为成交量类型
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -327,6 +328,17 @@ async function loadStockData(stockCode, tableName, period) {
             console.error(`[${period}] 分析数据加载异常:`, err);
         });
 
+        // 如果是日K线，加载成交量类型数据
+        if (period === 'day') {
+            console.log(`[${period}] 开始加载成交量类型数据...`);
+            loadVolumeTypes(stockCode).catch(err => {
+                console.error(`[${period}] 成交量类型数据加载异常:`, err);
+            });
+        } else {
+            // 非日K线，清空成交量类型数据
+            volumeTypeMap = {};
+        }
+
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineResult.data.length}`);
         try {
             renderChart(klineResult.data, {}, period);
@@ -354,6 +366,50 @@ async function loadStockData(stockCode, tableName, period) {
                 </button>
             </div>
         `;
+    }
+}
+
+// 加载成交量类型数据
+async function loadVolumeTypes(stockCode) {
+    try {
+        console.log(`开始加载成交量类型数据: ${stockCode}`);
+        
+        const response = await fetch(`${API_BASE_URL}/daily_chance`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stockCode: stockCode
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (result.code !== 200) {
+            console.warn(`获取成交量类型数据失败: ${result.message}`);
+            return;
+        }
+
+        // 将数据转换为日期到成交量类型的映射
+        volumeTypeMap = {};
+        if (result.data && Array.isArray(result.data)) {
+            result.data.forEach(item => {
+                if (item.date && item.volumeType) {
+                    // 处理日期格式，确保是 YYYY-MM-DD 格式
+                    const dateStr = item.date.split(' ')[0];
+                    volumeTypeMap[dateStr] = item.volumeType;
+                }
+            });
+            console.log(`成交量类型数据加载成功，共 ${Object.keys(volumeTypeMap).length} 条记录`);
+        }
+    } catch (error) {
+        console.error('加载成交量类型数据失败:', error);
+        volumeTypeMap = {};
     }
 }
 
@@ -671,6 +727,37 @@ function renderChart(klineData, analysisData, period) {
                             result += `${param.seriesName}: ${param.value}<br/>`;
                         }
                     });
+                    
+                    // 显示成交量类型（仅日K线）
+                    if (period === 'day' && params[0] && params[0].name) {
+                        const dateStr = params[0].name;
+                        // 处理日期格式，可能是 "2025-09-23 00:00:00" 或 "2025-09-23"
+                        const dateOnly = dateStr.split(' ')[0];
+                        const volumeType = volumeTypeMap[dateOnly];
+                        if (volumeType) {
+                            // 将成交量类型列表格式化显示，每种类型换行
+                            const types = volumeType.split(',');
+                            const typeNames = {
+                                'A': 'A(前1日2-3倍)',
+                                'B': 'B(前3日均量2倍+)',
+                                'C': 'C(前5日均量2倍+)',
+                                'D': 'D(前5日ABC放量后1.2倍+)',
+                                'E': 'E(前1日及前5日均值4倍+)',
+                                'F': 'F(前5日ABCD放量后3倍+)',
+                                'G': 'G(前5日ABCD放量后0.7倍+)',
+                                'H': 'H(前5日ABCD放量后大于)',
+                                'X': 'X(前3日均量1.5倍+)',
+                                'Y': 'Y(前5日均量1.5倍+)',
+                                'Z': 'Z(前10日ABC放量+昨日1.3倍+今日1.08倍)'
+                            };
+                            result += `<br/><span style="color: #4a90e2; font-weight: bold;">成交量类型:</span>`;
+                            types.forEach(t => {
+                                const typeLabel = typeNames[t.trim()] || t.trim();
+                                result += `<br/><span style="color: #4a90e2; margin-left: 10px;">• ${typeLabel}</span>`;
+                            });
+                        }
+                    }
+                    
                     return result;
                 }
             },
