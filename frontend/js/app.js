@@ -8,6 +8,7 @@ let availablePeriods = {};
 let chart = null;
 let currentAnalysisController = null;
 let volumeTypeMap = {}; // 存储成交量类型数据，key为日期字符串，value为成交量类型
+let winRatioScoreMap = {}; // 存储赔率总分数据，key为日期字符串，value为total_win_ratio_score
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -335,8 +336,9 @@ async function loadStockData(stockCode, tableName, period) {
                 console.error(`[${period}] 成交量类型数据加载异常:`, err);
             });
         } else {
-            // 非日K线，清空成交量类型数据
+            // 非日K线，清空成交量类型和赔率总分数据
             volumeTypeMap = {};
+            winRatioScoreMap = {};
         }
 
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineResult.data.length}`);
@@ -395,21 +397,28 @@ async function loadVolumeTypes(stockCode) {
             return;
         }
 
-        // 将数据转换为日期到成交量类型的映射
+        // 将数据转换为日期到成交量类型和赔率总分的映射
         volumeTypeMap = {};
+        winRatioScoreMap = {};
         if (result.data && Array.isArray(result.data)) {
             result.data.forEach(item => {
-                if (item.date && item.volumeType) {
+                if (item.date) {
                     // 处理日期格式，确保是 YYYY-MM-DD 格式
                     const dateStr = item.date.split(' ')[0];
-                    volumeTypeMap[dateStr] = item.volumeType;
+                    if (item.volumeType) {
+                        volumeTypeMap[dateStr] = item.volumeType;
+                    }
+                    if (item.totalWinRatioScore !== undefined && item.totalWinRatioScore !== null) {
+                        winRatioScoreMap[dateStr] = item.totalWinRatioScore;
+                    }
                 }
             });
-            console.log(`成交量类型数据加载成功，共 ${Object.keys(volumeTypeMap).length} 条记录`);
+            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条`);
         }
     } catch (error) {
         console.error('加载成交量类型数据失败:', error);
         volumeTypeMap = {};
+        winRatioScoreMap = {};
     }
 }
 
@@ -728,11 +737,19 @@ function renderChart(klineData, analysisData, period) {
                         }
                     });
                     
-                    // 显示成交量类型（仅日K线）
+                    // 显示赔率总分和成交量类型（仅日K线）
                     if (period === 'day' && params[0] && params[0].name) {
                         const dateStr = params[0].name;
                         // 处理日期格式，可能是 "2025-09-23 00:00:00" 或 "2025-09-23"
                         const dateOnly = dateStr.split(' ')[0];
+                        
+                        // 显示赔率总分
+                        const winRatioScore = winRatioScoreMap[dateOnly];
+                        if (winRatioScore !== undefined && winRatioScore !== null) {
+                            result += `<br/><span style="color: #FFD700; font-weight: bold;">赔率总分: ${winRatioScore.toFixed(2)}</span>`;
+                        }
+                        
+                        // 显示成交量类型
                         const volumeType = volumeTypeMap[dateOnly];
                         if (volumeType) {
                             // 将成交量类型列表格式化显示，每种类型换行
