@@ -41,4 +41,14 @@ class IDailyChanceRepository(ABC):
     def update_volume_type_batch(self, updates: List[tuple]) -> int:
         """批量更新成交量类型"""
         pass
+    
+    @abstractmethod
+    def update_bullish_pattern_batch(self, updates: List[tuple]) -> int:
+        """批量更新多头组合"""
+        pass
+    
+    @abstractmethod
+    def update_bearish_pattern_batch(self, updates: List[tuple]) -> int:
+        """批量更新空头组合"""
+        pass
 

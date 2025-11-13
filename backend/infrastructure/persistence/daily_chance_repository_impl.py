@@ -23,9 +23,9 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     INSERT INTO daily_chance (
                         stock_code, stock_name, stock_nature, date, chance,
                         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
-                        support_price, pressure_price, volume_type, bullish_pattern
+                        support_price, pressure_price, volume_type, bullish_pattern, bearish_pattern
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     ) ON DUPLICATE KEY UPDATE
                         stock_name = VALUES(stock_name),
                         stock_nature = VALUES(stock_nature),
@@ -36,7 +36,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                         support_price = VALUES(support_price),
                         pressure_price = VALUES(pressure_price),
                         volume_type = VALUES(volume_type),
-                        bullish_pattern = VALUES(bullish_pattern)
+                        bullish_pattern = VALUES(bullish_pattern),
+                        bearish_pattern = VALUES(bearish_pattern)
                 """
                 
                 cursor.execute(sql, (
@@ -51,7 +52,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     daily_chance.support_price,
                     daily_chance.pressure_price,
                     daily_chance.volume_type,
-                    daily_chance.bullish_pattern
+                    daily_chance.bullish_pattern,
+                    daily_chance.bearish_pattern
                 ))
                 
                 logger.debug(f"保存每日机会数据成功: {daily_chance.stock_code} {daily_chance.date}")
@@ -74,9 +76,9 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     INSERT INTO daily_chance (
                         stock_code, stock_name, stock_nature, date, chance,
                         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
-                        support_price, pressure_price, volume_type, bullish_pattern
+                        support_price, pressure_price, volume_type, bullish_pattern, bearish_pattern
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     ) ON DUPLICATE KEY UPDATE
                         stock_name = VALUES(stock_name),
                         stock_nature = VALUES(stock_nature),
@@ -87,7 +89,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                         support_price = VALUES(support_price),
                         pressure_price = VALUES(pressure_price),
                         volume_type = VALUES(volume_type),
-                        bullish_pattern = VALUES(bullish_pattern)
+                        bullish_pattern = VALUES(bullish_pattern),
+                        bearish_pattern = VALUES(bearish_pattern)
                 """
                 
                 values = []
@@ -104,7 +107,8 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                         dc.support_price,
                         dc.pressure_price,
                         dc.volume_type,
-                        dc.bullish_pattern
+                        dc.bullish_pattern,
+                        dc.bearish_pattern
                     ))
                 
                 cursor.executemany(sql, values)
@@ -252,6 +256,39 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             logger.error(f"批量更新多头组合失败: {e}", exc_info=True)
             return 0
     
+    def update_bearish_pattern_batch(self, updates: List[tuple]) -> int:
+        """
+        批量更新空头组合
+        
+        Args:
+            updates: 更新列表，每个元素为 (stock_code, date, bearish_pattern)
+            
+        Returns:
+            更新的记录数
+        """
+        if not updates:
+            return 0
+        
+        try:
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                
+                sql = """
+                    UPDATE daily_chance 
+                    SET bearish_pattern = %s
+                    WHERE stock_code = %s AND date = %s
+                """
+                
+                cursor.executemany(sql, [(bp, sc, d) for sc, d, bp in updates])
+                updated_count = cursor.rowcount
+                
+                logger.info(f"批量更新空头组合成功: {updated_count} 条记录")
+                return updated_count
+                
+        except Exception as e:
+            logger.error(f"批量更新空头组合失败: {e}", exc_info=True)
+            return 0
+    
     def update_volume_type_batch(self, updates: List[tuple]) -> int:
         """
         批量更新成交量类型
@@ -301,6 +338,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             pressure_price=float(row['pressure_price']) if row['pressure_price'] else None,
             volume_type=row.get('volume_type'),
             bullish_pattern=row.get('bullish_pattern'),
+            bearish_pattern=row.get('bearish_pattern'),
             created_at=row['created_at']
         )
 

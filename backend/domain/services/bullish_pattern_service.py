@@ -46,8 +46,19 @@ class BullishPatternService:
             
             # 找到目标日期的索引
             target_idx = None
+            target_date_only = target_date.date() if isinstance(target_date, datetime) else target_date
+            
             for i, data in enumerate(daily_data):
-                if data['date'].date() == target_date.date():
+                data_date = data['date']
+                # 统一处理日期类型
+                if isinstance(data_date, datetime):
+                    data_date_only = data_date.date()
+                elif isinstance(data_date, type(target_date_only)):
+                    data_date_only = data_date
+                else:
+                    continue
+                
+                if data_date_only == target_date_only:
                     target_idx = i
                     break
             
@@ -129,7 +140,7 @@ class BullishPatternService:
             stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
         )
         
-        # 今日为振幅5%以上的中阳线
+        # 今日为振幅5%以上的中阳线或大阳线
         today_amplitude = BullishPatternService._calculate_amplitude(
             today['high'], today['low'], prev_day['close']
         )
@@ -138,7 +149,7 @@ class BullishPatternService:
         )
         
         if (prev_pattern == "十字星" and prev_amplitude >= 5.0 and
-            today_pattern in ["中阳线"] and today_amplitude >= 5.0):
+            today_pattern in ["中阳线", "大阳线"] and today_amplitude >= 5.0):
             return "十字星+中阳线"
         
         return None
@@ -183,7 +194,7 @@ class BullishPatternService:
             stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
         )
         
-        # 今日为振幅6%以上的中阳线
+        # 今日为振幅6%以上的中阳线或大阳线
         today_amplitude = BullishPatternService._calculate_amplitude(
             today['high'], today['low'], prev_day['close']
         )
@@ -192,7 +203,7 @@ class BullishPatternService:
         )
         
         if (prev_pattern == "触底反弹阴线" and prev_amplitude >= 5.0 and
-            today_pattern == "中阳线" and today_amplitude >= 6.0):
+            today_pattern in ["中阳线", "大阳线"] and today_amplitude >= 6.0):
             return "触底反弹阴线+中阳"
         
         return None
@@ -225,20 +236,29 @@ class BullishPatternService:
     
     @staticmethod
     def _check_pattern5(stock_code: str, prev_day: Optional[Dict], today: Dict) -> Optional[str]:
-        """5. 刺透"""
+        """
+        5. 刺透
+        
+        定义：
+        - 前一天是>5%(B>=4%）以上跌幅的阴线（不考虑K线形态识别服务的中阴线定义）
+        - 后一天为阳线收盘，且收盘价>前一天（开盘价+收盘价）/2
+        """
         if not prev_day:
             return None
         
-        # 前一天是>5%(B>=4%）以上跌幅的中阴线
+        # 前一天是>5%(B>=4%）以上跌幅的阴线
         prev_abc = KLinePatternService.calculate_abc(
             prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
         )
+        
+        # 计算跌幅：(收盘价-开盘价)/开盘价
         prev_change = (prev_day['close'] - prev_day['open']) / prev_day['open'] if prev_day['open'] > 0 else 0
         prev_change_pct = abs(prev_change) * 100
         
-        prev_pattern = KLinePatternService.identify_pattern(
-            stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
-        )
+        # 前一天必须是阴线（收盘价 < 开盘价）
+        is_prev_negative = prev_day['close'] < prev_day['open']
+        
+        # B/最低价 >= 4%
         prev_b_ratio = (prev_abc.b / prev_day['low']) * 100 if prev_day['low'] > 0 else 0
         
         # 后一天为阳线收盘，且收盘价>前一天（开盘价+收盘价）/2
@@ -246,7 +266,13 @@ class BullishPatternService:
         mid_price = (prev_day['open'] + prev_day['close']) / 2
         is_piercing = today['close'] > mid_price
         
-        if (prev_pattern == "中阴线" and prev_change_pct > 5.0 and prev_b_ratio >= 4.0 and
+        # 条件检查：
+        # 1. 前一天是阴线（收盘价 < 开盘价）
+        # 2. 前一天跌幅 > 5%
+        # 3. 前一天B/最低价 >= 4%
+        # 4. 今日是阳线
+        # 5. 今日收盘价 > 前一天（开盘价+收盘价）/2
+        if (is_prev_negative and prev_change_pct > 5.0 and prev_b_ratio >= 4.0 and
             is_today_positive and is_piercing):
             return "刺透"
         
@@ -302,19 +328,28 @@ class BullishPatternService:
     
     @staticmethod
     def _check_pattern7(stock_code: str, table_name: str, daily_data: List[Dict], target_idx: int) -> Optional[str]:
-        """7. 一阳穿三阴"""
+        """
+        7. 一阳穿三阴
+        
+        定义：
+        - 前2日或前3日为连续阴线（今天往前看2-3天）
+        - 合计2天或3天累计跌幅大于6%（从连续阴线的起始日到结束日的累计跌幅）
+        - 成交量呈现连续缩量（即后一日成交量＜前一日交易量）
+        - 当日出现一根放量(XY)的阳线
+        - 当前价大于前三日的最高价
+        """
         if target_idx < 2:
             return None
         
-        # 检查前2日或前3日是否为连续阴线
+        # 检查前2日或前3日是否为连续阴线（今天往前看2-3天）
         start_idx = max(0, target_idx - 3)
         consecutive_negative_days = 0
-        total_decline = 0.0
         volumes = []
         max_high = 0.0
-        first_negative_idx = None
+        first_negative_idx = None  # 连续阴线的起始日（最早的那一天）
+        last_negative_idx = None   # 连续阴线的结束日（最晚的那一天，即昨天）
         
-        # 从目标日期往前找连续阴线
+        # 从目标日期往前找连续阴线（从昨天开始往前找）
         for i in range(target_idx - 1, start_idx - 1, -1):
             if i < 0:
                 break
@@ -323,12 +358,9 @@ class BullishPatternService:
             
             if is_negative:
                 if first_negative_idx is None:
-                    first_negative_idx = i
+                    first_negative_idx = i  # 记录连续阴线的起始日（最早的那一天）
+                last_negative_idx = i  # 更新连续阴线的结束日（最晚的那一天）
                 consecutive_negative_days += 1
-                if i > 0:
-                    prev_close = daily_data[i-1]['close']
-                    decline = (day['close'] - prev_close) / prev_close if prev_close > 0 else 0
-                    total_decline += abs(decline) * 100
                 max_high = max(max_high, day['high'])
                 volumes.insert(0, day.get('volume', 0))  # 从前往后插入，保持时间顺序
             else:
@@ -336,7 +368,32 @@ class BullishPatternService:
                 if consecutive_negative_days > 0:
                     break
         
-        if consecutive_negative_days < 2 or total_decline <= 6.0:
+        # 必须至少有2天连续阴线
+        if consecutive_negative_days < 2:
+            return None
+        
+        # 计算累计跌幅：从连续阴线的起始日到结束日的累计跌幅
+        # 起始日是first_negative_idx，结束日是last_negative_idx
+        # 累计跌幅 = (结束日收盘价 - 起始日前一日收盘价) / 起始日前一日收盘价 * 100
+        if first_negative_idx is None or last_negative_idx is None:
+            return None
+        
+        if first_negative_idx > 0:
+            # 起始日前一日的收盘价
+            start_prev_close = daily_data[first_negative_idx - 1]['close']
+            # 结束日的收盘价
+            end_close = daily_data[last_negative_idx]['close']
+            # 计算累计跌幅
+            if start_prev_close > 0:
+                total_decline = abs((end_close - start_prev_close) / start_prev_close) * 100
+            else:
+                return None
+        else:
+            # 如果起始日已经是第一天，无法计算累计跌幅
+            return None
+        
+        # 累计跌幅必须大于6%
+        if total_decline <= 6.0:
             return None
         
         # 成交量呈现连续缩量（后一日成交量<前一日交易量）
@@ -401,8 +458,22 @@ class BullishPatternService:
                 
                 daily_list = []
                 for i, row in enumerate(results):
+                    # 统一处理日期类型
+                    date_value = row['date']
+                    if isinstance(date_value, datetime):
+                        date_obj = date_value
+                    else:
+                        # 如果是date类型或其他格式，转换为datetime
+                        try:
+                            if isinstance(date_value, str):
+                                date_obj = datetime.strptime(date_value.split()[0], '%Y-%m-%d')
+                            else:
+                                date_obj = datetime.combine(date_value, datetime.min.time())
+                        except:
+                            date_obj = date_value
+                    
                     daily_item = {
-                        'date': row['date'],
+                        'date': date_obj,
                         'open': float(row['open']) if row['open'] else 0,
                         'close': float(row['close']) if row['close'] else 0,
                         'high': float(row['high']) if row['high'] else 0,
