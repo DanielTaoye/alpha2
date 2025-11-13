@@ -349,10 +349,13 @@ async function loadStockData(stockCode, tableName, period) {
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
             
-            // 自动加载CR点数据并显示（所有周期都支持）
-            loadCRPoints().catch(err => {
-                console.error('加载CR点数据失败:', err);
-            });
+            // 实时计算并加载CR点数据（仅日K线支持）
+            if (period === 'day') {
+                console.log('[日K线] 开始实时计算C点...');
+                analyzeCRPointsAuto().catch(err => {
+                    console.error('实时计算C点失败:', err);
+                });
+            }
         } catch (error) {
             console.error(`[${period}] K线渲染失败:`, error);
             throw error;
@@ -739,6 +742,15 @@ function renderChart(klineData, analysisData, period) {
                             result += `最高: ${param.value[4]}<br/>`;
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
+                        } else if (param.seriesName === 'C点') {
+                            // C点显示得分信息
+                            if (param.data && param.data.cPointInfo) {
+                                result += `<span style="color: #ff4444; font-weight: bold;">⚫ C点触发</span><br/>`;
+                                result += `<span style="color: #ffa500;">得分: ${param.data.cPointInfo.score.toFixed(2)}</span><br/>`;
+                                result += `<span style="color: #888; font-size: 11px;">${param.data.cPointInfo.strategy}</span><br/>`;
+                            } else {
+                                result += `<span style="color: #ff4444;">⚫ C点</span><br/>`;
+                            }
                         } else {
                             result += `${param.seriesName}: ${param.value}<br/>`;
                         }
@@ -1017,7 +1029,49 @@ function updateAnalysisInfo(analysisData, latestData) {
 let crPointsData = { c_points: [], r_points: [] };
 let showCRPoints = true; // 默认显示CR点
 
-// 分析CR点
+// 自动实时计算CR点（不显示提示）
+async function analyzeCRPointsAuto() {
+    if (!currentStockCode || !currentTableName) {
+        return;
+    }
+    
+    const stockSelect = document.getElementById('stockSelect');
+    const selectedOption = stockSelect.options[stockSelect.selectedIndex];
+    const stockName = selectedOption.dataset.name || '';
+    
+    try {
+        console.log('[实时计算] 开始计算C点...', { stockCode: currentStockCode, stockName });
+        
+        const response = await fetch(`${API_BASE_URL}/cr_points/analyze`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stockCode: currentStockCode,
+                stockName: stockName,
+                tableName: currentTableName,
+                period: 'day'
+            })
+        });
+        
+        const result = await response.json();
+        console.log('[实时计算] C点计算结果:', result);
+        
+        if (result.code === 200) {
+            console.log(`[实时计算] 找到C点: ${result.data.c_points_count}个`);
+            
+            // 重新加载CR点数据并显示
+            await loadCRPoints();
+        } else {
+            console.error('[实时计算] C点计算失败:', result.message);
+        }
+    } catch (error) {
+        console.error('[实时计算] C点计算失败:', error);
+    }
+}
+
+// 手动分析CR点（带提示）
 async function analyzeCRPoints() {
     if (!currentStockCode || !currentTableName) {
         alert('请先选择股票');
@@ -1045,8 +1099,8 @@ async function analyzeCRPoints() {
             body: JSON.stringify({
                 stockCode: currentStockCode,
                 stockName: stockName,
-                tableName: currentTableName,  // 传递实际的表名
-                period: 'day'  // 目前只支持日K线
+                tableName: currentTableName,
+                period: 'day'
             })
         });
         
@@ -1054,7 +1108,7 @@ async function analyzeCRPoints() {
         console.log('CR点分析结果:', result);
         
         if (result.code === 200) {
-            alert(`CR点分析完成！\n找到C点(买入点): ${result.data.c_points_count}个\n找到R点(卖出点): ${result.data.r_points_count}个`);
+            alert(`CR点分析完成！\n找到C点(买入点): ${result.data.c_points_count}个`);
             
             // 重新加载CR点数据并显示
             await loadCRPoints();
@@ -1154,6 +1208,11 @@ function updateChartWithCRPoints() {
                 if (index !== undefined && index >= 0) {
                     return {
                         value: [index, point.lowPrice],
+                        cPointInfo: {
+                            score: point.score || 0,
+                            strategy: point.strategyName || '策略一',
+                            date: point.triggerDate
+                        },
                         itemStyle: {
                             color: '#ff0000',
                             borderColor: '#fff',
@@ -1186,10 +1245,11 @@ function updateChartWithCRPoints() {
             }
         }
         
-        // 添加R点标记（绿色，在K线上方）
+        // R点暂时不显示（等待后续需求）
+        /*
         if (crPointsData.r_points && crPointsData.r_points.length > 0) {
             const rPointData = crPointsData.r_points.map(point => {
-                const dateStr = point.triggerDate; // CR点日期格式是 'YYYY-MM-DD'
+                const dateStr = point.triggerDate;
                 const index = dateMap.get(dateStr);
                 if (index !== undefined && index >= 0) {
                     return {
@@ -1225,6 +1285,7 @@ function updateChartWithCRPoints() {
                 currentSeries.push(rPointSeries);
             }
         }
+        */
     }
     
     chart.setOption({
@@ -1237,8 +1298,8 @@ function updateCRPointsStats() {
     const statsEl = document.getElementById('crPointsStats');
     if (statsEl) {
         const cCount = crPointsData.c_points ? crPointsData.c_points.length : 0;
-        const rCount = crPointsData.r_points ? crPointsData.r_points.length : 0;
-        statsEl.textContent = `C点: ${cCount} | R点: ${rCount}`;
+        // 只显示C点数量
+        statsEl.textContent = `C点: ${cCount}`;
     }
 }
 

@@ -18,6 +18,11 @@ class IDailyChanceRepository(ABC):
         pass
     
     @abstractmethod
+    def find_by_stock_and_date(self, stock_code: str, date: str) -> Optional[DailyChance]:
+        """根据股票代码和日期查询单条数据"""
+        pass
+    
+    @abstractmethod
     def find_by_stock_code(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[DailyChance]:
         """根据股票代码查询"""
         pass

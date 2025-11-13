@@ -34,18 +34,20 @@ class CRPointService:
         r_points = []
         
         for kline in kline_data:
-            # 计算ABC
-            abc = self.strategy_service.calculate_abc(
-                kline.open,
-                kline.high,
-                kline.low,
-                kline.close
+            # 检查C点策略1（新逻辑：基于赔率分+胜率分）
+            is_c_point, c_score, c_strategy = self.strategy_service.check_c_point_strategy_1(
+                stock_code, 
+                kline.time
             )
             
-            # 检查C点策略1
-            is_c_point, c_score, c_strategy = self.strategy_service.check_c_point_strategy_1(abc, kline.low)
-            
             if is_c_point:
+                # 计算ABC（用于记录）
+                abc = self.strategy_service.calculate_abc(
+                    kline.open,
+                    kline.high,
+                    kline.low,
+                    kline.close
+                )
                 cr_point = CRPoint(
                     stock_code=stock_code,
                     stock_name=stock_name,
@@ -67,8 +69,14 @@ class CRPointService:
                 if self.cr_repository.save(cr_point):
                     c_points.append(cr_point)
             
-            # 检查R点策略1（可选）
-            is_r_point, r_score, r_strategy = self.strategy_service.check_r_point_strategy_1(abc, kline.high)
+            # 检查R点策略1（R点逻辑稍后给出，暂时保留原逻辑）
+            abc_r = self.strategy_service.calculate_abc(
+                kline.open,
+                kline.high,
+                kline.low,
+                kline.close
+            )
+            is_r_point, r_score, r_strategy = self.strategy_service.check_r_point_strategy_1(abc_r, kline.high)
             
             if is_r_point:
                 cr_point = CRPoint(
@@ -82,9 +90,9 @@ class CRPointService:
                     low_price=kline.low,
                     close_price=kline.close,
                     volume=kline.volume,
-                    a_value=abc.a,
-                    b_value=abc.b,
-                    c_value=abc.c,
+                    a_value=abc_r.a,
+                    b_value=abc_r.b,
+                    c_value=abc_r.c,
                     score=r_score,
                     strategy_name=r_strategy
                 )

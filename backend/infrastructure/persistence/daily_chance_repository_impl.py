@@ -120,6 +120,27 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             logger.error(f"批量保存每日机会数据失败: {e}", exc_info=True)
             return 0
     
+    def find_by_stock_and_date(self, stock_code: str, date: str) -> Optional[DailyChance]:
+        """根据股票代码和日期查询单条数据"""
+        try:
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                
+                sql = """
+                    SELECT * FROM daily_chance 
+                    WHERE stock_code = %s AND date = %s
+                """
+                cursor.execute(sql, (stock_code, date))
+                
+                row = cursor.fetchone()
+                if row:
+                    return self._row_to_daily_chance(row)
+                return None
+                
+        except Exception as e:
+            logger.error(f"查询每日机会数据失败: {e}", exc_info=True)
+            return None
+    
     def find_by_stock_code(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[DailyChance]:
         """根据股票代码查询"""
         try:
