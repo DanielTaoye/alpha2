@@ -9,6 +9,7 @@ let chart = null;
 let currentAnalysisController = null;
 let volumeTypeMap = {}; // 存储成交量类型数据，key为日期字符串，value为成交量类型
 let winRatioScoreMap = {}; // 存储赔率总分数据，key为日期字符串，value为total_win_ratio_score
+let bullishPatternMap = {}; // 存储多头组合数据，key为日期字符串，value为多头组合
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -336,9 +337,10 @@ async function loadStockData(stockCode, tableName, period) {
                 console.error(`[${period}] 成交量类型数据加载异常:`, err);
             });
         } else {
-            // 非日K线，清空成交量类型和赔率总分数据
+            // 非日K线，清空成交量类型、赔率总分和多头组合数据
             volumeTypeMap = {};
             winRatioScoreMap = {};
+            bullishPatternMap = {};
         }
 
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineResult.data.length}`);
@@ -397,9 +399,10 @@ async function loadVolumeTypes(stockCode) {
             return;
         }
 
-        // 将数据转换为日期到成交量类型和赔率总分的映射
+        // 将数据转换为日期到成交量类型、赔率总分和多头组合的映射
         volumeTypeMap = {};
         winRatioScoreMap = {};
+        bullishPatternMap = {};
         if (result.data && Array.isArray(result.data)) {
             result.data.forEach(item => {
                 if (item.date) {
@@ -411,14 +414,18 @@ async function loadVolumeTypes(stockCode) {
                     if (item.totalWinRatioScore !== undefined && item.totalWinRatioScore !== null) {
                         winRatioScoreMap[dateStr] = item.totalWinRatioScore;
                     }
+                    if (item.bullishPattern) {
+                        bullishPatternMap[dateStr] = item.bullishPattern;
+                    }
                 }
             });
-            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条`);
+            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条，多头组合: ${Object.keys(bullishPatternMap).length} 条`);
         }
     } catch (error) {
         console.error('加载成交量类型数据失败:', error);
         volumeTypeMap = {};
         winRatioScoreMap = {};
+        bullishPatternMap = {};
     }
 }
 
@@ -737,7 +744,7 @@ function renderChart(klineData, analysisData, period) {
                         }
                     });
                     
-                    // 显示赔率总分和成交量类型（仅日K线）
+                    // 显示赔率总分、成交量类型和多头组合（仅日K线）
                     if (period === 'day' && params[0] && params[0].name) {
                         const dateStr = params[0].name;
                         // 处理日期格式，可能是 "2025-09-23 00:00:00" 或 "2025-09-23"
@@ -771,6 +778,18 @@ function renderChart(klineData, analysisData, period) {
                             types.forEach(t => {
                                 const typeLabel = typeNames[t.trim()] || t.trim();
                                 result += `<br/><span style="color: #4a90e2; margin-left: 10px;">• ${typeLabel}</span>`;
+                            });
+                        }
+                        
+                        // 显示多头组合
+                        const bullishPattern = bullishPatternMap[dateOnly];
+                        if (bullishPattern) {
+                            // 将多头组合列表格式化显示，每种组合换行
+                            const patterns = bullishPattern.split(',');
+                            result += `<br/><span style="color: #26a69a; font-weight: bold;">多头组合:</span>`;
+                            patterns.forEach(p => {
+                                const patternLabel = p.trim();
+                                result += `<br/><span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span>`;
                             });
                         }
                     }

@@ -18,7 +18,8 @@ class DailyChance:
     total_win_ratio_score: float = 0.0  # 赔率总分
     support_price: Optional[float] = None  # 支撑价格
     pressure_price: Optional[float] = None  # 压力价格
-    volume_type: Optional[str] = None  # 成交量类型(A/B/C/D)
+    volume_type: Optional[str] = None  # 成交量类型(A/B/C/D/E/F/G/H/X/Y/Z)
+    bullish_pattern: Optional[str] = None  # 多头组合
     created_at: Optional[datetime] = None  # 创建时间
     
     def to_dict(self) -> dict:
@@ -36,6 +37,7 @@ class DailyChance:
             'supportPrice': self.support_price,
             'pressurePrice': self.pressure_price,
             'volumeType': self.volume_type,
+            'bullishPattern': self.bullish_pattern,
             'createdAt': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
         }
 
