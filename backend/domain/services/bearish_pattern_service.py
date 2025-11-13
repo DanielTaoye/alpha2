@@ -607,11 +607,18 @@ class BearishPatternService:
     
     @staticmethod
     def _check_pattern13(stock_code: str, daily_data: List[Dict], target_idx: int) -> Optional[str]:
-        """13. 吞没阴线（二阴或三阴）吞一根阳线"""
+        """
+        13. 吞没阴线（二阴或三阴）吞一根阳线
+        
+        逻辑：
+        - 从今天往前看最多3天，寻找符合条件的阳线（B>3%且涨幅>5%）
+        - 从阳线之后到今天的区间内，检查是否有连续的1-3根阴线
+        - 今天（最后一根阴线）的收盘价必须跌穿起始阳线的开盘价
+        """
         if target_idx < 2:
             return None
         
-        # 往前找B>3%且涨幅>5%的阳线
+        # 往前找B>3%且涨幅>5%的阳线（从今天往前看最多3天）
         start_positive_idx = None
         for i in range(target_idx - 1, max(0, target_idx - 4), -1):
             if i < 0:
@@ -635,20 +642,32 @@ class BearishPatternService:
         if start_positive_idx is None:
             return None
         
-        # 之后1-3根阴线跌穿起始阳线的开盘价
+        # 从阳线之后到今天的区间内，检查是否有连续的1-3根阴线
         start_positive_open = daily_data[start_positive_idx]['open']
         negative_count = 0
         
+        # 统计从阳线之后到今天的连续阴线数量
         for i in range(start_positive_idx + 1, target_idx + 1):
             if i >= len(daily_data):
                 break
             day = daily_data[i]
             is_negative = day['close'] < day['open']
+            
             if is_negative:
                 negative_count += 1
-                if day['close'] < start_positive_open:
-                    if 1 <= negative_count <= 3:
-                        return "吞没阴线（二阴或三阴）吞一根阳线"
+            else:
+                # 如果遇到非阴线，且已经有连续阴线，则停止检查
+                if negative_count > 0:
+                    break
+        
+        # 检查条件：
+        # 1. 有1-3根连续阴线
+        # 2. 今天（最后一根）必须是阴线且跌穿起始阳线的开盘价
+        if 1 <= negative_count <= 3:
+            today = daily_data[target_idx]
+            is_today_negative = today['close'] < today['open']
+            if is_today_negative and today['close'] < start_positive_open:
+                return "吞没阴线（二阴或三阴）吞一根阳线"
         
         return None
     
