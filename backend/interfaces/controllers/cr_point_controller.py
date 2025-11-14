@@ -46,8 +46,10 @@ class CRPointController:
             
             logger.info(f"开始分析CR点: {stock_code} {stock_name} 表:{table_name} 周期:{period}")
             
-            # 获取K线数据
-            kline_data_list = self.kline_service.get_kline_data(table_name, period)
+            # 获取K线数据及技术指标
+            result = self.kline_service.get_kline_data(table_name, period)
+            kline_data_list = result.get('kline_data', [])
+            macd_data = result.get('macd', {})
             
             if not kline_data_list:
                 return jsonify(ResponseBuilder.error('K线数据为空')), 404
@@ -71,9 +73,12 @@ class CRPointController:
                 kline_objects.append(kline_obj)
             
             # 实时分析CR点（不保存）
-            result = self.cr_service.analyze_cr_points(stock_code, stock_name, kline_objects)
+            cr_result = self.cr_service.analyze_cr_points(stock_code, stock_name, kline_objects)
             
-            return jsonify(ResponseBuilder.success(result, f'CR点实时分析完成，发现C点{result["c_points_count"]}个，R点{result["r_points_count"]}个')), 200
+            # 将MACD数据添加到返回结果中
+            cr_result['macd'] = macd_data
+            
+            return jsonify(ResponseBuilder.success(cr_result, f'CR点实时分析完成，发现C点{cr_result["c_points_count"]}个，R点{cr_result["r_points_count"]}个')), 200
             
         except Exception as e:
             logger.error(f"分析CR点失败: {e}", exc_info=True)

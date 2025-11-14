@@ -31,16 +31,19 @@ class KLineController:
             return jsonify(ResponseBuilder.error(str(e))), 500
     
     def get_kline_data(self):
-        """获取K线数据"""
+        """获取K线数据及技术指标"""
         try:
             data = request.json
             table_name = data.get('table_name')
             period_type = data.get('period_type', 'day')
             
             logger.info(f"收到请求: 获取K线数据, 表名={table_name}, 周期={period_type}")
-            kline_data = self.kline_service.get_kline_data(table_name, period_type)
-            logger.info(f"成功返回K线数据，共{len(kline_data)}条记录")
-            return jsonify(ResponseBuilder.success(kline_data))
+            result = self.kline_service.get_kline_data(table_name, period_type)
+            
+            # result现在是一个字典，包含kline_data和macd
+            kline_count = len(result.get('kline_data', []))
+            logger.info(f"成功返回K线数据，共{kline_count}条记录，已附带MACD指标")
+            return jsonify(ResponseBuilder.success(result))
         
         except Exception as e:
             logger.error(f"获取K线数据失败: 表名={table_name}, 周期={period_type}, 错误={str(e)}", exc_info=True)

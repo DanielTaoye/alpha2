@@ -312,7 +312,11 @@ async function loadStockData(stockCode, tableName, period) {
             throw new Error(klineResult.message);
         }
 
-        if (!klineResult.data || klineResult.data.length === 0) {
+        // 适配新的返回格式：data现在包含kline_data和macd
+        const klineData = klineResult.data.kline_data || klineResult.data;
+        const macdData = klineResult.data.macd || null;
+        
+        if (!klineData || klineData.length === 0) {
             document.getElementById('mainChart').innerHTML = `
                 <div class="error">
                     <p>📊 暂无${getPeriodName(period)}数据</p>
@@ -325,8 +329,14 @@ async function loadStockData(stockCode, tableName, period) {
             return;
         }
 
+        // 保存MACD数据供图表使用
+        if (macdData) {
+            window.currentMACDData = macdData;
+            console.log(`[${period}] ✅ MACD数据已加载`, macdData);
+        }
+
         console.log(`[${period}] ✅ 立即启动分析数据加载（并行）`);
-        const analysisPromise = loadAnalysisData(stockCode, period, klineResult.data).catch(err => {
+        const analysisPromise = loadAnalysisData(stockCode, period, klineData).catch(err => {
             console.error(`[${period}] 分析数据加载异常:`, err);
         });
 
@@ -343,9 +353,9 @@ async function loadStockData(stockCode, tableName, period) {
             bullishPatternMap = {};
         }
 
-        console.log(`[${period}] 开始渲染K线，数据点数: ${klineResult.data.length}`);
+        console.log(`[${period}] 开始渲染K线，数据点数: ${klineData.length}`);
         try {
-            renderChart(klineResult.data, {}, period);
+            renderChart(klineData, {}, period);
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
             
@@ -705,6 +715,12 @@ function renderChart(klineData, analysisData, period) {
         const values = klineData.map(item => [item.open, item.close, item.low, item.high]);
         const volumes = klineData.map(item => item.volume);
         
+        // 使用后端返回的MACD数据
+        const macdData = window.currentMACDData || { dif: [], dea: [], macd: [] };
+        if (window.currentMACDData) {
+            console.log(`[${period}] 使用后端计算的MACD - DIF数:${macdData.dif.length}, DEA数:${macdData.dea.length}, MACD数:${macdData.macd.length}`);
+        }
+        
         console.log(`[${period}] 数据准备完成 - 日期数:${dates.length}, K线数:${values.length}, 成交量数:${volumes.length}`);
 
         const latestData = klineData[klineData.length - 1] || {};
@@ -846,6 +862,28 @@ function renderChart(klineData, analysisData, period) {
                                 result += `<br/><span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span>`;
                             });
                         }
+                        
+                        // 显示MACD指标
+                        if (macdData && params[0] && params[0].dataIndex !== undefined) {
+                            const dataIndex = params[0].dataIndex;
+                            const dif = macdData.dif[dataIndex];
+                            const dea = macdData.dea[dataIndex];
+                            const macd = macdData.macd[dataIndex];
+                            
+                            if (dif !== null || dea !== null || macd !== null) {
+                                result += `<br/><span style="color: #8e44ad; font-weight: bold;">MACD指标:</span>`;
+                                if (dif !== null) {
+                                    result += `<br/><span style="color: #3498db; margin-left: 10px;">DIF: ${dif.toFixed(4)}</span>`;
+                                }
+                                if (dea !== null) {
+                                    result += `<br/><span style="color: #e67e22; margin-left: 10px;">DEA: ${dea.toFixed(4)}</span>`;
+                                }
+                                if (macd !== null) {
+                                    const macdColor = macd >= 0 ? '#e74c3c' : '#2ecc71';
+                                    result += `<br/><span style="color: ${macdColor}; margin-left: 10px;">MACD: ${macd.toFixed(4)}</span>`;
+                                }
+                            }
+                        }
                     }
                     
                     return result;
@@ -855,14 +893,20 @@ function renderChart(klineData, analysisData, period) {
                 {
                     left: '8%',
                     right: '8%',
-                    top: '12%',
-                    height: '52%'
+                    top: '8%',
+                    height: '48%'
                 },
                 {
                     left: '8%',
                     right: '8%',
-                    top: '72%',
-                    height: '18%'
+                    top: '60%',
+                    height: '12%'
+                },
+                {
+                    left: '8%',
+                    right: '8%',
+                    top: '76%',
+                    height: '14%'
                 }
             ],
             xAxis: [
@@ -897,6 +941,27 @@ function renderChart(klineData, analysisData, period) {
                     splitLine: { show: false },
                     min: 'dataMin',
                     max: 'dataMax'
+                },
+                {
+                    type: 'category',
+                    gridIndex: 2,
+                    data: dates,
+                    scale: true,
+                    boundaryGap: false,
+                    axisLine: { lineStyle: { color: '#4a90e2' } },
+                    axisLabel: {
+                        color: '#888',
+                        formatter: function(value) {
+                            if (period === '30min') {
+                                return value.substring(5, 16);
+                            } else {
+                                return value.substring(0, 10);
+                            }
+                        }
+                    },
+                    splitLine: { show: false },
+                    min: 'dataMin',
+                    max: 'dataMax'
                 }
             ],
             yAxis: [
@@ -924,20 +989,35 @@ function renderChart(klineData, analysisData, period) {
                             color: '#2a3f5f'
                         }
                     }
+                },
+                {
+                    scale: true,
+                    gridIndex: 2,
+                    splitNumber: 3,
+                    axisLine: { lineStyle: { color: '#4a90e2' } },
+                    axisLabel: { 
+                        color: '#888',
+                        fontSize: 10
+                    },
+                    splitLine: {
+                        lineStyle: {
+                            color: '#2a3f5f'
+                        }
+                    }
                 }
             ],
             dataZoom: [
                 {
                     type: 'inside',
-                    xAxisIndex: [0, 1],
+                    xAxisIndex: [0, 1, 2],
                     start: calculateStartPercent(dates.length, period),
                     end: 100
                 },
                 {
                     show: true,
-                    xAxisIndex: [0, 1],
+                    xAxisIndex: [0, 1, 2],
                     type: 'slider',
-                    bottom: '2%',
+                    bottom: '1%',
                     start: calculateStartPercent(dates.length, period),
                     end: 100,
                     backgroundColor: '#1e2a4a',
@@ -981,6 +1061,50 @@ function renderChart(klineData, analysisData, period) {
                             return values[dataIndex][1] > values[dataIndex][0] ? '#ef5350' : '#26a69a';
                         }
                     }
+                },
+                // MACD DIF线（快线）
+                {
+                    name: 'DIF',
+                    type: 'line',
+                    xAxisIndex: 2,
+                    yAxisIndex: 2,
+                    data: macdData.dif,
+                    smooth: false,
+                    lineStyle: {
+                        color: '#3498db',
+                        width: 1.5
+                    },
+                    symbol: 'none',
+                    z: 5
+                },
+                // MACD DEA线（慢线/信号线）
+                {
+                    name: 'DEA',
+                    type: 'line',
+                    xAxisIndex: 2,
+                    yAxisIndex: 2,
+                    data: macdData.dea,
+                    smooth: false,
+                    lineStyle: {
+                        color: '#e67e22',
+                        width: 1.5
+                    },
+                    symbol: 'none',
+                    z: 5
+                },
+                // MACD柱状图
+                {
+                    name: 'MACD',
+                    type: 'bar',
+                    xAxisIndex: 2,
+                    yAxisIndex: 2,
+                    data: macdData.macd,
+                    itemStyle: {
+                        color: function(params) {
+                            return params.value >= 0 ? '#e74c3c' : '#2ecc71';
+                        }
+                    },
+                    barWidth: '60%'
                 }
             ]
         };
@@ -1101,7 +1225,13 @@ async function analyzeCRPointsAuto() {
         console.log('[实时计算] C点计算结果:', result);
         
         if (result.code === 200) {
-            console.log(`[实时计算] 找到C点: ${result.data.c_points_count}个`);
+            console.log(`[实时计算] 找到C点: ${result.data.c_points_count}个, R点: ${result.data.r_points_count}个`);
+            
+            // 保存MACD数据（如果有）
+            if (result.data.macd) {
+                window.currentMACDData = result.data.macd;
+                console.log('[实时计算] MACD数据已更新');
+            }
             
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
@@ -1153,6 +1283,12 @@ async function analyzeCRPoints() {
             const cCount = result.data.c_points_count || 0;
             const rCount = result.data.r_points_count || 0;
             alert(`CR点分析完成！\nC点(买入信号): ${cCount}个\nR点(卖出信号): ${rCount}个`);
+            
+            // 保存MACD数据（如果有）
+            if (result.data.macd) {
+                window.currentMACDData = result.data.macd;
+                console.log('MACD数据已更新');
+            }
             
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
