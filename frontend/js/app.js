@@ -742,12 +742,35 @@ function renderChart(klineData, analysisData, period) {
                             result += `最高: ${param.value[4]}<br/>`;
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
-                        } else if (param.seriesName === 'C点') {
+                        } else if (param.seriesName === 'C点' || param.seriesName === '被否决C点') {
                             // C点显示得分信息
                             if (param.data && param.data.cPointInfo) {
-                                result += `<span style="color: #ff4444; font-weight: bold;">⚫ C点触发</span><br/>`;
-                                result += `<span style="color: #ffa500;">得分: ${param.data.cPointInfo.score.toFixed(2)}</span><br/>`;
+                                const isRejected = param.data.cPointInfo.isRejected;
+                                const titleColor = isRejected ? '#ff9800' : '#ff4444';
+                                const titleText = isRejected ? '⚠️ 被插件否决的C点' : '⚫ C点触发';
+                                
+                                result += `<span style="color: ${titleColor}; font-weight: bold;">${titleText}</span><br/>`;
+                                result += `<span style="color: #ffa500;">得分: ${param.data.cPointInfo.score.toFixed(2)} / 70</span><br/>`;
                                 result += `<span style="color: #888; font-size: 11px;">${param.data.cPointInfo.strategy}</span><br/>`;
+                                
+                                // 显示触发的插件信息
+                                if (param.data.cPointInfo.plugins && param.data.cPointInfo.plugins.length > 0) {
+                                    result += `<br/><span style="color: #ffeb3b; font-weight: bold;">🔌 触发的插件:</span><br/>`;
+                                    param.data.cPointInfo.plugins.forEach(plugin => {
+                                        const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✓';
+                                        const color = plugin.scoreAdjustment < 0 ? '#ff9800' : '#4caf50';
+                                        result += `<span style="color: ${color}; font-size: 11px; margin-left: 10px;">${icon} ${plugin.pluginName}</span><br/>`;
+                                        result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
+                                        if (plugin.scoreAdjustment !== 0 && plugin.scoreAdjustment !== -999) {
+                                            const scoreText = plugin.scoreAdjustment > 0 ? `+${plugin.scoreAdjustment}` : plugin.scoreAdjustment;
+                                            result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">分数调整: ${scoreText}分</span><br/>`;
+                                        }
+                                    });
+                                }
+                                
+                                if (isRejected) {
+                                    result += `<br/><span style="color: #ff5722; font-size: 11px;">💡 基础分达标但被插件规则否决</span>`;
+                                }
                             } else {
                                 result += `<span style="color: #ff4444;">⚫ C点</span><br/>`;
                             }
@@ -1026,7 +1049,7 @@ function updateAnalysisInfo(analysisData, latestData) {
 
 // ============ CR点分析功能 ============
 
-let crPointsData = { c_points: [], r_points: [] };
+let crPointsData = { c_points: [], r_points: [], rejected_c_points: [] };
 let showCRPoints = true; // 默认显示CR点
 
 // 自动实时计算CR点（不显示提示）
@@ -1133,12 +1156,18 @@ async function loadCRPoints(existingData = null) {
     try {
         let c_points = [];
         let r_points = [];
+        let rejected_c_points = [];
         
         // 如果传入了已有数据，直接使用
         if (existingData) {
             c_points = existingData.c_points || [];
             r_points = existingData.r_points || [];
-            console.log('使用已有的CR点数据:', { c_points: c_points.length, r_points: r_points.length });
+            rejected_c_points = existingData.rejected_c_points || [];
+            console.log('使用已有的CR点数据:', { 
+                c_points: c_points.length, 
+                r_points: r_points.length,
+                rejected_c_points: rejected_c_points.length
+            });
         } else {
             // 否则进行实时计算
             const stockSelect = document.getElementById('stockSelect');
@@ -1166,6 +1195,7 @@ async function loadCRPoints(existingData = null) {
             if (result.code === 200) {
                 c_points = result.data.c_points || [];
                 r_points = result.data.r_points || [];
+                rejected_c_points = result.data.rejected_c_points || [];
             } else {
                 console.error('实时计算CR点失败:', result.message);
                 return;
@@ -1175,6 +1205,7 @@ async function loadCRPoints(existingData = null) {
         // 保存CR点数据
         crPointsData.c_points = c_points;
         crPointsData.r_points = r_points;
+        crPointsData.rejected_c_points = rejected_c_points;
         
         // 默认显示CR点，更新图表
         if (chart) {
@@ -1212,7 +1243,7 @@ function updateChartWithCRPoints() {
     let currentSeries = currentOption.series || [];
     
     // 移除旧的CR点标记系列
-    currentSeries = currentSeries.filter(s => s.name !== 'C点' && s.name !== 'R点');
+    currentSeries = currentSeries.filter(s => s.name !== 'C点' && s.name !== 'R点' && s.name !== '被否决C点');
     
     if (showCRPoints && crPointsData) {
         const dates = currentOption.xAxis[0].data;
@@ -1238,7 +1269,8 @@ function updateChartWithCRPoints() {
                         cPointInfo: {
                             score: point.score || 0,
                             strategy: point.strategyName || '策略一',
-                            date: point.triggerDate
+                            date: point.triggerDate,
+                            plugins: point.plugins || []
                         },
                         itemStyle: {
                             color: '#ff0000',
@@ -1271,6 +1303,56 @@ function updateChartWithCRPoints() {
                 currentSeries.push(cPointSeries);
             }
         }
+        
+        // 被否决的C点不显示在图表上（隐藏）
+        // 如果需要显示，取消下面的注释
+        /*
+        if (crPointsData.rejected_c_points && crPointsData.rejected_c_points.length > 0) {
+            const rejectedCPointData = crPointsData.rejected_c_points.map(point => {
+                const dateStr = point.triggerDate;
+                const index = dateMap.get(dateStr);
+                if (index !== undefined && index >= 0) {
+                    return {
+                        value: [index, point.lowPrice],
+                        cPointInfo: {
+                            score: point.score || 0,
+                            strategy: point.strategyName || '策略一 (被插件否决)',
+                            date: point.triggerDate,
+                            plugins: point.plugins || [],
+                            isRejected: true
+                        },
+                        itemStyle: {
+                            color: '#ff9800',
+                            borderColor: '#fff',
+                            borderWidth: 2
+                        },
+                        symbolSize: 25,
+                        label: {
+                            show: true,
+                            formatter: 'C?',
+                            position: 'inside',
+                            color: '#ffffff',
+                            fontSize: 12,
+                            fontWeight: 'bold'
+                        }
+                    };
+                }
+                return null;
+            }).filter(item => item !== null);
+            
+            if (rejectedCPointData.length > 0) {
+                const rejectedCPointSeries = {
+                    name: '被否决C点',
+                    type: 'scatter',
+                    data: rejectedCPointData,
+                    symbol: 'circle',
+                    symbolSize: 25,
+                    z: 99
+                };
+                currentSeries.push(rejectedCPointSeries);
+            }
+        }
+        */
         
         // R点暂时不显示（等待后续需求）
         /*
@@ -1325,7 +1407,7 @@ function updateCRPointsStats() {
     const statsEl = document.getElementById('crPointsStats');
     if (statsEl) {
         const cCount = crPointsData.c_points ? crPointsData.c_points.length : 0;
-        // 只显示C点数量
+        // 只显示C点数量（被否决的不显示）
         statsEl.textContent = `C点: ${cCount}`;
     }
 }

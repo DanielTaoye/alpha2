@@ -1,7 +1,8 @@
 """CR策略领域服务"""
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime
 from domain.models.cr_point import ABCComponents
+from domain.services.c_point_plugin_service import CPointPluginService, CPointPluginResult
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,6 +15,7 @@ class CRStrategyService:
         """初始化CR策略服务"""
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
         self.daily_chance_repo = DailyChanceRepositoryImpl()
+        self.plugin_service = CPointPluginService()  # 插件服务
     
     @staticmethod
     def calculate_abc(open_price: float, high_price: float, low_price: float, close_price: float) -> ABCComponents:
@@ -41,17 +43,21 @@ class CRStrategyService:
         return ABCComponents(a=a, b=b, c=c)
     
     def check_c_point_strategy_1(self, stock_code: str, date: datetime, volume_type: Optional[str] = None, 
-                                  total_win_rate_score: Optional[float] = None) -> Tuple[bool, float, str]:
+                                  total_win_rate_score: Optional[float] = None) -> Tuple[bool, float, str, List[Dict[str, Any]], float, bool]:
         """
-        检查是否满足C点策略1（新逻辑）
+        检查是否满足C点策略1（新逻辑 + 插件系统）
         
-        策略一：
-        - 总分 = 赔率分（total_win_rate_score）+ 胜率分
+        基础层：
+        - 基础分 = 赔率分（total_win_rate_score）+ 胜率分
         - 胜率分根据volume_type计算：
           * 温和放量（ABCD）任意一种：40分
           * 其他特殊型（H）：28分
           * 异常量（EF）任意一种：0分
-        - 如果总分 >= 70，则触发C点
+        
+        计算层（插件）：
+        - 优先级高于基础分
+        - 插件可以直接否决或调整分数
+        - 如果最终分数 >= 70，则触发C点
         
         Args:
             stock_code: 股票代码
@@ -60,9 +66,10 @@ class CRStrategyService:
             total_win_rate_score: 赔率分（可选，如果不传则从数据库查询）
             
         Returns:
-            Tuple[bool, float, str]: (是否触发, 得分, 策略描述)
+            Tuple[bool, float, str, List[Dict], float, bool]: 
+                (是否触发, 最终分, 策略描述, 触发的插件列表, 基础分, 是否被插件否决)
         """
-        strategy_name = "策略一-赔率+胜率综合评分"
+        strategy_name = "策略一-赔率+胜率综合评分+插件"
         
         # 如果没有传入参数，从数据库查询
         if volume_type is None or total_win_rate_score is None:
@@ -71,33 +78,58 @@ class CRStrategyService:
             
             if not daily_chance:
                 logger.debug(f"{strategy_name}: 未找到股票 {stock_code} 在 {date_str} 的daily_chance数据")
-                return False, 0, strategy_name
+                return False, 0, strategy_name, [], 0, False
             
             volume_type = daily_chance.volume_type
             total_win_rate_score = daily_chance.total_win_ratio_score
         
+        # === 基础层计算 ===
         # 赔率分
         win_ratio_score = total_win_rate_score if total_win_rate_score is not None else 0
         
         # 计算胜率分
         win_rate_score = self._calculate_win_rate_score(volume_type)
         
-        # 总分
-        total_score = win_ratio_score + win_rate_score
+        # 基础总分
+        base_score = win_ratio_score + win_rate_score
+        
+        # === 计算层（插件）===
+        final_score, triggered_plugins = self.plugin_service.apply_plugins(stock_code, date, base_score)
         
         # 判断是否触发C点
-        is_triggered = total_score >= 70
+        is_triggered = final_score >= 70
+        
+        # 判断是否被插件否决（基础分>=70但最终分<70）
+        is_rejected_by_plugin = (base_score >= 70 and final_score < 70)
+        
+        # 格式化插件信息
+        plugin_dicts = [p.to_dict() for p in triggered_plugins]
+        plugin_names = [p.plugin_name for p in triggered_plugins] if triggered_plugins else []
         
         if is_triggered:
             logger.info(f"{strategy_name}: 触发C点！股票={stock_code}, 日期={date}, "
                        f"赔率分={win_ratio_score:.2f}, 胜率分={win_rate_score:.2f}, "
-                       f"总分={total_score:.2f}, 成交量类型={volume_type}")
+                       f"基础分={base_score:.2f}, 最终分={final_score:.2f}, "
+                       f"成交量类型={volume_type}, 触发插件={plugin_names}")
+        elif is_rejected_by_plugin:
+            logger.info(f"{strategy_name}: 基础分达标但被插件否决！股票={stock_code}, 日期={date}, "
+                       f"赔率分={win_ratio_score:.2f}, 胜率分={win_rate_score:.2f}, "
+                       f"基础分={base_score:.2f}, 最终分={final_score:.2f}, "
+                       f"成交量类型={volume_type}, 否决插件={plugin_names}")
         else:
-            logger.debug(f"{strategy_name}: 未触发C点。股票={stock_code}, 日期={date}, "
-                        f"赔率分={win_ratio_score:.2f}, 胜率分={win_rate_score:.2f}, "
-                        f"总分={total_score:.2f}, 成交量类型={volume_type}")
+            # 如果基础分接近70（>=60），输出info级别日志，方便调试
+            if base_score >= 60:
+                logger.info(f"{strategy_name}: 未触发C点(接近)。股票={stock_code}, 日期={date}, "
+                           f"赔率分={win_ratio_score:.2f}, 胜率分={win_rate_score:.2f}, "
+                           f"基础分={base_score:.2f}, 最终分={final_score:.2f}, "
+                           f"成交量类型={volume_type}, 触发插件={plugin_names}")
+            else:
+                logger.debug(f"{strategy_name}: 未触发C点。股票={stock_code}, 日期={date}, "
+                            f"赔率分={win_ratio_score:.2f}, 胜率分={win_rate_score:.2f}, "
+                            f"基础分={base_score:.2f}, 最终分={final_score:.2f}, "
+                            f"成交量类型={volume_type}, 触发插件={plugin_names}")
         
-        return is_triggered, total_score, strategy_name
+        return is_triggered, final_score, strategy_name, plugin_dicts, base_score, is_rejected_by_plugin
     
     @staticmethod
     def _calculate_win_rate_score(volume_type: Optional[str]) -> float:
