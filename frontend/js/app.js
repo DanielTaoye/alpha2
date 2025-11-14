@@ -774,6 +774,25 @@ function renderChart(klineData, analysisData, period) {
                             } else {
                                 result += `<span style="color: #ff4444;">⚫ C点</span><br/>`;
                             }
+                        } else if (param.seriesName === 'R点') {
+                            // R点显示风险信息
+                            if (param.data && param.data.rPointInfo) {
+                                result += `<span style="color: #00cc00; font-weight: bold;">⚠️ R点触发（卖出信号）</span><br/>`;
+                                result += `<span style="color: #888; font-size: 11px;">${param.data.rPointInfo.strategy}</span><br/>`;
+                                
+                                // 显示触发的插件信息
+                                if (param.data.rPointInfo.plugins && param.data.rPointInfo.plugins.length > 0) {
+                                    result += `<br/><span style="color: #ffeb3b; font-weight: bold;">⚠️ 风险插件:</span><br/>`;
+                                    param.data.rPointInfo.plugins.forEach(plugin => {
+                                        result += `<span style="color: #ff5722; font-size: 11px; margin-left: 10px;">🛑 ${plugin.pluginName}</span><br/>`;
+                                        result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
+                                    });
+                                }
+                                
+                                result += `<br/><span style="color: #ff5722; font-size: 11px;">💡 建议考虑卖出或止盈</span>`;
+                            } else {
+                                result += `<span style="color: #00cc00;">⚠️ R点（卖出信号）</span><br/>`;
+                            }
                         } else {
                             result += `${param.seriesName}: ${param.value}<br/>`;
                         }
@@ -1131,7 +1150,9 @@ async function analyzeCRPoints() {
         console.log('CR点分析结果:', result);
         
         if (result.code === 200) {
-            alert(`CR点分析完成！\n找到C点(买入点): ${result.data.c_points_count}个`);
+            const cCount = result.data.c_points_count || 0;
+            const rCount = result.data.r_points_count || 0;
+            alert(`CR点分析完成！\nC点(买入信号): ${cCount}个\nR点(卖出信号): ${rCount}个`);
             
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
@@ -1354,8 +1375,7 @@ function updateChartWithCRPoints() {
         }
         */
         
-        // R点暂时不显示（等待后续需求）
-        /*
+        // 添加R点标记（绿色，在K线上方）
         if (crPointsData.r_points && crPointsData.r_points.length > 0) {
             const rPointData = crPointsData.r_points.map(point => {
                 const dateStr = point.triggerDate;
@@ -1363,8 +1383,13 @@ function updateChartWithCRPoints() {
                 if (index !== undefined && index >= 0) {
                     return {
                         value: [index, point.highPrice],
+                        rPointInfo: {
+                            strategy: point.strategyName || 'R点策略',
+                            date: point.triggerDate,
+                            plugins: point.plugins || []
+                        },
                         itemStyle: {
-                            color: '#00ff00',
+                            color: '#00cc00',  // 绿色（卖出信号）
                             borderColor: '#fff',
                             borderWidth: 2
                         },
@@ -1394,7 +1419,6 @@ function updateChartWithCRPoints() {
                 currentSeries.push(rPointSeries);
             }
         }
-        */
     }
     
     chart.setOption({
@@ -1407,8 +1431,9 @@ function updateCRPointsStats() {
     const statsEl = document.getElementById('crPointsStats');
     if (statsEl) {
         const cCount = crPointsData.c_points ? crPointsData.c_points.length : 0;
-        // 只显示C点数量（被否决的不显示）
-        statsEl.textContent = `C点: ${cCount}`;
+        const rCount = crPointsData.r_points ? crPointsData.r_points.length : 0;
+        // 显示C点和R点数量
+        statsEl.textContent = `C点(买入): ${cCount} | R点(卖出): ${rCount}`;
     }
 }
 

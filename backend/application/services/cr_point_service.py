@@ -1,19 +1,21 @@
 """CR点应用服务 - 实时计算，不存储"""
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from domain.models.cr_point import CRPoint, ABCComponents
 from domain.models.kline import KLineData
 from domain.services.cr_strategy_service import CRStrategyService
+from domain.services.r_point_plugin_service import RPointPluginService
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class CRPointService:
-    """CR点应用服务 - 实时计算"""
+    """CR点应用服务 - 实时计算C点和R点"""
     
     def __init__(self):
         self.strategy_service = CRStrategyService()
+        self.r_point_service = RPointPluginService()
     
     def analyze_cr_points(self, stock_code: str, stock_name: str, kline_data: List[KLineData]) -> Dict[str, Any]:
         """
@@ -34,12 +36,16 @@ class CRPointService:
             start_date = (kline_data[0].time - timedelta(days=15)).strftime('%Y-%m-%d')
             end_date = kline_data[-1].time.strftime('%Y-%m-%d')
             
-            logger.info(f"初始化缓存: {stock_code} {start_date} 至 {end_date}")
+            logger.info(f"初始化C点和R点缓存: {stock_code} {start_date} 至 {end_date}")
+            # 初始化C点策略缓存
             self.strategy_service.init_cache(stock_code, start_date, end_date)
+            # 初始化R点插件缓存
+            self.r_point_service.init_cache(stock_code, start_date, end_date)
         
         c_points = []
         r_points = []
         rejected_c_points = []  # 被插件否决的C点
+        last_c_point_date: Optional[datetime] = None  # 记录最近的C点日期（用于R点判断）
         
         for kline in kline_data:
             # 检查C点策略1（新逻辑：基于赔率分+胜率分+插件）
@@ -77,6 +83,8 @@ class CRPointService:
                     plugins=c_plugins  # 添加插件信息
                 )
                 c_points.append(cr_point)
+                # 记录最近的C点日期
+                last_c_point_date = kline.time
             elif is_rejected:
                 # 被插件否决的C点（基础分>=70但最终分<70）
                 rejected_point = CRPoint(
@@ -99,16 +107,18 @@ class CRPointService:
                 )
                 rejected_c_points.append(rejected_point)
             
-            # 检查R点策略1（R点逻辑稍后给出，暂时保留原逻辑）
-            abc_r = self.strategy_service.calculate_abc(
-                kline.open,
-                kline.high,
-                kline.low,
-                kline.close
+            # 检查R点（使用新的插件系统）
+            is_r_point, r_plugins = self.r_point_service.check_r_point(
+                stock_code, 
+                kline.time, 
+                last_c_point_date  # 传入最近的C点日期（用于"上冲乏力"判断）
             )
-            is_r_point, r_score, r_strategy = self.strategy_service.check_r_point_strategy_1(abc_r, kline.high)
             
             if is_r_point:
+                # 触发R点
+                r_strategy_name = ", ".join([p.plugin_name for p in r_plugins])
+                r_reason = " | ".join([p.reason for p in r_plugins])
+                
                 cr_point = CRPoint(
                     stock_code=stock_code,
                     stock_name=stock_name,
@@ -120,11 +130,12 @@ class CRPointService:
                     low_price=kline.low,
                     close_price=kline.close,
                     volume=kline.volume,
-                    a_value=abc_r.a,
-                    b_value=abc_r.b,
-                    c_value=abc_r.c,
-                    score=r_score,
-                    strategy_name=r_strategy
+                    a_value=abc.a,
+                    b_value=abc.b,
+                    c_value=abc.c,
+                    score=0,  # R点不需要分数
+                    strategy_name=r_strategy_name,
+                    plugins=[p.to_dict() for p in r_plugins]  # 添加插件信息
                 )
                 r_points.append(cr_point)
         
@@ -132,6 +143,7 @@ class CRPointService:
         
         # 清空缓存，释放内存
         self.strategy_service.clear_cache()
+        self.r_point_service.clear_cache()
         
         return {
             'c_points_count': len(c_points),
