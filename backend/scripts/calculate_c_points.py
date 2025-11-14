@@ -90,8 +90,8 @@ def main():
             
             logger.info(f"股票 {stock_code} 有 {len(kline_data)} 条日线数据")
             
-            # 分析并保存C点
-            result = cr_service.analyze_and_save_cr_points(
+            # 实时分析C点（不保存）
+            result = cr_service.analyze_cr_points(
                 stock_code=stock_code,
                 stock_name='',  # 股票名称可以从daily_chance中获取，这里暂时为空
                 kline_data=kline_data

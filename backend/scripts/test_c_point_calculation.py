@@ -58,8 +58,8 @@ def test_stock(stock_code: str):
         
         print(f"\nAnalyzing C-points...")
         
-        # 分析并保存C点
-        result = cr_service.analyze_and_save_cr_points(
+        # 实时分析C点（不保存）
+        result = cr_service.analyze_cr_points(
             stock_code=stock_code,
             stock_name='',
             kline_data=kline_data

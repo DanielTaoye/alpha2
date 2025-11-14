@@ -1061,8 +1061,8 @@ async function analyzeCRPointsAuto() {
         if (result.code === 200) {
             console.log(`[实时计算] 找到C点: ${result.data.c_points_count}个`);
             
-            // 重新加载CR点数据并显示
-            await loadCRPoints();
+            // 使用实时计算的结果直接显示
+            await loadCRPoints(result.data);
         } else {
             console.error('[实时计算] C点计算失败:', result.message);
         }
@@ -1110,8 +1110,8 @@ async function analyzeCRPoints() {
         if (result.code === 200) {
             alert(`CR点分析完成！\n找到C点(买入点): ${result.data.c_points_count}个`);
             
-            // 重新加载CR点数据并显示
-            await loadCRPoints();
+            // 使用实时计算的结果直接显示
+            await loadCRPoints(result.data);
         } else {
             alert(`CR点分析失败: ${result.message}`);
         }
@@ -1126,37 +1126,64 @@ async function analyzeCRPoints() {
     }
 }
 
-// 加载CR点数据
-async function loadCRPoints() {
+// 加载CR点数据（实时计算）
+async function loadCRPoints(existingData = null) {
     if (!currentStockCode) return;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/cr_points`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                stockCode: currentStockCode
-            })
-        });
+        let c_points = [];
+        let r_points = [];
         
-        const result = await response.json();
-        console.log('CR点数据:', result);
-        
-        if (result.code === 200) {
-            // 分离C点和R点
-            crPointsData.c_points = result.data.filter(p => p.pointType === 'C');
-            crPointsData.r_points = result.data.filter(p => p.pointType === 'R');
+        // 如果传入了已有数据，直接使用
+        if (existingData) {
+            c_points = existingData.c_points || [];
+            r_points = existingData.r_points || [];
+            console.log('使用已有的CR点数据:', { c_points: c_points.length, r_points: r_points.length });
+        } else {
+            // 否则进行实时计算
+            const stockSelect = document.getElementById('stockSelect');
+            const selectedOption = stockSelect.options[stockSelect.selectedIndex];
+            const stockName = selectedOption.dataset.name || '';
             
-            // 默认显示CR点，更新图表
-            if (chart) {
-                updateChartWithCRPoints();
+            console.log('实时计算CR点...', { stockCode: currentStockCode, stockName });
+            
+            const response = await fetch(`${API_BASE_URL}/cr_points/analyze`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    stockCode: currentStockCode,
+                    stockName: stockName,
+                    tableName: currentTableName,
+                    period: 'day'
+                })
+            });
+            
+            const result = await response.json();
+            console.log('实时计算CR点结果:', result);
+            
+            if (result.code === 200) {
+                c_points = result.data.c_points || [];
+                r_points = result.data.r_points || [];
+            } else {
+                console.error('实时计算CR点失败:', result.message);
+                return;
             }
-            
-            // 更新统计信息
-            updateCRPointsStats();
         }
+        
+        // 保存CR点数据
+        crPointsData.c_points = c_points;
+        crPointsData.r_points = r_points;
+        
+        // 默认显示CR点，更新图表
+        if (chart) {
+            updateChartWithCRPoints();
+        }
+        
+        // 更新统计信息
+        updateCRPointsStats();
+        
     } catch (error) {
         console.error('加载CR点失败:', error);
     }

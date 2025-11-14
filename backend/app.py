@@ -74,7 +74,7 @@ def analyze_cr_points():
 
 @app.route('/api/cr_points', methods=['POST'])
 def get_cr_points():
-    """获取股票CR点列表"""
+    """获取股票CR点列表（已弃用：改为实时计算）"""
     return cr_point_controller.get_cr_points()
 
 

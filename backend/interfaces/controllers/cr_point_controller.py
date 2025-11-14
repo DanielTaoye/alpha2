@@ -70,10 +70,10 @@ class CRPointController:
                 )
                 kline_objects.append(kline_obj)
             
-            # 分析并保存CR点
-            result = self.cr_service.analyze_and_save_cr_points(stock_code, stock_name, kline_objects)
+            # 实时分析CR点（不保存）
+            result = self.cr_service.analyze_cr_points(stock_code, stock_name, kline_objects)
             
-            return jsonify(ResponseBuilder.success(result, f'CR点分析完成，发现C点{result["c_points_count"]}个，R点{result["r_points_count"]}个')), 200
+            return jsonify(ResponseBuilder.success(result, f'CR点实时分析完成，发现C点{result["c_points_count"]}个，R点{result["r_points_count"]}个')), 200
             
         except Exception as e:
             logger.error(f"分析CR点失败: {e}", exc_info=True)
@@ -81,38 +81,10 @@ class CRPointController:
     
     def get_cr_points(self):
         """
-        获取股票的CR点列表
+        获取股票的CR点列表（已弃用：C点改为实时计算，不再存储）
         
-        请求参数:
-            stock_code: 股票代码
-            point_type: 点类型（可选，'C'或'R'）
-            start_date: 开始日期（可选）
-            end_date: 结束日期（可选）
-        
-        返回:
-            CR点列表
+        说明：
+            C点已改为实时计算模式，请使用 analyze_cr_points 接口实时计算
         """
-        try:
-            data = request.get_json()
-            stock_code = data.get('stockCode')
-            point_type = data.get('pointType')
-            start_date = data.get('startDate')
-            end_date = data.get('endDate')
-            
-            if not stock_code:
-                return jsonify(ResponseBuilder.error('股票代码不能为空')), 400
-            
-            logger.info(f"查询CR点: {stock_code} 类型:{point_type}")
-            
-            # 根据是否有日期范围选择查询方法
-            if start_date and end_date:
-                cr_points = self.cr_service.get_cr_points_by_date_range(stock_code, start_date, end_date)
-            else:
-                cr_points = self.cr_service.get_cr_points(stock_code, point_type)
-            
-            return jsonify(ResponseBuilder.success(cr_points, f'查询到{len(cr_points)}个CR点')), 200
-            
-        except Exception as e:
-            logger.error(f"查询CR点失败: {e}", exc_info=True)
-            return jsonify(ResponseBuilder.error(f'查询CR点失败: {str(e)}')), 500
+        return jsonify(ResponseBuilder.error('C点已改为实时计算模式，请使用 analyze_cr_points 接口')), 410
 
