@@ -16,6 +16,37 @@ class CRStrategyService:
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
         self.daily_chance_repo = DailyChanceRepositoryImpl()
         self.plugin_service = CPointPluginService()  # 插件服务
+        # 数据缓存
+        self._daily_chance_cache = {}  # {date_str: DailyChance}
+    
+    def init_cache(self, stock_code: str, start_date: str, end_date: str):
+        """
+        初始化数据缓存（批量查询）
+        
+        Args:
+            stock_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+        """
+        logger.info(f"开始初始化CR策略缓存: {stock_code} {start_date} 至 {end_date}")
+        
+        # 批量查询 daily_chance 数据
+        daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+        self._daily_chance_cache = {}
+        for dc in daily_chance_list:
+            from datetime import datetime
+            date_str = dc.date.strftime('%Y-%m-%d') if isinstance(dc.date, datetime) else str(dc.date)
+            self._daily_chance_cache[date_str] = dc
+        
+        logger.info(f"CR策略缓存初始化完成: daily_chance={len(self._daily_chance_cache)}条")
+        
+        # 同时初始化插件服务的缓存
+        self.plugin_service.init_cache(stock_code, start_date, end_date)
+    
+    def clear_cache(self):
+        """清空缓存"""
+        self._daily_chance_cache = {}
+        self.plugin_service.clear_cache()
     
     @staticmethod
     def calculate_abc(open_price: float, high_price: float, low_price: float, close_price: float) -> ABCComponents:
@@ -71,10 +102,15 @@ class CRStrategyService:
         """
         strategy_name = "策略一-赔率+胜率综合评分+插件"
         
-        # 如果没有传入参数，从数据库查询
+        # 如果没有传入参数，从缓存或数据库查询
         if volume_type is None or total_win_rate_score is None:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            
+            # 优先使用缓存
+            daily_chance = self._daily_chance_cache.get(date_str)
+            if not daily_chance:
+                # 缓存未命中，查询数据库
+                daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
             
             if not daily_chance:
                 logger.debug(f"{strategy_name}: 未找到股票 {stock_code} 在 {date_str} 的daily_chance数据")

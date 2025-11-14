@@ -27,6 +27,16 @@ class CRPointService:
         Returns:
             分析结果统计
         """
+        # 性能优化：批量预加载数据到缓存
+        if kline_data:
+            # 计算数据日期范围（往前多取15天以支持插件查询历史数据）
+            from datetime import timedelta
+            start_date = (kline_data[0].time - timedelta(days=15)).strftime('%Y-%m-%d')
+            end_date = kline_data[-1].time.strftime('%Y-%m-%d')
+            
+            logger.info(f"初始化缓存: {stock_code} {start_date} 至 {end_date}")
+            self.strategy_service.init_cache(stock_code, start_date, end_date)
+        
         c_points = []
         r_points = []
         rejected_c_points = []  # 被插件否决的C点
@@ -119,6 +129,9 @@ class CRPointService:
                 r_points.append(cr_point)
         
         logger.info(f"CR点实时分析完成: {stock_code} - C点:{len(c_points)}个, 被否决:{len(rejected_c_points)}个, R点:{len(r_points)}个")
+        
+        # 清空缓存，释放内存
+        self.strategy_service.clear_cache()
         
         return {
             'c_points_count': len(c_points),

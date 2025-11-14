@@ -32,6 +32,41 @@ class CPointPluginService:
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
         self.daily_repo = DailyRepositoryImpl()
         self.daily_chance_repo = DailyChanceRepositoryImpl()
+        # 数据缓存
+        self._daily_cache = {}  # {date_str: DailyData}
+        self._daily_chance_cache = {}  # {date_str: DailyChance}
+    
+    def init_cache(self, stock_code: str, start_date: str, end_date: str):
+        """
+        初始化数据缓存（批量查询）
+        
+        Args:
+            stock_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+        """
+        logger.info(f"开始初始化插件缓存: {stock_code} {start_date} 至 {end_date}")
+        
+        # 批量查询 daily 数据
+        daily_list = self.daily_repo.find_by_date_range(stock_code, start_date, end_date)
+        self._daily_cache = {}
+        for daily in daily_list:
+            date_str = daily.date.strftime('%Y-%m-%d') if isinstance(daily.date, datetime) else str(daily.date)
+            self._daily_cache[date_str] = daily
+        
+        # 批量查询 daily_chance 数据
+        daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+        self._daily_chance_cache = {}
+        for dc in daily_chance_list:
+            date_str = dc.date.strftime('%Y-%m-%d') if isinstance(dc.date, datetime) else str(dc.date)
+            self._daily_chance_cache[date_str] = dc
+        
+        logger.info(f"插件缓存初始化完成: daily={len(self._daily_cache)}条, daily_chance={len(self._daily_chance_cache)}条")
+    
+    def clear_cache(self):
+        """清空缓存"""
+        self._daily_cache = {}
+        self._daily_chance_cache = {}
     
     def apply_plugins(self, stock_code: str, date: datetime, base_score: float) -> Tuple[float, List[CPointPluginResult]]:
         """
@@ -76,6 +111,13 @@ class CPointPluginService:
             adjusted_score += plugin4.score_adjustment
             logger.info(f"[插件-不追涨] {stock_code} {date}: {plugin4.reason}, 扣分{abs(plugin4.score_adjustment)}")
         
+        # 插件5: 急跌抢反弹（直接发C）
+        plugin5 = self._check_sharp_drop_rebound(stock_code, date)
+        if plugin5.triggered:
+            triggered_plugins.append(plugin5)
+            logger.info(f"[插件-急跌抢反弹] {stock_code} {date}: {plugin5.reason}, 直接发C")
+            return 999, triggered_plugins  # 直接返回高分，确保发C
+        
         return adjusted_score, triggered_plugins
     
     def _check_bearish_line(self, stock_code: str, date: datetime) -> CPointPluginResult:
@@ -85,7 +127,12 @@ class CPointPluginService:
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            daily_data = self.daily_repo.find_by_date(stock_code, date_str)
+            
+            # 优先使用缓存
+            daily_data = self._daily_cache.get(date_str)
+            if not daily_data:
+                # 缓存未命中，查询数据库
+                daily_data = self.daily_repo.find_by_date(stock_code, date_str)
             
             if not daily_data:
                 return CPointPluginResult("阴线", False, 0, "")
@@ -116,9 +163,14 @@ class CPointPluginService:
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
-            # 获取当日数据
-            daily_data = self.daily_repo.find_by_date(stock_code, date_str)
-            daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            # 优先使用缓存
+            daily_data = self._daily_cache.get(date_str)
+            if not daily_data:
+                daily_data = self.daily_repo.find_by_date(stock_code, date_str)
+            
+            daily_chance = self._daily_chance_cache.get(date_str)
+            if not daily_chance:
+                daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
             
             if not daily_data or not daily_chance:
                 return CPointPluginResult("赔率高胜率低", False, 0, "")
@@ -141,11 +193,15 @@ class CPointPluginService:
             # 情况2: 前三天+当日都无ABCD
             if not has_good_volume:
                 # 获取前三个交易日
-                prev_dates = self._get_previous_trading_dates(stock_code, date, 3)
+                prev_dates = self._get_previous_trading_dates_from_cache(date_str)
                 prev_has_good_volume = False
                 
-                for prev_date in prev_dates:
-                    prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
+                for prev_date in prev_dates[:3]:
+                    # 优先使用缓存
+                    prev_chance = self._daily_chance_cache.get(prev_date)
+                    if not prev_chance:
+                        prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
+                    
                     if prev_chance and prev_chance.volume_type:
                         if any(t in prev_chance.volume_type for t in ['A', 'B', 'C', 'D']):
                             prev_has_good_volume = True
@@ -172,7 +228,11 @@ class CPointPluginService:
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            daily_data = self.daily_repo.find_by_date(stock_code, date_str)
+            
+            # 优先使用缓存
+            daily_data = self._daily_cache.get(date_str)
+            if not daily_data:
+                daily_data = self.daily_repo.find_by_date(stock_code, date_str)
             
             if not daily_data:
                 return CPointPluginResult("风险K线", False, 0, "")
@@ -237,14 +297,17 @@ class CPointPluginService:
             # 判断主板还是非主板
             is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
             
-            # 获取前5个交易日数据
-            prev_dates = self._get_previous_trading_dates(stock_code, date, 5)
+            # 获取前5个交易日数据（从缓存）
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
             if len(prev_dates) < 2:
                 return CPointPluginResult("不追涨", False, 0, "")
             
             daily_data_list = []
             for prev_date in prev_dates[:5]:
-                data = self.daily_repo.find_by_date(stock_code, prev_date)
+                # 优先使用缓存
+                data = self._daily_cache.get(prev_date)
+                if not data:
+                    data = self.daily_repo.find_by_date(stock_code, prev_date)
                 if data:
                     daily_data_list.append(data)
             
@@ -325,8 +388,34 @@ class CPointPluginService:
             logger.error(f"插件-不追涨检查失败: {e}")
             return CPointPluginResult("不追涨", False, 0, "")
     
+    def _get_previous_trading_dates_from_cache(self, current_date_str: str) -> List[str]:
+        """
+        从缓存中获取前N个交易日的日期列表（性能优化版）
+        
+        Args:
+            current_date_str: 当前日期字符串 'YYYY-MM-DD'
+            
+        Returns:
+            前N个交易日的日期列表（按日期倒序）
+        """
+        try:
+            # 从缓存中获取所有日期并排序
+            all_dates = sorted(self._daily_cache.keys(), reverse=True)
+            
+            # 找到当前日期的位置，返回之前的日期
+            result = []
+            for date_str in all_dates:
+                if date_str < current_date_str:
+                    result.append(date_str)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"从缓存获取前N个交易日失败: {e}")
+            return []
+    
     def _get_previous_trading_dates(self, stock_code: str, current_date: datetime, days: int) -> List[str]:
-        """获取前N个交易日的日期列表"""
+        """获取前N个交易日的日期列表（降级方案，当缓存未初始化时使用）"""
         try:
             date_str = current_date.strftime('%Y-%m-%d') if isinstance(current_date, datetime) else current_date
             
@@ -352,4 +441,133 @@ class CPointPluginService:
         except Exception as e:
             logger.error(f"获取前N个交易日失败: {e}")
             return []
+    
+    def _check_sharp_drop_rebound(self, stock_code: str, date: datetime) -> CPointPluginResult:
+        """
+        插件5: 急跌抢反弹
+        
+        主要条件（满足其一）：
+        1）连续4日急跌且累计跌幅过大（主板20%，非主板25%）
+        2）连续5日连续阴线且累计跌幅过大（主板20%，非主板30%）
+        
+        叠加条件（满足其一即发C）：
+        A、今日成交量极度萎缩（相对第一日萎缩至20%）+ 振幅>5%的触底反弹十字星或阳线
+        B、昨日成交量极度萎缩（相对第一日萎缩至20%）且昨日为十字星，今日为阳线
+        
+        满足条件直接发C（返回999分标记）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 判断主板还是非主板
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            
+            # 获取当日数据
+            current_data = self._daily_cache.get(date_str)
+            if not current_data:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return CPointPluginResult("急跌抢反弹", False, 0, "")
+            
+            # 获取前5个交易日数据
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if len(prev_dates) < 5:
+                return CPointPluginResult("急跌抢反弹", False, 0, "")
+            
+            # 获取历史数据
+            prev_data_list = []
+            for prev_date in prev_dates[:5]:
+                data = self._daily_cache.get(prev_date)
+                if not data:
+                    data = self.daily_repo.find_by_date(stock_code, prev_date)
+                if data:
+                    prev_data_list.append(data)
+            
+            if len(prev_data_list) < 4:
+                return CPointPluginResult("急跌抢反弹", False, 0, "")
+            
+            # 计算涨跌幅列表（注意：prev_data_list[0]是最近的一天）
+            change_pcts = []
+            for data in prev_data_list:
+                if data.pre_close and data.pre_close > 0:
+                    pct = (data.close - data.pre_close) / data.pre_close * 100
+                    change_pcts.append(pct)
+                else:
+                    change_pcts.append(0)
+            
+            # === 检查主要条件 ===
+            main_condition_met = False
+            main_reason = ""
+            first_day_volume = 0  # 第一个下跌日的成交量
+            
+            # 条件1: 连续4日急跌且累计跌幅过大
+            if len(change_pcts) >= 4:
+                cum_4days = sum(change_pcts[:4])
+                threshold_4days = -20 if is_main_board else -25
+                if cum_4days < threshold_4days:
+                    main_condition_met = True
+                    main_reason = f"连续4日急跌(累计跌幅:{cum_4days:.2f}%)"
+                    first_day_volume = prev_data_list[3].volume  # 第4天前（最早的一天）
+            
+            # 条件2: 连续5日连续阴线且累计跌幅过大
+            if not main_condition_met and len(change_pcts) >= 5:
+                all_bearish = all(prev_data_list[i].close < prev_data_list[i].open for i in range(5))
+                cum_5days = sum(change_pcts[:5])
+                threshold_5days = -20 if is_main_board else -30
+                if all_bearish and cum_5days < threshold_5days:
+                    main_condition_met = True
+                    main_reason = f"连续5日阴线(累计跌幅:{cum_5days:.2f}%)"
+                    first_day_volume = prev_data_list[4].volume  # 第5天前
+            
+            if not main_condition_met or first_day_volume == 0:
+                return CPointPluginResult("急跌抢反弹", False, 0, "")
+            
+            # === 检查叠加条件 ===
+            
+            # 计算当日振幅
+            current_amplitude = ((current_data.high - current_data.low) / current_data.pre_close * 100) if current_data.pre_close else 0
+            
+            # 判断当日是否为阳线
+            is_current_bullish = current_data.close >= current_data.open
+            
+            # 判断当日是否为十字星（实体很小）
+            current_body = abs(current_data.close - current_data.open)
+            current_body_ratio = (current_body / current_data.close * 100) if current_data.close else 0
+            is_current_doji = current_body_ratio < 1  # 实体占比<1%视为十字星
+            
+            # 条件A: 今日成交量极度萎缩 + 振幅>5%的触底反弹十字星或阳线
+            current_volume_shrink = (current_data.volume / first_day_volume) if first_day_volume else 1
+            if current_volume_shrink <= 0.2 and current_amplitude > 5:
+                if is_current_doji or is_current_bullish:
+                    pattern_type = "十字星" if is_current_doji else "阳线"
+                    return CPointPluginResult(
+                        "急跌抢反弹",
+                        True,
+                        999,  # 直接发C标记
+                        f"{main_reason}, 今日量缩至{current_volume_shrink*100:.1f}%, 振幅{current_amplitude:.2f}%, {pattern_type}反弹"
+                    )
+            
+            # 条件B: 昨日成交量极度萎缩且昨日为十字星，今日为阳线
+            if len(prev_data_list) >= 1:
+                yesterday_data = prev_data_list[0]
+                yesterday_volume_shrink = (yesterday_data.volume / first_day_volume) if first_day_volume else 1
+                
+                # 判断昨日是否为十字星
+                yesterday_body = abs(yesterday_data.close - yesterday_data.open)
+                yesterday_body_ratio = (yesterday_body / yesterday_data.close * 100) if yesterday_data.close else 0
+                is_yesterday_doji = yesterday_body_ratio < 1
+                
+                if yesterday_volume_shrink <= 0.2 and is_yesterday_doji and is_current_bullish:
+                    return CPointPluginResult(
+                        "急跌抢反弹",
+                        True,
+                        999,  # 直接发C标记
+                        f"{main_reason}, 昨日量缩至{yesterday_volume_shrink*100:.1f}%且为十字星, 今日阳线反弹"
+                    )
+            
+            return CPointPluginResult("急跌抢反弹", False, 0, "")
+            
+        except Exception as e:
+            logger.error(f"插件-急跌抢反弹检查失败: {e}")
+            return CPointPluginResult("急跌抢反弹", False, 0, "")
 
