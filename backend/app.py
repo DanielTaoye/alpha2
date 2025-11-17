@@ -17,6 +17,7 @@ from interfaces.controllers.kline_controller import KLineController
 from interfaces.controllers.analysis_controller import AnalysisController
 from interfaces.controllers.cr_point_controller import CRPointController
 from interfaces.controllers.daily_chance_controller import DailyChanceController
+from interfaces.controllers.config_controller import ConfigController
 from infrastructure.config.app_config import SERVER_CONFIG
 
 # 初始化日志
@@ -32,6 +33,7 @@ kline_controller = KLineController()
 analysis_controller = AnalysisController()
 cr_point_controller = CRPointController()
 daily_chance_controller = DailyChanceController()
+config_controller = ConfigController()
 
 
 # ============ 路由定义 ============
@@ -94,6 +96,24 @@ def sync_daily_chance():
 def get_daily_chance():
     """获取每日机会数据"""
     return daily_chance_controller.get_daily_chance()
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """获取策略配置"""
+    return config_controller.get_config()
+
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """更新策略配置"""
+    return config_controller.update_config()
+
+
+@app.route('/api/config/reload', methods=['POST'])
+def reload_config():
+    """重新加载配置"""
+    return config_controller.reload_config()
 
 
 if __name__ == '__main__':

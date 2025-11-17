@@ -8,9 +8,11 @@ logger = get_logger(__name__)
 
 
 class Strategy2Service:
-    """策略2 - C点评分计算服务（总分≥70发C点）"""
+    """策略2 - C点评分计算服务（总分≥阈值发C点）"""
     
     def __init__(self):
+        from domain.services.config_service import get_config_service
+        self.config_service = get_config_service()  # 配置服务
         # 用于记录MACD加分的时间窗口
         self._macd_bonus_records = {}  # {stock_code: {bonus_type: end_date}}
     
@@ -68,12 +70,15 @@ class Strategy2Service:
         penalty = self._calculate_penalty(ma_data, close_price, index, details)
         total_score += penalty
         
-        # 判断是否触发（阈值：20分）
-        is_triggered = total_score >= 20
+        # 从配置读取触发阈值
+        threshold = self.config_service.get_strategy2_threshold()
+        
+        # 判断是否触发
+        is_triggered = total_score >= threshold
         reason = f"策略2总分: {total_score:.0f}分 ({', '.join(details)})"
         
         if is_triggered:
-            logger.info(f"[策略2] {stock_code} {date.strftime('%Y-%m-%d')} 触发C点！{reason}")
+            logger.info(f"[策略2] {stock_code} {date.strftime('%Y-%m-%d')} 触发C点！阈值{threshold}, {reason}")
         
         return is_triggered, total_score, reason
     

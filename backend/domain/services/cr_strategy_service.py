@@ -14,8 +14,10 @@ class CRStrategyService:
     def __init__(self):
         """初始化CR策略服务"""
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
+        from domain.services.config_service import get_config_service
         self.daily_chance_repo = DailyChanceRepositoryImpl()
         self.plugin_service = CPointPluginService()  # 插件服务
+        self.config_service = get_config_service()  # 配置服务
         # 数据缓存
         self._daily_chance_cache = {}  # {date_str: DailyChance}
     
@@ -132,11 +134,14 @@ class CRStrategyService:
         # === 计算层（插件）===
         final_score, triggered_plugins = self.plugin_service.apply_plugins(stock_code, date, base_score)
         
-        # 判断是否触发C点
-        is_triggered = final_score >= 70
+        # 从配置读取触发阈值
+        threshold = self.config_service.get_strategy1_threshold()
         
-        # 判断是否被插件否决（基础分>=70但最终分<70）
-        is_rejected_by_plugin = (base_score >= 70 and final_score < 70)
+        # 判断是否触发C点
+        is_triggered = final_score >= threshold
+        
+        # 判断是否被插件否决（基础分>=阈值但最终分<阈值）
+        is_rejected_by_plugin = (base_score >= threshold and final_score < threshold)
         
         # 格式化插件信息
         plugin_dicts = [p.to_dict() for p in triggered_plugins]

@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>策略调参平台 - Alpha Strategy v2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            background: white;
+            color: #667eea;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .back-link:hover {
+            background: #667eea;
+            color: white;
+            transform: translateX(-5px);
+        }
+
+        .config-panel {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .config-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .config-section h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .strategy-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            margin-left: 10px;
+            font-weight: bold;
+        }
+
+        .strategy1-badge {
+            background: #ff4444;
+            color: white;
+        }
+
+        .strategy2-badge {
+            background: #9C27B0;
+            color: white;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #555;
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .form-group .description {
+            color: #999;
+            font-size: 12px;
+            margin-top: 5px;
+            line-height: 1.5;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .form-group input[type="number"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .unit {
+            position: absolute;
+            right: 15px;
+            color: #999;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        .slider-wrapper {
+            margin-top: 10px;
+        }
+
+        .form-group input[type="range"] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #ddd;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .form-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .form-group input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+        }
+
+        .range-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #e0e0e0;
+        }
+
+        .current-config {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .current-config h3 {
+            color: #1976d2;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #bbdefb;
+        }
+
+        .config-item:last-child {
+            border-bottom: none;
+        }
+
+        .config-item .label {
+            color: #555;
+            font-weight: bold;
+        }
+
+        .config-item .value {
+            color: #1976d2;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .status-message {
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .info-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+
+        .info-box h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .info-box ul {
+            margin-left: 20px;
+            color: #856404;
+        }
+
+        .info-box li {
+            margin-bottom: 5px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .preset-btn {
+            padding: 8px 15px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+
+        .preset-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← 返回主页</a>
+
+        <div class="header">
+            <h1>🎛️ 策略调参平台</h1>
+            <p>调整策略1和策略2的C点触发阈值，优化买入信号质量</p>
+        </div>
+
+        <!-- 当前配置显示 -->
+        <div class="current-config">
+            <h3>📊 当前配置</h3>
+            <div class="config-item">
+                <span class="label">策略1 C点触发阈值</span>
+                <span class="value" id="currentStrategy1">加载中...</span>
+            </div>
+            <div class="config-item">
+                <span class="label">策略2 C点触发阈值</span>
+                <span class="value" id="currentStrategy2">加载中...</span>
+            </div>
+            <div class="config-item">
+                <span class="label">最后更新时间</span>
+                <span class="value" id="lastUpdated" style="font-size: 14px;">-</span>
+            </div>
+        </div>
+
+        <!-- 策略1配置 -->
+        <div class="config-panel">
+            <div class="config-section">
+                <h2>
+                    策略一配置
+                    <span class="strategy-badge strategy1-badge">赔率+胜率+插件</span>
+                </h2>
+                
+                <div class="form-group">
+                    <label for="strategy1Threshold">C点触发阈值</label>
+                    <div class="input-wrapper">
+                        <input type="number" id="strategy1Threshold" min="0" max="100" step="1" value="70">
+                        <span class="unit">分</span>
+                    </div>
+                    <div class="slider-wrapper">
+                        <input type="range" id="strategy1Slider" min="0" max="100" step="1" value="70">
+                        <div class="range-labels">
+                            <span>0分</span>
+                            <span>50分</span>
+                            <span>100分</span>
+                        </div>
+                    </div>
+                    <p class="description">
+                        策略1基于赔率分、胜率分和插件系统。分数越高，信号质量越高，但触发频率越低。<br>
+                        推荐：保守型 70-80分 | 均衡型 60-70分 | 激进型 50-60分
+                    </p>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setStrategy1Preset(80)">保守型 (80分)</button>
+                    <button class="preset-btn" onclick="setStrategy1Preset(70)">默认 (70分)</button>
+                    <button class="preset-btn" onclick="setStrategy1Preset(60)">均衡型 (60分)</button>
+                    <button class="preset-btn" onclick="setStrategy1Preset(50)">激进型 (50分)</button>
+                </div>
+            </div>
+
+            <!-- 策略2配置 -->
+            <div class="config-section">
+                <h2>
+                    策略二配置
+                    <span class="strategy-badge strategy2-badge">MA+MACD+成交量</span>
+                </h2>
+                
+                <div class="form-group">
+                    <label for="strategy2Threshold">C点触发阈值</label>
+                    <div class="input-wrapper">
+                        <input type="number" id="strategy2Threshold" min="0" max="100" step="1" value="20">
+                        <span class="unit">分</span>
+                    </div>
+                    <div class="slider-wrapper">
+                        <input type="range" id="strategy2Slider" min="0" max="100" step="1" value="20">
+                        <div class="range-labels">
+                            <span>0分</span>
+                            <span>50分</span>
+                            <span>100分</span>
+                        </div>
+                    </div>
+                    <p class="description">
+                        策略2基于多维度技术指标评分（均线30分+MACD30分+成交量30分+K线10分）。<br>
+                        推荐：保守型 60-70分 | 均衡型 40-50分 | 激进型 20-30分
+                    </p>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setStrategy2Preset(70)">保守型 (70分)</button>
+                    <button class="preset-btn" onclick="setStrategy2Preset(50)">均衡型 (50分)</button>
+                    <button class="preset-btn" onclick="setStrategy2Preset(30)">默认 (30分)</button>
+                    <button class="preset-btn" onclick="setStrategy2Preset(20)">激进型 (20分)</button>
+                </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="button-group">
+                <button class="btn-secondary" onclick="loadCurrentConfig()">🔄 重新加载</button>
+                <button class="btn-primary" onclick="saveConfig()" id="saveBtn">💾 保存配置</button>
+            </div>
+
+            <!-- 状态消息 -->
+            <div id="statusMessage" class="status-message"></div>
+
+            <!-- 提示信息 -->
+            <div class="info-box">
+                <h4>💡 使用说明</h4>
+                <ul>
+                    <li>调整滑块或直接输入数值来设置阈值</li>
+                    <li>可以使用预设按钮快速选择常用配置</li>
+                    <li>点击"保存配置"后，新配置将立即生效</li>
+                    <li>返回主页后，分析的C点将使用新的阈值</li>
+                    <li>建议根据实际回测结果逐步调整参数</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+
+        // 同步输入框和滑块
+        document.getElementById('strategy1Threshold').addEventListener('input', function() {
+            document.getElementById('strategy1Slider').value = this.value;
+        });
+
+        document.getElementById('strategy1Slider').addEventListener('input', function() {
+            document.getElementById('strategy1Threshold').value = this.value;
+        });
+
+        document.getElementById('strategy2Threshold').addEventListener('input', function() {
+            document.getElementById('strategy2Slider').value = this.value;
+        });
+
+        document.getElementById('strategy2Slider').addEventListener('input', function() {
+            document.getElementById('strategy2Threshold').value = this.value;
+        });
+
+        // 设置预设值
+        function setStrategy1Preset(value) {
+            document.getElementById('strategy1Threshold').value = value;
+            document.getElementById('strategy1Slider').value = value;
+        }
+
+        function setStrategy2Preset(value) {
+            document.getElementById('strategy2Threshold').value = value;
+            document.getElementById('strategy2Slider').value = value;
+        }
+
+        // 显示状态消息
+        function showMessage(message, isError = false) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
+            statusEl.style.display = 'block';
+
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        }
+
+        // 加载当前配置
+        async function loadCurrentConfig() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/config`);
+                const result = await response.json();
+
+                if (result.code === 200) {
+                    const config = result.data;
+                    
+                    // 更新显示
+                    document.getElementById('currentStrategy1').textContent = config.strategy1.c_point_threshold + ' 分';
+                    document.getElementById('currentStrategy2').textContent = config.strategy2.c_point_threshold + ' 分';
+                    document.getElementById('lastUpdated').textContent = config.last_updated || '-';
+
+                    // 更新输入框
+                    document.getElementById('strategy1Threshold').value = config.strategy1.c_point_threshold;
+                    document.getElementById('strategy1Slider').value = config.strategy1.c_point_threshold;
+                    document.getElementById('strategy2Threshold').value = config.strategy2.c_point_threshold;
+                    document.getElementById('strategy2Slider').value = config.strategy2.c_point_threshold;
+
+                    console.log('配置加载成功:', config);
+                } else {
+                    showMessage('加载配置失败: ' + result.message, true);
+                }
+            } catch (error) {
+                console.error('加载配置失败:', error);
+                showMessage('加载配置失败: ' + error.message, true);
+            }
+        }
+
+        // 保存配置
+        async function saveConfig() {
+            const saveBtn = document.getElementById('saveBtn');
+            const originalText = saveBtn.textContent;
+            
+            try {
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<span class="loading"></span> 保存中...';
+
+                const strategy1 = parseFloat(document.getElementById('strategy1Threshold').value);
+                const strategy2 = parseFloat(document.getElementById('strategy2Threshold').value);
+
+                // 参数验证
+                if (isNaN(strategy1) || strategy1 < 0 || strategy1 > 100) {
+                    showMessage('策略1阈值必须在0-100之间', true);
+                    return;
+                }
+
+                if (isNaN(strategy2) || strategy2 < 0 || strategy2 > 100) {
+                    showMessage('策略2阈值必须在0-100之间', true);
+                    return;
+                }
+
+                const response = await fetch(`${API_BASE_URL}/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        strategy1_threshold: strategy1,
+                        strategy2_threshold: strategy2
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 200) {
+                    showMessage('✅ ' + result.message);
+                    // 重新加载配置以更新显示
+                    await loadCurrentConfig();
+                    
+                    // 提示用户返回主页
+                    setTimeout(() => {
+                        if (confirm('配置已保存！是否返回主页查看效果？')) {
+                            window.location.href = '/';
+                        }
+                    }, 1000);
+                } else {
+                    showMessage('❌ ' + result.message, true);
+                }
+            } catch (error) {
+                console.error('保存配置失败:', error);
+                showMessage('❌ 保存配置失败: ' + error.message, true);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = originalText;
+            }
+        }
+
+        // 页面加载时获取当前配置
+        window.onload = function() {
+            loadCurrentConfig();
+        };
+    </script>
+</body>
+</html>
+
