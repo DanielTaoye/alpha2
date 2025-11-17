@@ -772,7 +772,16 @@ function renderChart(klineData, analysisData, period) {
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
                             // MA均线，只在值存在时显示
                             if (param.value !== null && param.value !== undefined) {
-                                result += `<span style="color: ${param.color};">${param.seriesName}: ${param.value.toFixed(2)}</span><br/>`;
+                                // 统一颜色：MA5白色、MA10黄色、MA20紫色
+                                let maColor = '#FFFFFF';  // 默认白色
+                                if (param.seriesName === 'MA5') {
+                                    maColor = '#FFFFFF';  // 白色
+                                } else if (param.seriesName === 'MA10') {
+                                    maColor = '#FFA500';  // 黄色
+                                } else if (param.seriesName === 'MA20') {
+                                    maColor = '#9C27B0';  // 紫色
+                                }
+                                result += `<span style="color: ${maColor};">${param.seriesName}: ${param.value.toFixed(2)}</span><br/>`;
                             }
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
@@ -895,10 +904,10 @@ function renderChart(klineData, analysisData, period) {
                             if (dif !== null || dea !== null || macd !== null) {
                                 result += `<br/><span style="color: #8e44ad; font-weight: bold;">MACD指标:</span>`;
                                 if (dif !== null) {
-                                    result += `<br/><span style="color: #3498db; margin-left: 10px;">DIF: ${dif.toFixed(4)}</span>`;
+                                    result += `<br/><span style="color: #FFFFFF; margin-left: 10px;">DIF: ${dif.toFixed(4)}</span>`;
                                 }
                                 if (dea !== null) {
-                                    result += `<br/><span style="color: #e67e22; margin-left: 10px;">DEA: ${dea.toFixed(4)}</span>`;
+                                    result += `<br/><span style="color: #FFA500; margin-left: 10px;">DEA: ${dea.toFixed(4)}</span>`;
                                 }
                                 if (macd !== null) {
                                     const macdColor = macd >= 0 ? '#e74c3c' : '#2ecc71';
@@ -1086,27 +1095,27 @@ function renderChart(klineData, analysisData, period) {
                         }
                     }
                 },
-                // MA5 均线（黄色）
+                // MA5 均线（白色）
                 {
                     name: 'MA5',
                     type: 'line',
                     data: maData.ma5 || [],
                     smooth: false,
                     lineStyle: {
-                        color: '#FFA500',
+                        color: '#FFFFFF',
                         width: 1.5
                     },
                     symbol: 'none',
                     z: 3
                 },
-                // MA10 均线（蓝色）
+                // MA10 均线（黄色）
                 {
                     name: 'MA10',
                     type: 'line',
                     data: maData.ma10 || [],
                     smooth: false,
                     lineStyle: {
-                        color: '#1E90FF',
+                        color: '#FFA500',
                         width: 1.5
                     },
                     symbol: 'none',
@@ -1119,7 +1128,7 @@ function renderChart(klineData, analysisData, period) {
                     data: maData.ma20 || [],
                     smooth: false,
                     lineStyle: {
-                        color: '#9370DB',
+                        color: '#9C27B0',
                         width: 1.5
                     },
                     symbol: 'none',
@@ -1139,7 +1148,7 @@ function renderChart(klineData, analysisData, period) {
                         }
                     }
                 },
-                // MACD DIF线（快线）
+                // MACD DIF线（快线，白色）
                 {
                     name: 'DIF',
                     type: 'line',
@@ -1148,13 +1157,13 @@ function renderChart(klineData, analysisData, period) {
                     data: macdData.dif,
                     smooth: false,
                     lineStyle: {
-                        color: '#3498db',
+                        color: '#FFFFFF',
                         width: 1.5
                     },
                     symbol: 'none',
                     z: 5
                 },
-                // MACD DEA线（慢线/信号线）
+                // MACD DEA线（慢线/信号线，黄色）
                 {
                     name: 'DEA',
                     type: 'line',
@@ -1163,7 +1172,7 @@ function renderChart(klineData, analysisData, period) {
                     data: macdData.dea,
                     smooth: false,
                     lineStyle: {
-                        color: '#e67e22',
+                        color: '#FFA500',
                         width: 1.5
                     },
                     symbol: 'none',
