@@ -41,6 +41,8 @@ class ConfigService:
                         "c_point_threshold": 20,
                         "description": "策略2 C点触发阈值（基于MA+MACD+成交量+K线组合）"
                     },
+                    "market_type": "bull",
+                    "market_type_description": "市场类型：bull=牛市, bear=熊市（人工判断）",
                     "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 self._save_config()
@@ -85,7 +87,12 @@ class ConfigService:
         config = self.get_config()
         return float(config.get('strategy2', {}).get('c_point_threshold', 20))
     
-    def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None) -> Dict[str, Any]:
+    def get_market_type(self) -> str:
+        """获取市场类型"""
+        config = self.get_config()
+        return config.get('market_type', 'bull')
+    
+    def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None, market_type: str = None) -> Dict[str, Any]:
         """更新配置"""
         config = self.get_config()
         
@@ -96,6 +103,12 @@ class ConfigService:
         if strategy2_threshold is not None:
             config['strategy2']['c_point_threshold'] = strategy2_threshold
             logger.info(f"策略2阈值更新为: {strategy2_threshold}")
+        
+        if market_type is not None:
+            if market_type not in ['bull', 'bear']:
+                raise ValueError(f"无效的市场类型: {market_type}，必须是 'bull' 或 'bear'")
+            config['market_type'] = market_type
+            logger.info(f"市场类型更新为: {market_type}")
         
         config['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         

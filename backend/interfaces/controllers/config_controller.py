@@ -31,6 +31,7 @@ class ConfigController:
             
             strategy1_threshold = data.get('strategy1_threshold')
             strategy2_threshold = data.get('strategy2_threshold')
+            market_type = data.get('market_type')
             
             # 参数验证
             if strategy1_threshold is not None:
@@ -49,17 +50,22 @@ class ConfigController:
                 except (ValueError, TypeError):
                     return jsonify(ResponseBuilder.error('策略2阈值必须是数字')), 400
             
+            if market_type is not None:
+                if market_type not in ['bull', 'bear']:
+                    return jsonify(ResponseBuilder.error('市场类型必须是 bull 或 bear')), 400
+            
             # 更新配置
             updated_config = self.config_service.update_config(
                 strategy1_threshold=strategy1_threshold,
-                strategy2_threshold=strategy2_threshold
+                strategy2_threshold=strategy2_threshold,
+                market_type=market_type
             )
             
-            logger.info(f"配置更新成功: 策略1={strategy1_threshold}, 策略2={strategy2_threshold}")
+            logger.info(f"配置更新成功: 策略1={strategy1_threshold}, 策略2={strategy2_threshold}, 市场类型={market_type}")
             
             return jsonify(ResponseBuilder.success(
                 updated_config, 
-                f'配置更新成功 (策略1:{strategy1_threshold or "未改变"}, 策略2:{strategy2_threshold or "未改变"})'
+                f'配置更新成功 (策略1:{strategy1_threshold or "未改变"}, 策略2:{strategy2_threshold or "未改变"}, 市场类型:{market_type or "未改变"})'
             )), 200
             
         except Exception as e:
