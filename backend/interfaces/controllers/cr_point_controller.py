@@ -4,6 +4,7 @@ from typing import Dict, Any
 from application.services.cr_point_service import CRPointService
 from application.services.kline_service import KLineApplicationService
 from infrastructure.persistence.kline_repository_impl import KLineRepositoryImpl
+from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
 from interfaces.dto.response import ResponseBuilder
 from infrastructure.logging.logger import get_logger
 
@@ -17,6 +18,7 @@ class CRPointController:
         self.cr_service = CRPointService()
         kline_repository = KLineRepositoryImpl()
         self.kline_service = KLineApplicationService(kline_repository)
+        self.daily_chance_repo = DailyChanceRepositoryImpl()
     
     def analyze_cr_points(self):
         """
@@ -73,8 +75,40 @@ class CRPointController:
                 )
                 kline_objects.append(kline_obj)
             
+            # 加载成交量类型和多头组合（用于策略2）
+            volume_types = {}
+            bullish_patterns = {}
+            
+            if period == 'day' and kline_data_list:
+                try:
+                    start_date = kline_data_list[0]['time'].split(' ')[0]
+                    end_date = kline_data_list[-1]['time'].split(' ')[0]
+                    
+                    daily_chances = self.daily_chance_repo.get_daily_chance_by_date_range(
+                        stock_code, start_date, end_date
+                    )
+                    
+                    for dc in daily_chances:
+                        date_str = dc.date.strftime('%Y-%m-%d')
+                        if dc.volume_type:
+                            volume_types[date_str] = dc.volume_type
+                        if dc.bullish_pattern:
+                            bullish_patterns[date_str] = dc.bullish_pattern
+                    
+                    logger.info(f"加载策略2数据: 成交量{len(volume_types)}个, 多头组合{len(bullish_patterns)}个")
+                except Exception as e:
+                    logger.warning(f"加载策略2数据失败: {e}")
+            
             # 实时分析CR点（不保存）
-            cr_result = self.cr_service.analyze_cr_points(stock_code, stock_name, kline_objects)
+            cr_result = self.cr_service.analyze_cr_points(
+                stock_code, 
+                stock_name, 
+                kline_objects,
+                ma_data=ma_data,
+                macd_data=macd_data,
+                volume_types=volume_types,
+                bullish_patterns=bullish_patterns
+            )
             
             # 将MACD和MA数据添加到返回结果中
             cr_result['macd'] = macd_data

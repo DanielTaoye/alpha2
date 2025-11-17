@@ -776,19 +776,21 @@ function renderChart(klineData, analysisData, period) {
                             }
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
-                        } else if (param.seriesName === 'C点' || param.seriesName === '被否决C点') {
+                        } else if (param.seriesName === 'C点' || param.seriesName === '被否决C点' || param.seriesName === '策略2C') {
                             // C点显示得分信息
                             if (param.data && param.data.cPointInfo) {
                                 const isRejected = param.data.cPointInfo.isRejected;
-                                const titleColor = isRejected ? '#ff9800' : '#ff4444';
-                                const titleText = isRejected ? '⚠️ 被插件否决的C点' : '⚫ C点触发';
+                                const isStrategy2 = param.seriesName === '策略2C';
+                                const titleColor = isRejected ? '#ff9800' : (isStrategy2 ? '#9C27B0' : '#ff4444');
+                                const titleText = isRejected ? '⚠️ 被插件否决的C点' : (isStrategy2 ? '🟣 策略2 C点触发' : '⚫ C点触发');
                                 
                                 result += `<span style="color: ${titleColor}; font-weight: bold;">${titleText}</span><br/>`;
-                                result += `<span style="color: #ffa500;">得分: ${param.data.cPointInfo.score.toFixed(2)} / 70</span><br/>`;
+                                const threshold = isStrategy2 ? 20 : 70;
+                                result += `<span style="color: #ffa500;">得分: ${param.data.cPointInfo.score.toFixed(2)} / ${threshold}</span><br/>`;
                                 result += `<span style="color: #888; font-size: 11px;">${param.data.cPointInfo.strategy}</span><br/>`;
                                 
-                                // 显示触发的插件信息
-                                if (param.data.cPointInfo.plugins && param.data.cPointInfo.plugins.length > 0) {
+                                // 显示触发的插件信息（仅策略1有插件）
+                                if (!isStrategy2 && param.data.cPointInfo.plugins && param.data.cPointInfo.plugins.length > 0) {
                                     result += `<br/><span style="color: #ffeb3b; font-weight: bold;">🔌 触发的插件:</span><br/>`;
                                     param.data.cPointInfo.plugins.forEach(plugin => {
                                         const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✓';
@@ -804,6 +806,8 @@ function renderChart(klineData, analysisData, period) {
                                 
                                 if (isRejected) {
                                     result += `<br/><span style="color: #ff5722; font-size: 11px;">💡 基础分达标但被插件规则否决</span>`;
+                                } else if (isStrategy2) {
+                                    result += `<br/><span style="color: #9C27B0; font-size: 11px;">💡 基于多维度评分系统触发</span>`;
                                 }
                             } else {
                                 result += `<span style="color: #ff4444;">⚫ C点</span><br/>`;
@@ -899,6 +903,22 @@ function renderChart(klineData, analysisData, period) {
                                 if (macd !== null) {
                                     const macdColor = macd >= 0 ? '#e74c3c' : '#2ecc71';
                                     result += `<br/><span style="color: ${macdColor}; margin-left: 10px;">MACD: ${macd.toFixed(4)}</span>`;
+                                }
+                            }
+                        }
+                        
+                        // 显示策略2评分（所有日K线）
+                        if (crPointsData && crPointsData.strategy2_scores && params[0] && params[0].name) {
+                            const dateStr = params[0].name;
+                            const dateOnly = dateStr.split(' ')[0];
+                            const strategy2Score = crPointsData.strategy2_scores[dateOnly];
+                            
+                            if (strategy2Score) {
+                                const scoreColor = strategy2Score.score >= 20 ? '#9C27B0' : (strategy2Score.score >= 10 ? '#FF9800' : '#999');
+                                const triggeredText = strategy2Score.triggered ? ' ✓ 已触发' : '';
+                                result += `<br/><span style="color: ${scoreColor}; font-weight: bold;">策略2评分: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span>`;
+                                if (strategy2Score.reason) {
+                                    result += `<br/><span style="color: #999; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span>`;
                                 }
                             }
                         }
@@ -1249,7 +1269,13 @@ function updateAnalysisInfo(analysisData, latestData) {
 
 // ============ CR点分析功能 ============
 
-let crPointsData = { c_points: [], r_points: [], rejected_c_points: [] };
+let crPointsData = { 
+    c_points: [], 
+    r_points: [], 
+    rejected_c_points: [],
+    strategy2_c_points: [],
+    strategy2_scores: {}
+};
 let showCRPoints = true; // 默认显示CR点
 
 // 自动实时计算CR点（不显示提示）
@@ -1389,10 +1415,21 @@ async function loadCRPoints(existingData = null) {
             c_points = existingData.c_points || [];
             r_points = existingData.r_points || [];
             rejected_c_points = existingData.rejected_c_points || [];
+            
+            // 添加策略2相关数据
+            if (existingData.strategy2_c_points) {
+                crPointsData.strategy2_c_points = existingData.strategy2_c_points;
+            }
+            if (existingData.strategy2_scores) {
+                crPointsData.strategy2_scores = existingData.strategy2_scores;
+            }
+            
             console.log('使用已有的CR点数据:', { 
                 c_points: c_points.length, 
                 r_points: r_points.length,
-                rejected_c_points: rejected_c_points.length
+                rejected_c_points: rejected_c_points.length,
+                strategy2_c_points: (existingData.strategy2_c_points || []).length,
+                strategy2_scores: Object.keys(existingData.strategy2_scores || {}).length
             });
         } else {
             // 否则进行实时计算
@@ -1422,6 +1459,14 @@ async function loadCRPoints(existingData = null) {
                 c_points = result.data.c_points || [];
                 r_points = result.data.r_points || [];
                 rejected_c_points = result.data.rejected_c_points || [];
+                
+                // 保存策略2相关数据
+                if (result.data.strategy2_c_points) {
+                    crPointsData.strategy2_c_points = result.data.strategy2_c_points;
+                }
+                if (result.data.strategy2_scores) {
+                    crPointsData.strategy2_scores = result.data.strategy2_scores;
+                }
             } else {
                 console.error('实时计算CR点失败:', result.message);
                 return;
@@ -1469,7 +1514,7 @@ function updateChartWithCRPoints() {
     let currentSeries = currentOption.series || [];
     
     // 移除旧的CR点标记系列
-    currentSeries = currentSeries.filter(s => s.name !== 'C点' && s.name !== 'R点' && s.name !== '被否决C点');
+    currentSeries = currentSeries.filter(s => s.name !== 'C点' && s.name !== 'R点' && s.name !== '被否决C点' && s.name !== '策略2C');
     
     if (showCRPoints && crPointsData) {
         const dates = currentOption.xAxis[0].data;
@@ -1580,6 +1625,52 @@ function updateChartWithCRPoints() {
         }
         */
         
+        // 添加策略2 C点标记（紫色矩形，在K线下方，标记为"C"）
+        if (crPointsData.strategy2_c_points && crPointsData.strategy2_c_points.length > 0) {
+            const strategy2CPointData = crPointsData.strategy2_c_points.map(point => {
+                const dateStr = point.triggerDate;
+                const index = dateMap.get(dateStr);
+                if (index !== undefined && index >= 0) {
+                    return {
+                        value: [index, point.lowPrice * 0.995],  // 略微降低位置，避免与策略1重叠
+                        cPointInfo: {
+                            score: point.score || 0,
+                            strategy: point.strategyName || '策略二',
+                            date: point.triggerDate,
+                            plugins: []
+                        },
+                        itemStyle: {
+                            color: '#9C27B0',  // 紫色
+                            borderColor: '#fff',
+                            borderWidth: 2
+                        },
+                        symbolSize: 24,
+                        label: {
+                            show: true,
+                            formatter: 'C',
+                            position: 'inside',
+                            color: '#ffffff',
+                            fontSize: 12,
+                            fontWeight: 'bold'
+                        }
+                    };
+                }
+                return null;
+            }).filter(item => item !== null);
+            
+            if (strategy2CPointData.length > 0) {
+                const strategy2CPointSeries = {
+                    name: '策略2C',
+                    type: 'scatter',
+                    data: strategy2CPointData,
+                    symbol: 'rect',  // 使用紫色矩形区分策略1
+                    symbolSize: [24, 18],
+                    z: 101  // 比普通C点稍高一层
+                };
+                currentSeries.push(strategy2CPointSeries);
+            }
+        }
+        
         // 添加R点标记（绿色，在K线上方）
         if (crPointsData.r_points && crPointsData.r_points.length > 0) {
             const rPointData = crPointsData.r_points.map(point => {
@@ -1635,10 +1726,19 @@ function updateChartWithCRPoints() {
 function updateCRPointsStats() {
     const statsEl = document.getElementById('crPointsStats');
     if (statsEl) {
-        const cCount = crPointsData.c_points ? crPointsData.c_points.length : 0;
+        // c_points现在只包含策略1的C点
+        const strategy1Count = crPointsData.c_points ? crPointsData.c_points.length : 0;
+        const strategy2Count = crPointsData.strategy2_c_points ? crPointsData.strategy2_c_points.length : 0;
+        const totalCCount = strategy1Count + strategy2Count;
         const rCount = crPointsData.r_points ? crPointsData.r_points.length : 0;
-        // 显示C点和R点数量
-        statsEl.textContent = `C点(买入): ${cCount} | R点(卖出): ${rCount}`;
+        
+        // 显示C点和R点数量，区分策略1和策略2
+        let text = `C点(买入): ${totalCCount}`;
+        if (strategy2Count > 0) {
+            text += ` (策略1:${strategy1Count}, 策略2:${strategy2Count})`;
+        }
+        text += ` | R点(卖出): ${rCount}`;
+        statsEl.textContent = text;
     }
 }
 
