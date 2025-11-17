@@ -234,6 +234,7 @@ class Strategy2Service:
         """
         计算成交量得分：最高30分
         
+        异常量（EF）任意一种：0分（优先级最高）
         温和放量（ABCD）任意一种：30分
         其他特殊型（H）：21分（70%权重）
         """
@@ -242,13 +243,17 @@ class Strategy2Service:
         if not volume_type:
             return score
         
-        volume_types = volume_type.split(',')
+        volume_types = [vt.strip() for vt in volume_type.split(',')]
+        
+        # 异常量（E或F）优先级最高，如果包含E或F，则得0分
+        if 'E' in volume_types or 'F' in volume_types:
+            return 0
         
         # 温和放量（ABCD）
-        moderate_volume = any(vt.strip() in ['A', 'B', 'C', 'D'] for vt in volume_types)
+        moderate_volume = any(vt in ['A', 'B', 'C', 'D'] for vt in volume_types)
         
         # 特殊型（H）
-        special_volume = 'H' in [vt.strip() for vt in volume_types]
+        special_volume = 'H' in volume_types
         
         if moderate_volume:
             score = 30

@@ -76,15 +76,17 @@ class CRPointController:
                 kline_objects.append(kline_obj)
             
             # 加载成交量类型和多头组合（用于策略2）
+            # 注意：所有周期都加载，因为策略2需要根据日期匹配成交量数据
             volume_types = {}
             bullish_patterns = {}
             
-            if period == 'day' and kline_data_list:
+            if kline_data_list:
                 try:
                     start_date = kline_data_list[0]['time'].split(' ')[0]
                     end_date = kline_data_list[-1]['time'].split(' ')[0]
                     
-                    daily_chances = self.daily_chance_repo.get_daily_chance_by_date_range(
+                    # 使用正确的方法名：find_by_stock_code
+                    daily_chances = self.daily_chance_repo.find_by_stock_code(
                         stock_code, start_date, end_date
                     )
                     
@@ -95,9 +97,9 @@ class CRPointController:
                         if dc.bullish_pattern:
                             bullish_patterns[date_str] = dc.bullish_pattern
                     
-                    logger.info(f"加载策略2数据: 成交量{len(volume_types)}个, 多头组合{len(bullish_patterns)}个")
+                    logger.info(f"[策略2] 加载数据成功(周期:{period}): 成交量{len(volume_types)}个, 多头组合{len(bullish_patterns)}个")
                 except Exception as e:
-                    logger.warning(f"加载策略2数据失败: {e}")
+                    logger.error(f"[策略2] 加载数据失败: {e}", exc_info=True)
             
             # 实时分析CR点（不保存）
             cr_result = self.cr_service.analyze_cr_points(
