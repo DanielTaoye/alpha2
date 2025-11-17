@@ -50,6 +50,7 @@ class CRPointController:
             result = self.kline_service.get_kline_data(table_name, period)
             kline_data_list = result.get('kline_data', [])
             macd_data = result.get('macd', {})
+            ma_data = result.get('ma', {})
             
             if not kline_data_list:
                 return jsonify(ResponseBuilder.error('K线数据为空')), 404
@@ -75,8 +76,9 @@ class CRPointController:
             # 实时分析CR点（不保存）
             cr_result = self.cr_service.analyze_cr_points(stock_code, stock_name, kline_objects)
             
-            # 将MACD数据添加到返回结果中
+            # 将MACD和MA数据添加到返回结果中
             cr_result['macd'] = macd_data
+            cr_result['ma'] = ma_data
             
             return jsonify(ResponseBuilder.success(cr_result, f'CR点实时分析完成，发现C点{cr_result["c_points_count"]}个，R点{cr_result["r_points_count"]}个')), 200
             

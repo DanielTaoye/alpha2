@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from domain.repositories.kline_repository import IKLineRepository
 from domain.services.period_service import PeriodService
 from domain.services.macd_service import MACDService
+from domain.services.ma_service import MAService
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -15,6 +16,7 @@ class KLineApplicationService:
     def __init__(self, kline_repository: IKLineRepository):
         self.kline_repository = kline_repository
         self.macd_service = MACDService()
+        self.ma_service = MAService()
     
     def get_kline_data(self, table_name: str, period_type: str) -> Dict[str, any]:
         """
@@ -56,9 +58,32 @@ class KLineApplicationService:
                     'macd': [None] * len(kline_data)
                 }
         
+        # 计算移动平均线（MA5, MA10, MA20）
+        ma_data = {}
+        if kline_data:
+            try:
+                # 日K线计算5、10、20日均线
+                if period_type == 'day':
+                    ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[5, 10, 20])
+                # 30分钟K线计算不同周期的均线
+                elif period_type == '30min':
+                    ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[10, 20, 40])
+                # 周K线
+                elif period_type == 'week':
+                    ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[5, 10, 20])
+                # 月K线
+                elif period_type == 'month':
+                    ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[3, 6, 12])
+                
+                logger.info(f"MA计算成功: 股票{table_name}, 周期{period_type}, 均线{list(ma_data.keys())}")
+            except Exception as e:
+                logger.error(f"MA计算失败: {e}")
+                ma_data = {}
+        
         return {
             'kline_data': kline_data,
-            'macd': macd_data
+            'macd': macd_data,
+            'ma': ma_data
         }
     
     def get_available_periods(self, table_name: str) -> Dict[str, int]:

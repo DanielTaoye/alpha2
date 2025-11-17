@@ -312,9 +312,10 @@ async function loadStockData(stockCode, tableName, period) {
             throw new Error(klineResult.message);
         }
 
-        // 适配新的返回格式：data现在包含kline_data和macd
+        // 适配新的返回格式：data现在包含kline_data、macd和ma
         const klineData = klineResult.data.kline_data || klineResult.data;
         const macdData = klineResult.data.macd || null;
+        const maData = klineResult.data.ma || null;
         
         if (!klineData || klineData.length === 0) {
             document.getElementById('mainChart').innerHTML = `
@@ -333,6 +334,12 @@ async function loadStockData(stockCode, tableName, period) {
         if (macdData) {
             window.currentMACDData = macdData;
             console.log(`[${period}] ✅ MACD数据已加载`, macdData);
+        }
+        
+        // 保存MA数据供图表使用
+        if (maData) {
+            window.currentMAData = maData;
+            console.log(`[${period}] ✅ MA数据已加载`, Object.keys(maData));
         }
 
         console.log(`[${period}] ✅ 立即启动分析数据加载（并行）`);
@@ -721,6 +728,12 @@ function renderChart(klineData, analysisData, period) {
             console.log(`[${period}] 使用后端计算的MACD - DIF数:${macdData.dif.length}, DEA数:${macdData.dea.length}, MACD数:${macdData.macd.length}`);
         }
         
+        // 使用后端返回的MA数据
+        const maData = window.currentMAData || {};
+        if (window.currentMAData) {
+            console.log(`[${period}] 使用后端计算的MA - ${Object.keys(maData).join(', ')}`);
+        }
+        
         console.log(`[${period}] 数据准备完成 - 日期数:${dates.length}, K线数:${values.length}, 成交量数:${volumes.length}`);
 
         const latestData = klineData[klineData.length - 1] || {};
@@ -756,6 +769,11 @@ function renderChart(klineData, analysisData, period) {
                             result += `收盘: ${param.value[2]}<br/>`;
                             result += `最低: ${param.value[3]}<br/>`;
                             result += `最高: ${param.value[4]}<br/>`;
+                        } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
+                            // MA均线，只在值存在时显示
+                            if (param.value !== null && param.value !== undefined) {
+                                result += `<span style="color: ${param.color};">${param.seriesName}: ${param.value.toFixed(2)}</span><br/>`;
+                            }
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
                         } else if (param.seriesName === 'C点' || param.seriesName === '被否决C点') {
@@ -1048,6 +1066,45 @@ function renderChart(klineData, analysisData, period) {
                         }
                     }
                 },
+                // MA5 均线（黄色）
+                {
+                    name: 'MA5',
+                    type: 'line',
+                    data: maData.ma5 || [],
+                    smooth: false,
+                    lineStyle: {
+                        color: '#FFA500',
+                        width: 1.5
+                    },
+                    symbol: 'none',
+                    z: 3
+                },
+                // MA10 均线（蓝色）
+                {
+                    name: 'MA10',
+                    type: 'line',
+                    data: maData.ma10 || [],
+                    smooth: false,
+                    lineStyle: {
+                        color: '#1E90FF',
+                        width: 1.5
+                    },
+                    symbol: 'none',
+                    z: 3
+                },
+                // MA20 均线（紫色）
+                {
+                    name: 'MA20',
+                    type: 'line',
+                    data: maData.ma20 || [],
+                    smooth: false,
+                    lineStyle: {
+                        color: '#9370DB',
+                        width: 1.5
+                    },
+                    symbol: 'none',
+                    z: 3
+                },
                 {
                     name: '成交量',
                     type: 'bar',
@@ -1233,6 +1290,12 @@ async function analyzeCRPointsAuto() {
                 console.log('[实时计算] MACD数据已更新');
             }
             
+            // 保存MA数据（如果有）
+            if (result.data.ma) {
+                window.currentMAData = result.data.ma;
+                console.log('[实时计算] MA数据已更新', Object.keys(result.data.ma));
+            }
+            
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
         } else {
@@ -1288,6 +1351,12 @@ async function analyzeCRPoints() {
             if (result.data.macd) {
                 window.currentMACDData = result.data.macd;
                 console.log('MACD数据已更新');
+            }
+            
+            // 保存MA数据（如果有）
+            if (result.data.ma) {
+                window.currentMAData = result.data.ma;
+                console.log('MA数据已更新', Object.keys(result.data.ma));
             }
             
             // 使用实时计算的结果直接显示
