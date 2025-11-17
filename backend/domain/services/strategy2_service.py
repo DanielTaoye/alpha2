@@ -13,8 +13,8 @@ class Strategy2Service:
     def __init__(self):
         from domain.services.config_service import get_config_service
         self.config_service = get_config_service()  # 配置服务
-        # 用于记录MACD加分的时间窗口
-        self._macd_bonus_records = {}  # {stock_code: {bonus_type: end_date}}
+        # 用于记录加分的时间窗口（MA、MACD等）
+        self._bonus_records = {}  # {stock_code: {bonus_type: end_date}}
     
     def check_strategy2(self, 
                        stock_code: str, 
@@ -51,7 +51,7 @@ class Strategy2Service:
             return False, 0, "数据不完整"
         
         # 1. 均线总分：30分
-        ma_score = self._calculate_ma_score(ma_data, close_price, index, details)
+        ma_score = self._calculate_ma_score(stock_code, date, ma_data, close_price, index, details)
         total_score += ma_score
         
         # 2. MACD总分：30分
@@ -109,10 +109,12 @@ class Strategy2Service:
         
         return True
     
-    def _calculate_ma_score(self, ma_data: Dict, close_price: float, index: int, details: List[str]) -> float:
+    def _calculate_ma_score(self, stock_code: str, date: datetime, ma_data: Dict, 
+                           close_price: float, index: int, details: List[str]) -> float:
         """
         计算均线得分：30分
         条件：5日线上穿10日线 且 K线当前价格 > 20日均线价格
+        一旦触发，5个交易日（包括今天）内持续有效
         """
         score = 0
         
@@ -130,6 +132,13 @@ class Strategy2Service:
         if ma5_prev is None or ma10_prev is None:
             return score
         
+        # 检查是否在5日有效期内
+        bonus_key = f"{stock_code}_ma_golden_cross"
+        if self._check_time_window_bonus(stock_code, date, bonus_key, 5):
+            score = 30
+            details.append("均线30分(MA5金叉MA10+价格>MA20)")
+            return score
+        
         # 判断5日线上穿10日线
         golden_cross = ma5_prev <= ma10_prev and ma5_current > ma10_current
         
@@ -139,6 +148,8 @@ class Strategy2Service:
         if golden_cross and price_above_ma20:
             score = 30
             details.append("均线30分(MA5金叉MA10+价格>MA20)")
+            # 记录这个加分，5日内有效
+            self._record_bonus(stock_code, bonus_key, date, 5)
         
         return score
     
@@ -349,26 +360,26 @@ class Strategy2Service:
     def _check_time_window_bonus(self, stock_code: str, date: datetime, bonus_key: str, 
                                  window_days: int) -> bool:
         """检查时间窗口内的加分是否有效"""
-        if stock_code not in self._macd_bonus_records:
+        if stock_code not in self._bonus_records:
             return False
         
-        if bonus_key not in self._macd_bonus_records[stock_code]:
+        if bonus_key not in self._bonus_records[stock_code]:
             return False
         
-        end_date = self._macd_bonus_records[stock_code][bonus_key]
+        end_date = self._bonus_records[stock_code][bonus_key]
         return date <= end_date
     
     def _record_bonus(self, stock_code: str, bonus_key: str, trigger_date: datetime, 
                      window_days: int):
         """记录加分，设置有效期"""
-        if stock_code not in self._macd_bonus_records:
-            self._macd_bonus_records[stock_code] = {}
+        if stock_code not in self._bonus_records:
+            self._bonus_records[stock_code] = {}
         
         end_date = trigger_date + timedelta(days=window_days)
-        self._macd_bonus_records[stock_code][bonus_key] = end_date
+        self._bonus_records[stock_code][bonus_key] = end_date
         logger.debug(f"记录加分: {bonus_key}, 有效期至 {end_date.strftime('%Y-%m-%d')}")
     
     def clear_cache(self):
         """清空缓存"""
-        self._macd_bonus_records.clear()
+        self._bonus_records.clear()
 
