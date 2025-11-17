@@ -10,6 +10,8 @@ let currentAnalysisController = null;
 let volumeTypeMap = {}; // 存储成交量类型数据，key为日期字符串，value为成交量类型
 let winRatioScoreMap = {}; // 存储赔率总分数据，key为日期字符串，value为total_win_ratio_score
 let bullishPatternMap = {}; // 存储多头组合数据，key为日期字符串，value为多头组合
+let supportPriceMap = {}; // 存储支撑线数据，key为日期字符串，value为支撑价格（整数，需除以100）
+let pressurePriceMap = {}; // 存储压力线数据，key为日期字符串，value为压力价格（整数，需除以100）
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -354,10 +356,12 @@ async function loadStockData(stockCode, tableName, period) {
                 console.error(`[${period}] 成交量类型数据加载异常:`, err);
             });
         } else {
-            // 非日K线，清空成交量类型、赔率总分和多头组合数据
+            // 非日K线，清空成交量类型、赔率总分、多头组合、压力线和支撑线数据
             volumeTypeMap = {};
             winRatioScoreMap = {};
             bullishPatternMap = {};
+            supportPriceMap = {};
+            pressurePriceMap = {};
         }
 
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineData.length}`);
@@ -419,10 +423,12 @@ async function loadVolumeTypes(stockCode) {
             return;
         }
 
-        // 将数据转换为日期到成交量类型、赔率总分和多头组合的映射
+        // 将数据转换为日期到成交量类型、赔率总分、多头组合、压力线和支撑线的映射
         volumeTypeMap = {};
         winRatioScoreMap = {};
         bullishPatternMap = {};
+        supportPriceMap = {};
+        pressurePriceMap = {};
         if (result.data && Array.isArray(result.data)) {
             result.data.forEach(item => {
                 if (item.date) {
@@ -437,15 +443,23 @@ async function loadVolumeTypes(stockCode) {
                     if (item.bullishPattern) {
                         bullishPatternMap[dateStr] = item.bullishPattern;
                     }
+                    if (item.supportPrice !== undefined && item.supportPrice !== null) {
+                        supportPriceMap[dateStr] = item.supportPrice;
+                    }
+                    if (item.pressurePrice !== undefined && item.pressurePrice !== null) {
+                        pressurePriceMap[dateStr] = item.pressurePrice;
+                    }
                 }
             });
-            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条，多头组合: ${Object.keys(bullishPatternMap).length} 条`);
+            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条，多头组合: ${Object.keys(bullishPatternMap).length} 条，支撑线: ${Object.keys(supportPriceMap).length} 条，压力线: ${Object.keys(pressurePriceMap).length} 条`);
         }
     } catch (error) {
         console.error('加载成交量类型数据失败:', error);
         volumeTypeMap = {};
         winRatioScoreMap = {};
         bullishPatternMap = {};
+        supportPriceMap = {};
+        pressurePriceMap = {};
     }
 }
 
@@ -840,79 +854,82 @@ function renderChart(klineData, analysisData, period) {
                             } else {
                                 result += `<span style="color: #00cc00;">⚠️ R点（卖出信号）</span><br/>`;
                             }
-                        } else {
+                        } else if (param.seriesName !== '支撑线' && param.seriesName !== '压力线') {
+                            // 过滤掉支撑线和压力线系列（只显示底部的历史数据）
                             result += `${param.seriesName}: ${param.value}<br/>`;
                         }
                     });
                     
-                    // 显示赔率总分、成交量类型和多头组合（仅日K线）
+                    // 显示策略一相关信息（仅日K线）
                     if (period === 'day' && params[0] && params[0].name) {
                         const dateStr = params[0].name;
                         // 处理日期格式，可能是 "2025-09-23 00:00:00" 或 "2025-09-23"
                         const dateOnly = dateStr.split(' ')[0];
                         
-                        // 显示赔率总分
+                        // 获取基础数据
                         const winRatioScore = winRatioScoreMap[dateOnly];
-                        if (winRatioScore !== undefined && winRatioScore !== null) {
-                            result += `<br/><span style="color: #FFD700; font-weight: bold;">赔率总分: ${winRatioScore.toFixed(2)}</span>`;
-                        }
-                        
-                        // 显示成交量类型
                         const volumeType = volumeTypeMap[dateOnly];
-                        if (volumeType) {
-                            // 将成交量类型列表格式化显示，每种类型换行
-                            const types = volumeType.split(',');
-                            const typeNames = {
-                                'A': 'A(前1日2-3倍)',
-                                'B': 'B(前3日均量2倍+)',
-                                'C': 'C(前5日均量2倍+)',
-                                'D': 'D(前5日ABC放量后1.2倍+)',
-                                'E': 'E(前1日及前5日均值4倍+)',
-                                'F': 'F(前5日ABCD放量后3倍+)',
-                                'G': 'G(前5日ABCD放量后0.7倍+)',
-                                'H': 'H(前5日ABCD放量后大于)',
-                                'X': 'X(前3日均量1.5倍+)',
-                                'Y': 'Y(前5日均量1.5倍+)',
-                                'Z': 'Z(前10日ABC放量+昨日1.3倍+今日1.08倍)'
-                            };
-                            result += `<br/><span style="color: #4a90e2; font-weight: bold;">成交量类型:</span>`;
-                            types.forEach(t => {
-                                const typeLabel = typeNames[t.trim()] || t.trim();
-                                result += `<br/><span style="color: #4a90e2; margin-left: 10px;">• ${typeLabel}</span>`;
-                            });
-                        }
-                        
-                        // 显示多头组合
                         const bullishPattern = bullishPatternMap[dateOnly];
-                        if (bullishPattern) {
-                            // 将多头组合列表格式化显示，每种组合换行
-                            const patterns = bullishPattern.split(',');
-                            result += `<br/><span style="color: #26a69a; font-weight: bold;">多头组合:</span>`;
-                            patterns.forEach(p => {
-                                const patternLabel = p.trim();
-                                result += `<br/><span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span>`;
-                            });
+                        
+                        // 计算成交量总分（根据成交量类型）
+                        function calculateVolumeScore(volumeType) {
+                            if (!volumeType) return 0;
+                            const types = volumeType.split(',').map(t => t.trim());
+                            // E或F：0分
+                            if (types.includes('E') || types.includes('F')) return 0;
+                            // ABCD任意一种：40分
+                            if (types.some(t => ['A', 'B', 'C', 'D'].includes(t))) return 40;
+                            // H：28分
+                            if (types.includes('H')) return 28;
+                            // 其他：0分
+                            return 0;
                         }
                         
-                        // 显示MACD指标
-                        if (macdData && params[0] && params[0].dataIndex !== undefined) {
-                            const dataIndex = params[0].dataIndex;
-                            const dif = macdData.dif[dataIndex];
-                            const dea = macdData.dea[dataIndex];
-                            const macd = macdData.macd[dataIndex];
+                        const volumeScore = calculateVolumeScore(volumeType);
+                        const strategy1TotalScore = (winRatioScore || 0) + volumeScore;
+                        
+                        // 显示策略一标题和总分
+                        if (winRatioScore !== undefined || volumeType) {
+                            result += `<br/><span style="color: #FFD700; font-weight: bold;">策略一: ${strategy1TotalScore.toFixed(2)}分</span>`;
                             
-                            if (dif !== null || dea !== null || macd !== null) {
-                                result += `<br/><span style="color: #8e44ad; font-weight: bold;">MACD指标:</span>`;
-                                if (dif !== null) {
-                                    result += `<br/><span style="color: #FFFFFF; margin-left: 10px;">DIF: ${dif.toFixed(4)}</span>`;
-                                }
-                                if (dea !== null) {
-                                    result += `<br/><span style="color: #FFA500; margin-left: 10px;">DEA: ${dea.toFixed(4)}</span>`;
-                                }
-                                if (macd !== null) {
-                                    const macdColor = macd >= 0 ? '#e74c3c' : '#2ecc71';
-                                    result += `<br/><span style="color: ${macdColor}; margin-left: 10px;">MACD: ${macd.toFixed(4)}</span>`;
-                                }
+                            // 显示赔率总分
+                            if (winRatioScore !== undefined && winRatioScore !== null) {
+                                result += `<br/><span style="color: #FFD700; margin-left: 10px;">赔率总分: ${winRatioScore.toFixed(2)}</span>`;
+                            }
+                            
+                            // 显示成交量总分
+                            if (volumeType) {
+                                result += `<br/><span style="color: #4a90e2; margin-left: 10px;">成交量总分: ${volumeScore}分</span>`;
+                                // 显示成交量类型详情
+                                const types = volumeType.split(',');
+                                const typeNames = {
+                                    'A': 'A(前1日2-3倍)',
+                                    'B': 'B(前3日均量2倍+)',
+                                    'C': 'C(前5日均量2倍+)',
+                                    'D': 'D(前5日ABC放量后1.2倍+)',
+                                    'E': 'E(前1日及前5日均值4倍+)',
+                                    'F': 'F(前5日ABCD放量后3倍+)',
+                                    'G': 'G(前5日ABCD放量后0.7倍+)',
+                                    'H': 'H(前5日ABCD放量后大于)',
+                                    'X': 'X(前3日均量1.5倍+)',
+                                    'Y': 'Y(前5日均量1.5倍+)',
+                                    'Z': 'Z(前10日ABC放量+昨日1.3倍+今日1.08倍)'
+                                };
+                                result += `<br/><span style="color: #4a90e2; font-weight: bold; margin-left: 10px;">成交量类型:</span>`;
+                                types.forEach(t => {
+                                    const typeLabel = typeNames[t.trim()] || t.trim();
+                                    result += `<br/><span style="color: #4a90e2; margin-left: 20px;">• ${typeLabel}</span>`;
+                                });
+                            }
+                            
+                            // 显示多头组合
+                            if (bullishPattern) {
+                                result += `<br/><span style="color: #26a69a; font-weight: bold; margin-left: 10px;">多头组合:</span>`;
+                                const patterns = bullishPattern.split(',');
+                                patterns.forEach(p => {
+                                    const patternLabel = p.trim();
+                                    result += `<br/><span style="color: #26a69a; margin-left: 20px;">• ${patternLabel}</span>`;
+                                });
                             }
                         }
                         
@@ -925,9 +942,32 @@ function renderChart(klineData, analysisData, period) {
                             if (strategy2Score) {
                                 const scoreColor = strategy2Score.score >= 20 ? '#9C27B0' : (strategy2Score.score >= 10 ? '#FF9800' : '#999');
                                 const triggeredText = strategy2Score.triggered ? ' ✓ 已触发' : '';
-                                result += `<br/><span style="color: ${scoreColor}; font-weight: bold;">策略2评分: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span>`;
+                                result += `<br/><span style="color: ${scoreColor}; font-weight: bold;">策略二: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span>`;
                                 if (strategy2Score.reason) {
                                     result += `<br/><span style="color: #999; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span>`;
+                                }
+                            }
+                        }
+                        
+                        // 显示当天的压力线和支撑线（历史数据，数据库存储为整数，需除以100）
+                        if (params[0] && params[0].name) {
+                            const dateStr = params[0].name;
+                            const dateOnly = dateStr.split(' ')[0];
+                            const supportPrice = supportPriceMap[dateOnly];
+                            const pressurePrice = pressurePriceMap[dateOnly];
+                            
+                            if (supportPrice !== undefined || pressurePrice !== undefined) {
+                                result += `<br/>`;
+                                if (supportPrice !== undefined && supportPrice !== null) {
+                                    // 数据库存储的是整数，需要除以100转换为实际价格
+                                    const actualSupportPrice = supportPrice / 100;
+                                    result += `<br/><span style="color: #26a69a; font-weight: bold;">支撑线: ${actualSupportPrice.toFixed(2)}</span>`;
+                                }
+                                
+                                if (pressurePrice !== undefined && pressurePrice !== null) {
+                                    // 数据库存储的是整数，需要除以100转换为实际价格
+                                    const actualPressurePrice = pressurePrice / 100;
+                                    result += `<br/><span style="color: #ef5350; font-weight: bold;">压力线: ${actualPressurePrice.toFixed(2)}</span>`;
                                 }
                             }
                         }
