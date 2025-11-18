@@ -652,9 +652,15 @@ class CPointPluginService:
             if not is_above_support:
                 return CPointPluginResult("R后回支撑位", False, 0, "")
             
-            # 检查是否有多头K线组合（1234）
+            # 检查是否有多头K线组合（1234对应的名称）
+            # 1=十字星+中阳线, 2=触底反弹阳线+阳线, 3=触底反弹阴线+中阳, 4=阳包阴
             bullish_pattern = daily_chance.bullish_pattern or ""
-            has_bullish_pattern = any(p in bullish_pattern for p in ['1', '2', '3', '4'])
+            if bullish_pattern:
+                pattern_names_1234 = ["十字星+中阳线", "触底反弹阳线+阳线", "触底反弹阴线+中阳", "阳包阴"]
+                pattern_list = [p.strip() for p in bullish_pattern.split(',')]
+                has_bullish_pattern = any(p in pattern_names_1234 for p in pattern_list)
+            else:
+                has_bullish_pattern = False
             
             if not has_bullish_pattern:
                 return CPointPluginResult("R后回支撑位", False, 0, "")
@@ -739,7 +745,7 @@ class CPointPluginService:
             # 检查叠加条件1：当日成交量 > R日成交量的0.85倍
             volume_condition = current_data.volume > (r_point_in_range.volume * 0.85)
             
-            # 检查叠加条件2：前一日为多头组合
+            # 检查叠加条件2：前一日为多头组合（任意）
             prev_bullish_condition = False
             if len(prev_dates) >= 1:
                 prev_date = prev_dates[0]
@@ -747,8 +753,9 @@ class CPointPluginService:
                 if not prev_chance:
                     prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
                 
+                # 前一日有多头组合（任意组合都算，不限定1234）
                 if prev_chance and prev_chance.bullish_pattern:
-                    prev_bullish_condition = len(prev_chance.bullish_pattern) > 0
+                    prev_bullish_condition = len(prev_chance.bullish_pattern.strip()) > 0
             
             # 至少满足一个叠加条件
             if not (volume_condition or prev_bullish_condition):

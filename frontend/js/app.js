@@ -10,6 +10,7 @@ let currentAnalysisController = null;
 let volumeTypeMap = {}; // 存储成交量类型数据，key为日期字符串，value为成交量类型
 let winRatioScoreMap = {}; // 存储赔率总分数据，key为日期字符串，value为total_win_ratio_score
 let bullishPatternMap = {}; // 存储多头组合数据，key为日期字符串，value为多头组合
+let bearishPatternMap = {}; // 存储空头组合数据，key为日期字符串，value为空头组合
 let supportPriceMap = {}; // 存储支撑线数据，key为日期字符串，value为支撑价格（整数，需除以100）
 let pressurePriceMap = {}; // 存储压力线数据，key为日期字符串，value为压力价格（整数，需除以100）
 
@@ -356,10 +357,11 @@ async function loadStockData(stockCode, tableName, period) {
                 console.error(`[${period}] 成交量类型数据加载异常:`, err);
             });
         } else {
-            // 非日K线，清空成交量类型、赔率总分、多头组合、压力线和支撑线数据
+            // 非日K线，清空成交量类型、赔率总分、多头组合、空头组合、压力线和支撑线数据
             volumeTypeMap = {};
             winRatioScoreMap = {};
             bullishPatternMap = {};
+            bearishPatternMap = {};
             supportPriceMap = {};
             pressurePriceMap = {};
         }
@@ -423,10 +425,11 @@ async function loadVolumeTypes(stockCode) {
             return;
         }
 
-        // 将数据转换为日期到成交量类型、赔率总分、多头组合、压力线和支撑线的映射
+        // 将数据转换为日期到成交量类型、赔率总分、多头组合、空头组合、压力线和支撑线的映射
         volumeTypeMap = {};
         winRatioScoreMap = {};
         bullishPatternMap = {};
+        bearishPatternMap = {};
         supportPriceMap = {};
         pressurePriceMap = {};
         if (result.data && Array.isArray(result.data)) {
@@ -443,6 +446,9 @@ async function loadVolumeTypes(stockCode) {
                     if (item.bullishPattern) {
                         bullishPatternMap[dateStr] = item.bullishPattern;
                     }
+                    if (item.bearishPattern) {
+                        bearishPatternMap[dateStr] = item.bearishPattern;
+                    }
                     if (item.supportPrice !== undefined && item.supportPrice !== null) {
                         supportPriceMap[dateStr] = item.supportPrice;
                     }
@@ -451,13 +457,14 @@ async function loadVolumeTypes(stockCode) {
                     }
                 }
             });
-            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条，多头组合: ${Object.keys(bullishPatternMap).length} 条，支撑线: ${Object.keys(supportPriceMap).length} 条，压力线: ${Object.keys(pressurePriceMap).length} 条`);
+            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条，多头组合: ${Object.keys(bullishPatternMap).length} 条，空头组合: ${Object.keys(bearishPatternMap).length} 条，支撑线: ${Object.keys(supportPriceMap).length} 条，压力线: ${Object.keys(pressurePriceMap).length} 条`);
         }
     } catch (error) {
         console.error('加载成交量类型数据失败:', error);
         volumeTypeMap = {};
         winRatioScoreMap = {};
         bullishPatternMap = {};
+        bearishPatternMap = {};
         supportPriceMap = {};
         pressurePriceMap = {};
     }
@@ -883,19 +890,30 @@ function renderChart(klineData, analysisData, period) {
                         }
                     });
                     
-                    // 显示多头组合（仅日K线）
+                    // 显示多头组合和空头组合（仅日K线）
                     if (period === 'day' && params[0] && params[0].name) {
                         const dateStr = params[0].name;
                         const dateOnly = dateStr.split(' ')[0];
                         const bullishPattern = bullishPatternMap[dateOnly];
+                        const bearishPattern = bearishPatternMap[dateOnly];
                         
                         // 显示多头组合
                         if (bullishPattern) {
-                            result += `<span style="color: #26a69a; font-weight: bold;">多头组合:</span><br/>`;
+                            result += `<span style="color: #26a69a; font-weight: bold;">📈 多头组合:</span><br/>`;
                             const patterns = bullishPattern.split(',');
                             patterns.forEach(p => {
                                 const patternLabel = p.trim();
                                 result += `<span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span><br/>`;
+                            });
+                        }
+                        
+                        // 显示空头组合
+                        if (bearishPattern) {
+                            result += `<span style="color: #ef5350; font-weight: bold;">📉 空头组合:</span><br/>`;
+                            const patterns = bearishPattern.split(',');
+                            patterns.forEach(p => {
+                                const patternLabel = p.trim();
+                                result += `<span style="color: #ef5350; margin-left: 10px;">• ${patternLabel}</span><br/>`;
                             });
                         }
                         
