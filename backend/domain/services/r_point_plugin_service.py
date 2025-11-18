@@ -360,7 +360,7 @@ class RPointPluginService:
                             return RPointPluginResult(
                                 "临近压力位滞涨",
                                 True,
-                                f"条件2: 距压力位近(赔率{day_win_ratio_score:.1f}<6)+前3日无放量+空头组合"
+                                f"条件2(熊市): 距压力位近(赔率{day_win_ratio_score:.1f}<6)+前3日无放量+空头组合"
                             )
             
             return RPointPluginResult("临近压力位滞涨", False, "")

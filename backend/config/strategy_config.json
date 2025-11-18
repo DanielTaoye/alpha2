@@ -7,7 +7,7 @@
     "c_point_threshold": 65.0,
     "description": "策略2 C点触发阈值（基于MA+MACD+成交量+K线组合）"
   },
-  "market_type": "bull",
+  "market_type": "bear",
   "market_type_description": "市场类型：bull=牛市, bear=熊市（人工判断）",
-  "last_updated": "2025-11-17 15:00:29"
+  "last_updated": "2025-11-18 10:51:45"
 }
