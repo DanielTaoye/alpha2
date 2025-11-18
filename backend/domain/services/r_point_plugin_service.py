@@ -28,8 +28,10 @@ class RPointPluginService:
         """初始化R点插件服务"""
         from infrastructure.persistence.daily_repository_impl import DailyRepositoryImpl
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
+        from domain.services.config_service import ConfigService
         self.daily_repo = DailyRepositoryImpl()
         self.daily_chance_repo = DailyChanceRepositoryImpl()
+        self.config_service = ConfigService()
         # 数据缓存
         self._daily_cache = {}  # {date_str: DailyData}
         self._daily_chance_cache = {}  # {date_str: DailyChance}
@@ -205,7 +207,7 @@ class RPointPluginService:
                     return RPointPluginResult(
                         "乖离率偏离",
                         True,
-                        f"连续{consecutive_limits}个涨停+放量+空头K线"
+                        f"条件1: 连续{consecutive_limits}个涨停+放量+空头K线"
                     )
             
             # === 条件2: 前3日累计涨幅过大 ===
@@ -219,7 +221,7 @@ class RPointPluginService:
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"前3日涨幅{cum_3days:.2f}%+放量+空头K线"
+                            f"条件2: 前3日涨幅{cum_3days:.2f}%+放量+空头K线"
                         )
             
             # === 条件3: 前5日累计涨幅过大 ===
@@ -233,7 +235,7 @@ class RPointPluginService:
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"前5日涨幅{cum_5days:.2f}%+放量+空头K线"
+                            f"条件3: 前5日涨幅{cum_5days:.2f}%+放量+空头K线"
                         )
             
             # === 条件4: 连续5连阳+涨幅过大 ===
@@ -248,7 +250,7 @@ class RPointPluginService:
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"连续5连阳+涨幅{cum_5days_yang:.2f}%+放量+空头K线"
+                            f"条件4: 连续5连阳+涨幅{cum_5days_yang:.2f}%+放量+空头K线"
                         )
             
             # === 条件5: 前15日累计涨幅>50% ===
@@ -261,7 +263,7 @@ class RPointPluginService:
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"前15日涨幅{cum_15days:.2f}%+放量+空头信号"
+                            f"条件5: 前15日涨幅{cum_15days:.2f}%+放量+空头信号"
                         )
             
             # === 条件6: 前20日累计涨幅>50% ===
@@ -274,7 +276,7 @@ class RPointPluginService:
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"前20日涨幅{cum_20days:.2f}%+放量+空头信号"
+                            f"条件6: 前20日涨幅{cum_20days:.2f}%+放量+空头信号"
                         )
             
             return RPointPluginResult("乖离率偏离", False, "")
@@ -312,8 +314,8 @@ class RPointPluginService:
             
             # 计算日线赔率（距离压力位的空间）
             day_win_ratio_score = current_chance.day_win_ratio_score or 0
-            # 赔率分<15分视为距离压力位较近
-            is_near_pressure = day_win_ratio_score < 15
+            # 赔率分<6分视为距离压力位较近
+            is_near_pressure = day_win_ratio_score < 6
             
             if not is_near_pressure:
                 return RPointPluginResult("临近压力位滞涨", False, "")
@@ -332,30 +334,34 @@ class RPointPluginService:
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"距压力位近(赔率{day_win_ratio_score:.1f})+放量+空头K线"
+                        f"条件1: 距压力位近(赔率{day_win_ratio_score:.1f}<6)+放量+空头K线"
                     )
             
-            # === 条件2: 前3日无AXYZ放量 + 空头组合 ===
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
-            if len(prev_dates) >= 3:
-                has_good_volume = False
-                for prev_date in prev_dates[:3]:
-                    prev_chance = self._daily_chance_cache.get(prev_date)
-                    if not prev_chance:
-                        prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
-                    if prev_chance:
-                        if self._check_volume_type(prev_chance, ['A', 'X', 'Y', 'Z']):
-                            has_good_volume = True
-                            break
-                
-                if not has_good_volume:
-                    has_bearish_pattern = self._check_bearish_pattern(current_chance)
-                    if has_bearish_pattern:
-                        return RPointPluginResult(
-                            "临近压力位滞涨",
-                            True,
-                            f"距压力位近(赔率{day_win_ratio_score:.1f})+前3日无放量+空头组合"
-                        )
+            # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
+            market_type = self.config_service.get_market_type()
+            
+            # 条件2仅在熊市生效
+            if market_type == 'bear':
+                prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+                if len(prev_dates) >= 3:
+                    has_good_volume = False
+                    for prev_date in prev_dates[:3]:
+                        prev_chance = self._daily_chance_cache.get(prev_date)
+                        if not prev_chance:
+                            prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
+                        if prev_chance:
+                            if self._check_volume_type(prev_chance, ['A', 'X', 'Y', 'Z']):
+                                has_good_volume = True
+                                break
+                    
+                    if not has_good_volume:
+                        has_bearish_pattern = self._check_bearish_pattern(current_chance)
+                        if has_bearish_pattern:
+                            return RPointPluginResult(
+                                "临近压力位滞涨",
+                                True,
+                                f"条件2: 距压力位近(赔率{day_win_ratio_score:.1f}<6)+前3日无放量+空头组合"
+                            )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
             
