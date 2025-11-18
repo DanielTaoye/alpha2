@@ -30,8 +30,10 @@ class CPointPluginService:
         """初始化插件服务"""
         from infrastructure.persistence.daily_repository_impl import DailyRepositoryImpl
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
+        from domain.services.config_service import get_config_service
         self.daily_repo = DailyRepositoryImpl()
         self.daily_chance_repo = DailyChanceRepositoryImpl()
+        self.config_service = get_config_service()
         # 数据缓存
         self._daily_cache = {}  # {date_str: DailyData}
         self._daily_chance_cache = {}  # {date_str: DailyChance}
@@ -698,8 +700,15 @@ class CPointPluginService:
            - 前一日为多头组合（任意）
         
         满足条件直接发C（返回999分标记）
+        
+        注意：此插件仅在牛市时生效
         """
         try:
+            # 检查市场类型，只在牛市时生效
+            market_type = self.config_service.get_market_type()
+            if market_type != 'bull':
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
             # 获取当日数据
@@ -792,8 +801,15 @@ class CPointPluginService:
         4. 股价突破R日收盘价
         
         满足条件直接发C（返回999分标记）
+        
+        注意：此插件仅在牛市时生效
         """
         try:
+            # 检查市场类型，只在牛市时生效
+            market_type = self.config_service.get_market_type()
+            if market_type != 'bull':
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
             # 获取当日数据
