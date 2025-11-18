@@ -55,6 +55,7 @@ class CRPointService:
         rejected_c_points = []  # 被插件否决的C点
         strategy2_c_points = []  # 策略2触发的C点
         strategy2_scores = {}  # 记录所有K线的策略2评分 {date_str: {score, reason}}
+        strategy1_scores = {}  # 记录所有K线的策略1评分和插件信息 {date_str: {score, base_score, plugins}}
         last_c_point_date: Optional[datetime] = None  # 记录最近的C点日期（用于R点判断）
         
         # CR关系校验：记录最后一个有效点的类型和日期
@@ -67,6 +68,16 @@ class CRPointService:
                 stock_code, 
                 kline.time
             )
+            
+            # 记录所有K线的策略1评分和插件信息（用于前端显示）
+            date_str = kline.time.strftime('%Y-%m-%d')
+            strategy1_scores[date_str] = {
+                'score': c_score,
+                'base_score': base_score,
+                'plugins': c_plugins,
+                'is_c_point': is_c_point,
+                'is_rejected': is_rejected
+            }
             
             # 计算ABC（用于记录）
             abc = self.strategy_service.calculate_abc(
@@ -338,6 +349,12 @@ class CRPointService:
         self.r_point_service.clear_cache()
         self.strategy2_service.clear_cache()
         
+        # 日志输出：确认数据
+        logger.info(f"strategy1_scores 数量: {len(strategy1_scores)}")
+        if strategy1_scores:
+            first_date = list(strategy1_scores.keys())[0]
+            logger.info(f"示例数据 {first_date}: {strategy1_scores[first_date]}")
+        
         return {
             'c_points_count': total_c_count,  # 总C点数（策略1+策略2）
             'r_points_count': len(r_points),
@@ -348,6 +365,7 @@ class CRPointService:
             'r_points': [rp.to_dict() for rp in r_points],
             'rejected_c_points': [rcp.to_dict() for rcp in rejected_c_points],
             'strategy2_c_points': [s2p.to_dict() for s2p in strategy2_c_points],  # 策略2的C点
-            'strategy2_scores': strategy2_scores  # 所有K线的策略2评分
+            'strategy2_scores': strategy2_scores,  # 所有K线的策略2评分
+            'strategy1_scores': strategy1_scores  # 所有K线的策略1评分和插件信息
         }
 

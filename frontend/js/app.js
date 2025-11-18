@@ -777,12 +777,48 @@ function renderChart(klineData, analysisData, period) {
                 },
                 formatter: function(params) {
                     let result = params[0].name + '<br/>';
+                    const currentDate = params[0].name;
+                    // 提取纯日期部分（去掉时间）
+                    const dateOnly = currentDate.split(' ')[0];
+                    
                     params.forEach(param => {
                         if (param.seriesName === 'K线') {
                             result += `开盘: ${param.value[1]}<br/>`;
                             result += `收盘: ${param.value[2]}<br/>`;
                             result += `最低: ${param.value[3]}<br/>`;
                             result += `最高: ${param.value[4]}<br/>`;
+                            
+                            // 显示策略1的评分和插件信息（如果存在）
+                            if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
+                                const s1Data = crPointsData.strategy1_scores[dateOnly];
+                                result += `<br/><span style="color: #00BFFF; font-weight: bold;">📊 策略1评分</span><br/>`;
+                                result += `<span style="color: #FFA500; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
+                                result += `<span style="color: #FFA500; font-size: 11px;">最终分: ${s1Data.score.toFixed(2)}</span><br/>`;
+                                
+                                // 显示触发的插件
+                                if (s1Data.plugins && s1Data.plugins.length > 0) {
+                                    result += `<br/><span style="color: #FFEB3B; font-size: 11px;">🔌 触发插件:</span><br/>`;
+                                    s1Data.plugins.forEach(plugin => {
+                                        const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✅';
+                                        const color = plugin.scoreAdjustment < 0 ? '#FF9800' : '#4CAF50';
+                                        result += `<span style="color: ${color}; font-size: 10px; margin-left: 10px;">${icon} ${plugin.pluginName}</span><br/>`;
+                                        result += `<span style="color: #999; font-size: 9px; margin-left: 15px;">${plugin.reason}</span><br/>`;
+                                        if (plugin.scoreAdjustment !== 0 && plugin.scoreAdjustment !== -999) {
+                                            const scoreText = plugin.scoreAdjustment > 0 ? `+${plugin.scoreAdjustment}` : plugin.scoreAdjustment;
+                                            result += `<span style="color: #999; font-size: 9px; margin-left: 15px;">分数: ${scoreText}分</span><br/>`;
+                                        }
+                                    });
+                                }
+                                
+                                // 显示是否触发C点
+                                if (s1Data.is_c_point) {
+                                    result += `<br/><span style="color: #4CAF50; font-size: 11px;">✅ 触发C点</span><br/>`;
+                                } else if (s1Data.is_rejected) {
+                                    result += `<br/><span style="color: #FF5722; font-size: 11px;">❌ 被插件否决</span><br/>`;
+                                } else {
+                                    result += `<br/><span style="color: #999; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
+                                }
+                            }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
                             // MA均线，只在值存在时显示
                             if (param.value !== null && param.value !== undefined) {
@@ -1323,7 +1359,8 @@ let crPointsData = {
     r_points: [], 
     rejected_c_points: [],
     strategy2_c_points: [],
-    strategy2_scores: {}
+    strategy2_scores: {},
+    strategy1_scores: {}  // 添加策略1评分数据
 };
 let showCRPoints = true; // 默认显示CR点
 
@@ -1355,6 +1392,15 @@ async function analyzeCRPointsAuto() {
         
         const result = await response.json();
         console.log('[实时计算] C点计算结果:', result);
+        
+        // 调试：检查strategy1_scores
+        if (result.data && result.data.strategy1_scores) {
+            console.log('✅ [自动分析] strategy1_scores存在，数量:', Object.keys(result.data.strategy1_scores).length);
+            const firstDate = Object.keys(result.data.strategy1_scores)[0];
+            console.log('[自动分析] 示例数据:', firstDate, result.data.strategy1_scores[firstDate]);
+        } else {
+            console.log('❌ [自动分析] strategy1_scores不存在或为空');
+        }
         
         if (result.code === 200) {
             console.log(`[实时计算] 找到C点: ${result.data.c_points_count}个, R点: ${result.data.r_points_count}个`);
@@ -1417,6 +1463,15 @@ async function analyzeCRPoints() {
         const result = await response.json();
         console.log('CR点分析结果:', result);
         
+        // 调试：检查strategy1_scores
+        if (result.data && result.data.strategy1_scores) {
+            console.log('✅ strategy1_scores存在，数量:', Object.keys(result.data.strategy1_scores).length);
+            const firstDate = Object.keys(result.data.strategy1_scores)[0];
+            console.log('示例数据:', firstDate, result.data.strategy1_scores[firstDate]);
+        } else {
+            console.log('❌ strategy1_scores不存在或为空');
+        }
+        
         if (result.code === 200) {
             const cCount = result.data.c_points_count || 0;
             const rCount = result.data.r_points_count || 0;
@@ -1471,6 +1526,12 @@ async function loadCRPoints(existingData = null) {
             }
             if (existingData.strategy2_scores) {
                 crPointsData.strategy2_scores = existingData.strategy2_scores;
+            }
+            
+            // 添加策略1评分数据
+            if (existingData.strategy1_scores) {
+                crPointsData.strategy1_scores = existingData.strategy1_scores;
+                console.log('✅ 保存strategy1_scores到crPointsData，数量:', Object.keys(existingData.strategy1_scores).length);
             }
             
             console.log('使用已有的CR点数据:', { 
