@@ -66,7 +66,9 @@ class CRPointService:
             # 检查C点策略1（新逻辑：基于赔率分+胜率分+插件）
             is_c_point, c_score, c_strategy, c_plugins, base_score, is_rejected = self.strategy_service.check_c_point_strategy_1(
                 stock_code, 
-                kline.time
+                kline.time,
+                historical_r_points=r_points,
+                historical_c_points=c_points
             )
             
             # 记录所有K线的策略1评分和插件信息（用于前端显示）

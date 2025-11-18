@@ -68,27 +68,33 @@ class CPointPluginService:
         self._daily_cache = {}
         self._daily_chance_cache = {}
     
-    def apply_plugins(self, stock_code: str, date: datetime, base_score: float) -> Tuple[float, List[CPointPluginResult]]:
+    def apply_plugins(self, stock_code: str, date: datetime, base_score: float, 
+                     historical_r_points: Optional[List] = None, 
+                     historical_c_points: Optional[List] = None) -> Tuple[float, List[CPointPluginResult], bool]:
         """
-        应用所有插件，返回调整后的分数和触发的插件列表
+        应用所有插件，返回调整后的分数、触发的插件列表和是否强制发C的标志
         
         Args:
             stock_code: 股票代码
             date: 日期
             base_score: 基础分数（赔率分+胜率分）
+            historical_r_points: 历史R点列表（可选，用于新插件）
+            historical_c_points: 历史C点列表（可选，用于新插件）
             
         Returns:
-            Tuple[final_score, triggered_plugins]
+            Tuple[final_score, triggered_plugins, force_c_point]: 
+                (最终分数, 触发的插件列表, 是否强制发C)
         """
         triggered_plugins = []
         adjusted_score = base_score
+        force_c_point = False  # 是否强制发C点
         
         # 插件1: 阴线检查（一票否决）
         plugin1 = self._check_bearish_line(stock_code, date)
         if plugin1.triggered:
             triggered_plugins.append(plugin1)
             logger.info(f"[插件-阴线] {stock_code} {date}: {plugin1.reason}")
-            return 0, triggered_plugins  # 直接返回0分，不再检查其他插件
+            return 0, triggered_plugins, False  # 直接返回0分，不再检查其他插件
         
         # 插件2: 赔率高胜率低
         plugin2 = self._check_high_ratio_low_win(stock_code, date)
@@ -102,7 +108,7 @@ class CPointPluginService:
         if plugin3.triggered:
             triggered_plugins.append(plugin3)
             logger.info(f"[插件-风险K线] {stock_code} {date}: {plugin3.reason}")
-            return 0, triggered_plugins  # 一票否决
+            return 0, triggered_plugins, False  # 一票否决
         
         # 插件4: 不追涨
         plugin4 = self._check_no_chase_high(stock_code, date)
@@ -115,10 +121,34 @@ class CPointPluginService:
         plugin5 = self._check_sharp_drop_rebound(stock_code, date)
         if plugin5.triggered:
             triggered_plugins.append(plugin5)
-            logger.info(f"[插件-急跌抢反弹] {stock_code} {date}: {plugin5.reason}, 直接发C")
-            return 999, triggered_plugins  # 直接返回高分，确保发C
+            logger.info(f"[插件-急跌抢反弹] {stock_code} {date}: {plugin5.reason}, 强制发C")
+            return adjusted_score, triggered_plugins, True  # 强制发C，保持原分数
         
-        return adjusted_score, triggered_plugins
+        # 插件6: R后回支撑位发C（直接发C）
+        if historical_r_points is not None:
+            plugin6 = self._check_r_back_to_support(stock_code, date, historical_r_points)
+            if plugin6.triggered:
+                triggered_plugins.append(plugin6)
+                logger.info(f"[插件-R后回支撑位] {stock_code} {date}: {plugin6.reason}, 强制发C")
+                return adjusted_score, triggered_plugins, True
+        
+        # 插件7: 阳包阴发C（直接发C）
+        if historical_r_points is not None:
+            plugin7 = self._check_yang_bao_yin(stock_code, date, historical_r_points)
+            if plugin7.triggered:
+                triggered_plugins.append(plugin7)
+                logger.info(f"[插件-阳包阴] {stock_code} {date}: {plugin7.reason}, 强制发C")
+                return adjusted_score, triggered_plugins, True
+        
+        # 插件8: 横盘修整后突破发C（直接发C）
+        if historical_r_points is not None and historical_c_points is not None:
+            plugin8 = self._check_consolidation_breakout(stock_code, date, historical_r_points, historical_c_points)
+            if plugin8.triggered:
+                triggered_plugins.append(plugin8)
+                logger.info(f"[插件-横盘修整后突破] {stock_code} {date}: {plugin8.reason}, 强制发C")
+                return adjusted_score, triggered_plugins, True
+        
+        return adjusted_score, triggered_plugins, False
     
     def _check_bearish_line(self, stock_code: str, date: datetime) -> CPointPluginResult:
         """
@@ -543,7 +573,7 @@ class CPointPluginService:
                     return CPointPluginResult(
                         "急跌抢反弹",
                         True,
-                        999,  # 直接发C标记
+                        0,  # 不调整分数，通过 force_c_point 标志直接发C
                         f"{main_reason}, 今日量缩至{current_volume_shrink*100:.1f}%, 振幅{current_amplitude:.2f}%, {pattern_type}反弹"
                     )
             
@@ -561,7 +591,7 @@ class CPointPluginService:
                     return CPointPluginResult(
                         "急跌抢反弹",
                         True,
-                        999,  # 直接发C标记
+                        0,  # 不调整分数，通过 force_c_point 标志直接发C
                         f"{main_reason}, 昨日量缩至{yesterday_volume_shrink*100:.1f}%且为十字星, 今日阳线反弹"
                     )
             
@@ -570,4 +600,281 @@ class CPointPluginService:
         except Exception as e:
             logger.error(f"插件-急跌抢反弹检查失败: {e}")
             return CPointPluginResult("急跌抢反弹", False, 0, "")
+    
+    def _check_r_back_to_support(self, stock_code: str, date: datetime, historical_r_points: List) -> CPointPluginResult:
+        """
+        插件6: R后回支撑位发C
+        
+        条件：
+        1. 在个股出R以后的3日内
+        2. 重新回到支撑位上方或原本未跌破支撑
+        3. 出现多头K线组合（1234任意一种）
+        4. 当日成交量放大（ABCD任意一种）
+        
+        满足条件直接发C（返回999分标记）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 查找最近的R点（3日内）
+            last_r_point = None
+            for r_point in reversed(historical_r_points):
+                r_date = r_point.trigger_date
+                days_diff = (date - r_date).days
+                if 0 < days_diff <= 3:
+                    last_r_point = r_point
+                    break
+                elif days_diff > 3:
+                    break  # 超过3天，不再查找
+            
+            if not last_r_point:
+                return CPointPluginResult("R后回支撑位", False, 0, "")
+            
+            # 获取当日数据
+            current_data = self._daily_cache.get(date_str)
+            if not current_data:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return CPointPluginResult("R后回支撑位", False, 0, "")
+            
+            # 获取支撑价格
+            daily_chance = self._daily_chance_cache.get(date_str)
+            if not daily_chance:
+                daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            if not daily_chance or not daily_chance.support_price:
+                return CPointPluginResult("R后回支撑位", False, 0, "")
+            
+            support_price = daily_chance.support_price
+            
+            # 检查是否在支撑位上方（收盘价或最低价未跌破支撑位）
+            is_above_support = current_data.close >= support_price or current_data.low >= support_price
+            
+            if not is_above_support:
+                return CPointPluginResult("R后回支撑位", False, 0, "")
+            
+            # 检查是否有多头K线组合（1234）
+            bullish_pattern = daily_chance.bullish_pattern or ""
+            has_bullish_pattern = any(p in bullish_pattern for p in ['1', '2', '3', '4'])
+            
+            if not has_bullish_pattern:
+                return CPointPluginResult("R后回支撑位", False, 0, "")
+            
+            # 检查成交量放大（ABCD）
+            volume_type = daily_chance.volume_type or ""
+            has_volume_increase = any(t in volume_type for t in ['A', 'B', 'C', 'D'])
+            
+            if not has_volume_increase:
+                return CPointPluginResult("R后回支撑位", False, 0, "")
+            
+            # 所有条件满足
+            r_date_str = last_r_point.trigger_date.strftime('%Y-%m-%d')
+            return CPointPluginResult(
+                "R后回支撑位",
+                True,
+                0,  # 不调整分数，通过 force_c_point 标志直接发C
+                f"R点后{(date - last_r_point.trigger_date).days}日, 回到支撑位上方({support_price:.2f}), 多头组合({bullish_pattern}), 放量({volume_type})"
+            )
+            
+        except Exception as e:
+            logger.error(f"插件-R后回支撑位检查失败: {e}")
+            return CPointPluginResult("R后回支撑位", False, 0, "")
+    
+    def _check_yang_bao_yin(self, stock_code: str, date: datetime, historical_r_points: List) -> CPointPluginResult:
+        """
+        插件7: 阳包阴发C
+        
+        条件：
+        1. 从当日往前数15根K线，若出现R
+        2. R日放量（XYZH）
+        3. 当日的收盘价 > R日的开盘价（阳包阴）
+        4. 叠加条件（满足其一）：
+           - 当日成交量 > R日成交量的0.85倍
+           - 前一日为多头组合（任意）
+        
+        满足条件直接发C（返回999分标记）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 获取当日数据
+            current_data = self._daily_cache.get(date_str)
+            if not current_data:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 获取前15个交易日
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if len(prev_dates) < 1:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 查找15日内的R点
+            r_point_in_range = None
+            for r_point in reversed(historical_r_points):
+                r_date = r_point.trigger_date
+                r_date_str = r_date.strftime('%Y-%m-%d')
+                
+                # 检查R点是否在前15个交易日内
+                if r_date_str in prev_dates[:15]:
+                    # 检查R日是否放量（XYZH）
+                    r_daily_chance = self._daily_chance_cache.get(r_date_str)
+                    if not r_daily_chance:
+                        r_daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, r_date_str)
+                    
+                    if r_daily_chance and r_daily_chance.volume_type:
+                        has_r_volume = any(t in r_daily_chance.volume_type for t in ['X', 'Y', 'Z', 'H'])
+                        if has_r_volume:
+                            r_point_in_range = r_point
+                            break
+            
+            if not r_point_in_range:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 检查阳包阴：当日收盘价 > R日开盘价
+            is_yang_bao_yin = current_data.close > r_point_in_range.open_price
+            
+            if not is_yang_bao_yin:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 检查叠加条件1：当日成交量 > R日成交量的0.85倍
+            volume_condition = current_data.volume > (r_point_in_range.volume * 0.85)
+            
+            # 检查叠加条件2：前一日为多头组合
+            prev_bullish_condition = False
+            if len(prev_dates) >= 1:
+                prev_date = prev_dates[0]
+                prev_chance = self._daily_chance_cache.get(prev_date)
+                if not prev_chance:
+                    prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
+                
+                if prev_chance and prev_chance.bullish_pattern:
+                    prev_bullish_condition = len(prev_chance.bullish_pattern) > 0
+            
+            # 至少满足一个叠加条件
+            if not (volume_condition or prev_bullish_condition):
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 所有条件满足
+            r_date_str = r_point_in_range.trigger_date.strftime('%Y-%m-%d')
+            condition_text = []
+            if volume_condition:
+                condition_text.append(f"当日量>{r_point_in_range.volume * 0.85:.0f}")
+            if prev_bullish_condition:
+                condition_text.append("前日多头组合")
+            
+            return CPointPluginResult(
+                "阳包阴",
+                True,
+                0,  # 不调整分数，通过 force_c_point 标志直接发C
+                f"R点({r_date_str}), 阳包阴(收{current_data.close:.2f}>R开{r_point_in_range.open_price:.2f}), {', '.join(condition_text)}"
+            )
+            
+        except Exception as e:
+            logger.error(f"插件-阳包阴检查失败: {e}")
+            return CPointPluginResult("阳包阴", False, 0, "")
+    
+    def _check_consolidation_breakout(self, stock_code: str, date: datetime, 
+                                     historical_r_points: List, historical_c_points: List) -> CPointPluginResult:
+        """
+        插件8: 横盘修整后突破发C
+        
+        条件：
+        1. 往前数30个交易日，若发现R且R后无C
+        2. R后的成交量均小于R日
+        3. 今日成交量出现放量（AXYHZ任意一种）
+        4. 股价突破R日收盘价
+        
+        满足条件直接发C（返回999分标记）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 获取当日数据
+            current_data = self._daily_cache.get(date_str)
+            if not current_data:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 获取当日成交量类型
+            daily_chance = self._daily_chance_cache.get(date_str)
+            if not daily_chance:
+                daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            if not daily_chance:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 检查今日是否放量（AXYHZ）
+            volume_type = daily_chance.volume_type or ""
+            has_volume_increase = any(t in volume_type for t in ['A', 'X', 'Y', 'H', 'Z'])
+            
+            if not has_volume_increase:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 获取前30个交易日
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if len(prev_dates) < 1:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 查找30日内的R点，且R后无C
+            target_r_point = None
+            for r_point in reversed(historical_r_points):
+                r_date = r_point.trigger_date
+                r_date_str = r_date.strftime('%Y-%m-%d')
+                
+                # 检查R点是否在前30个交易日内
+                if r_date_str in prev_dates[:30]:
+                    # 检查R点之后是否有C点
+                    has_c_after_r = False
+                    for c_point in historical_c_points:
+                        c_date = c_point.trigger_date
+                        if r_date < c_date < date:
+                            has_c_after_r = True
+                            break
+                    
+                    if not has_c_after_r:
+                        target_r_point = r_point
+                        break
+            
+            if not target_r_point:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 检查R后的成交量均小于R日
+            r_date = target_r_point.trigger_date
+            r_date_str = r_date.strftime('%Y-%m-%d')
+            r_volume = target_r_point.volume
+            
+            # 获取R点到当日之间的所有交易日
+            dates_after_r = [d for d in prev_dates if d > r_date_str]
+            
+            all_volume_less_than_r = True
+            for check_date in dates_after_r:
+                check_data = self._daily_cache.get(check_date)
+                if not check_data:
+                    check_data = self.daily_repo.find_by_date(stock_code, check_date)
+                
+                if check_data and check_data.volume >= r_volume:
+                    all_volume_less_than_r = False
+                    break
+            
+            if not all_volume_less_than_r:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 检查股价突破R日收盘价
+            is_breakout = current_data.close > target_r_point.close_price
+            
+            if not is_breakout:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
+            # 所有条件满足
+            days_since_r = (date - target_r_point.trigger_date).days
+            return CPointPluginResult(
+                "横盘修整后突破",
+                True,
+                0,  # 不调整分数，通过 force_c_point 标志直接发C
+                f"R点({r_date_str})后{days_since_r}日横盘, R后无C, 今日放量({volume_type})突破R收盘价({target_r_point.close_price:.2f})"
+            )
+            
+        except Exception as e:
+            logger.error(f"插件-横盘修整后突破检查失败: {e}")
+            return CPointPluginResult("横盘修整后突破", False, 0, "")
 

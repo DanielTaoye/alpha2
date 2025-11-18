@@ -76,7 +76,9 @@ class CRStrategyService:
         return ABCComponents(a=a, b=b, c=c)
     
     def check_c_point_strategy_1(self, stock_code: str, date: datetime, volume_type: Optional[str] = None, 
-                                  total_win_rate_score: Optional[float] = None) -> Tuple[bool, float, str, List[Dict[str, Any]], float, bool]:
+                                  total_win_rate_score: Optional[float] = None,
+                                  historical_r_points: Optional[List] = None,
+                                  historical_c_points: Optional[List] = None) -> Tuple[bool, float, str, List[Dict[str, Any]], float, bool]:
         """
         检查是否满足C点策略1（新逻辑 + 插件系统）
         
@@ -97,6 +99,8 @@ class CRStrategyService:
             date: 日期
             volume_type: 成交量类型（可选，如果不传则从数据库查询）
             total_win_rate_score: 赔率分（可选，如果不传则从数据库查询）
+            historical_r_points: 历史R点列表（可选，用于新插件）
+            historical_c_points: 历史C点列表（可选，用于新插件）
             
         Returns:
             Tuple[bool, float, str, List[Dict], float, bool]: 
@@ -132,16 +136,22 @@ class CRStrategyService:
         base_score = win_ratio_score + win_rate_score
         
         # === 计算层（插件）===
-        final_score, triggered_plugins = self.plugin_service.apply_plugins(stock_code, date, base_score)
+        final_score, triggered_plugins, force_c_point = self.plugin_service.apply_plugins(
+            stock_code, date, base_score, historical_r_points, historical_c_points
+        )
         
         # 从配置读取触发阈值
         threshold = self.config_service.get_strategy1_threshold()
         
         # 判断是否触发C点
-        is_triggered = final_score >= threshold
+        # 如果插件强制发C，则直接触发；否则根据分数判断
+        if force_c_point:
+            is_triggered = True
+        else:
+            is_triggered = final_score >= threshold
         
         # 判断是否被插件否决（基础分>=阈值但最终分<阈值）
-        is_rejected_by_plugin = (base_score >= threshold and final_score < threshold)
+        is_rejected_by_plugin = (base_score >= threshold and final_score < threshold and not force_c_point)
         
         # 格式化插件信息
         plugin_dicts = [p.to_dict() for p in triggered_plugins]
