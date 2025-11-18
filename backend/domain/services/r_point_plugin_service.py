@@ -141,9 +141,15 @@ class RPointPluginService:
             if not current_chance:
                 current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
             
+            # 如果没有daily_chance数据，无法判断成交量和空头组合，记录日志
+            if not current_chance:
+                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 无daily_chance数据，跳过检查")
+                return RPointPluginResult("乖离率偏离", False, "")
+            
             # 获取历史数据
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
             if len(prev_dates) < 20:
+                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足20天({len(prev_dates)}天)")
                 return RPointPluginResult("乖离率偏离", False, "")
             
             # 判断当日是否放量（XYH）或（XYZH）
@@ -155,6 +161,12 @@ class RPointPluginService:
             is_bearish_divergence = self._check_bearish_divergence_kline(current_data, is_main_board)
             is_bearish_line = self._check_bearish_line_above_threshold(current_data, is_main_board)
             has_bearish_pattern = self._check_bearish_pattern(current_chance)
+            
+            # 调试日志
+            logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 基础检查: volume_type={current_chance.volume_type}, "
+                        f"is_volume_xyh={is_volume_xyh}, is_volume_xyzh={is_volume_xyzh}, "
+                        f"is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}, "
+                        f"has_bearish_pattern={has_bearish_pattern}")
             
             # 获取前N日数据
             prev_data_list = []
@@ -187,6 +199,8 @@ class RPointPluginService:
                     break
             
             if consecutive_limits >= 2:
+                logger.debug(f"[R点-乖离率偏离-条件1] {stock_code} {date_str} 连续{consecutive_limits}个涨停, "
+                            f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
                 if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
                     return RPointPluginResult(
                         "乖离率偏离",
@@ -199,6 +213,8 @@ class RPointPluginService:
                 cum_3days = sum(change_pcts[:3])
                 threshold_3days = 15 if is_main_board else 20
                 if cum_3days > threshold_3days:
+                    logger.debug(f"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日涨幅{cum_3days:.2f}%>{threshold_3days}%, "
+                                f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
                     if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
                         return RPointPluginResult(
                             "乖离率偏离",
@@ -211,6 +227,8 @@ class RPointPluginService:
                 cum_5days = sum(change_pcts[:5])
                 threshold_5days = 20 if is_main_board else 25
                 if cum_5days > threshold_5days:
+                    logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日涨幅{cum_5days:.2f}%>{threshold_5days}%, "
+                                f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
                     if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
                         return RPointPluginResult(
                             "乖离率偏离",
@@ -224,6 +242,8 @@ class RPointPluginService:
                 cum_5days_yang = sum(change_pcts[:5])
                 threshold_yang = 20 if is_main_board else 25
                 if all_bullish and cum_5days_yang > threshold_yang:
+                    logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳+涨幅{cum_5days_yang:.2f}%>{threshold_yang}%, "
+                                f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
                     if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
                         return RPointPluginResult(
                             "乖离率偏离",
@@ -235,6 +255,8 @@ class RPointPluginService:
             if len(change_pcts) >= 15:
                 cum_15days = sum(change_pcts[:15])
                 if cum_15days > 50:
+                    logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日涨幅{cum_15days:.2f}%>50%, "
+                                f"is_volume_xyzh={is_volume_xyzh}, is_bearish_divergence={is_bearish_divergence}, has_bearish_pattern={has_bearish_pattern}")
                     if is_volume_xyzh and (is_bearish_divergence or has_bearish_pattern):
                         return RPointPluginResult(
                             "乖离率偏离",
@@ -246,6 +268,8 @@ class RPointPluginService:
             if len(change_pcts) >= 20:
                 cum_20days = sum(change_pcts[:20])
                 if cum_20days > 50:
+                    logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{cum_20days:.2f}%>50%, "
+                                f"is_volume_xyzh={is_volume_xyzh}, is_bearish_divergence={is_bearish_divergence}, has_bearish_pattern={has_bearish_pattern}")
                     if is_volume_xyzh and (is_bearish_divergence or has_bearish_pattern):
                         return RPointPluginResult(
                             "乖离率偏离",
