@@ -4,6 +4,7 @@ let allStockGroups = {};
 let currentStrategy = '波段';
 let currentStockCode = '';
 let currentTableName = '';
+let currentPeriod = 'day'; // 当前周期，默认日K线
 let availablePeriods = {};
 let chart = null;
 let currentAnalysisController = null;
@@ -388,6 +389,17 @@ async function loadStockData(stockCode, tableName, period) {
             bearishPatternMap = {};
             supportPriceMap = {};
             pressurePriceMap = {};
+            
+            // 清空CR点数据（30分钟、周线、月线不应该显示CR点）
+            crPointsData = {
+                c_points: [],
+                r_points: [],
+                rejected_c_points: [],
+                strategy2_c_points: [],
+                strategy2_scores: {},
+                strategy1_scores: {}
+            };
+            console.log(`[${period}] 已清空CR点数据（非日K线）`);
         }
 
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineData.length}`);
@@ -402,6 +414,9 @@ async function loadStockData(stockCode, tableName, period) {
                 analyzeCRPointsAuto().catch(err => {
                     console.error('实时计算C点失败:', err);
                 });
+            } else {
+                // 非日K线，更新CR点统计显示提示信息
+                updateCRPointsStats();
             }
         } catch (error) {
             console.error(`[${period}] K线渲染失败:`, error);
@@ -754,6 +769,9 @@ function calculateStartPercent(totalDataPoints, period) {
 // 渲染图表
 function renderChart(klineData, analysisData, period) {
     try {
+        // 更新当前周期
+        currentPeriod = period;
+        
         const chartDom = document.getElementById('mainChart');
         if (!chartDom) {
             console.error('找不到图表容器 mainChart');
@@ -1615,6 +1633,12 @@ function toggleCRPoints() {
 function updateChartWithCRPoints() {
     if (!chart) return;
     
+    // 只在日K线时显示CR点，30分钟、周线、月线不显示
+    if (currentPeriod !== 'day') {
+        console.log(`[${currentPeriod}] 非日K线，跳过CR点渲染`);
+        return;
+    }
+    
     const currentOption = chart.getOption();
     let currentSeries = currentOption.series || [];
     
@@ -1831,6 +1855,12 @@ function updateChartWithCRPoints() {
 function updateCRPointsStats() {
     const statsEl = document.getElementById('crPointsStats');
     if (statsEl) {
+        // 只在日K线时显示CR点统计
+        if (currentPeriod !== 'day') {
+            statsEl.textContent = '仅日K线支持';
+            return;
+        }
+        
         // c_points现在只包含策略1的C点
         const strategy1Count = crPointsData.c_points ? crPointsData.c_points.length : 0;
         const strategy2Count = crPointsData.strategy2_c_points ? crPointsData.strategy2_c_points.length : 0;
