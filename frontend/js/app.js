@@ -936,10 +936,9 @@ function renderChart(klineData, analysisData, period) {
                         // 显示R点信息（在策略2之后、支撑压力线之前）
                         if (rPointInfo) {
                             if (rPointInfo.simple) {
-                                result += `<br/><span style="color: #00cc00;">⚠️ R点（卖出信号）</span><br/>`;
+                                result += `<br/><span style="color: #00cc00;">R点</span><br/>`;
                             } else {
-                                result += `<br/><span style="color: #00cc00; font-weight: bold;">⚠️ R点触发（卖出信号）</span><br/>`;
-                                result += `<span style="color: #888; font-size: 11px;">${rPointInfo.strategy}</span><br/>`;
+                                result += `<br/><span style="color: #00cc00; font-weight: bold;">R点触发</span><br/>`;
                                 
                                 // 显示触发的插件信息
                                 if (rPointInfo.plugins && rPointInfo.plugins.length > 0) {
