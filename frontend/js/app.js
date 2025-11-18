@@ -104,26 +104,50 @@ function updateStockList() {
     });
 }
 
-// 筛选股票（搜索功能）
+// 筛选股票（搜索功能 - 搜索全部股票）
 function filterStocks() {
-    const searchText = document.getElementById('searchInput').value.toLowerCase();
+    const searchText = document.getElementById('searchInput').value.toLowerCase().trim();
     const stockSelect = document.getElementById('stockSelect');
-    const options = stockSelect.querySelectorAll('option');
     
-    options.forEach((option, index) => {
-        if (index === 0) return;
-        
-        const text = option.textContent.toLowerCase();
-        if (text.includes(searchText)) {
-            option.style.display = '';
-        } else {
-            option.style.display = 'none';
-        }
-    });
-
+    // 如果搜索框为空，显示当前策略下的股票
     if (!searchText) {
-        stockSelect.value = '';
+        updateStockList();
+        return;
     }
+    
+    // 搜索全部股票
+    stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
+    
+    let matchCount = 0;
+    
+    // 遍历所有策略组
+    for (const [strategyName, stocks] of Object.entries(allStockGroups)) {
+        stocks.forEach(stock => {
+            const stockText = `${stock.name} ${stock.code}`.toLowerCase();
+            
+            // 如果匹配搜索词
+            if (stockText.includes(searchText)) {
+                const option = document.createElement('option');
+                option.value = stock.code;
+                option.textContent = `${stock.name} (${stock.code}) - ${strategyName}`;
+                option.dataset.name = stock.name;
+                option.dataset.table = stock.table;
+                stockSelect.appendChild(option);
+                matchCount++;
+            }
+        });
+    }
+    
+    // 如果没有匹配结果，显示提示
+    if (matchCount === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = `未找到匹配 "${searchText}" 的股票`;
+        option.disabled = true;
+        stockSelect.appendChild(option);
+    }
+    
+    stockSelect.value = '';
 }
 
 // 选择股票
