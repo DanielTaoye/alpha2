@@ -57,6 +57,10 @@ class CRPointService:
         strategy2_scores = {}  # 记录所有K线的策略2评分 {date_str: {score, reason}}
         last_c_point_date: Optional[datetime] = None  # 记录最近的C点日期（用于R点判断）
         
+        # CR关系校验：记录最后一个有效点的类型和日期
+        last_valid_point_type: Optional[str] = None  # 'C' 或 'R'
+        last_valid_point_date: Optional[datetime] = None
+        
         for index, kline in enumerate(kline_data):
             # 检查C点策略1（新逻辑：基于赔率分+胜率分+插件）
             is_c_point, c_score, c_strategy, c_plugins, base_score, is_rejected = self.strategy_service.check_c_point_strategy_1(
@@ -115,51 +119,126 @@ class CRPointService:
                 }
             
             if is_c_point:
-                # 正常触发的C点
-                cr_point = CRPoint(
-                    stock_code=stock_code,
-                    stock_name=stock_name,
-                    point_type='C',
-                    trigger_date=kline.time,
-                    trigger_price=kline.close,
-                    open_price=kline.open,
-                    high_price=kline.high,
-                    low_price=kline.low,
-                    close_price=kline.close,
-                    volume=kline.volume,
-                    a_value=abc.a,
-                    b_value=abc.b,
-                    c_value=abc.c,
-                    score=c_score,
-                    strategy_name=c_strategy,
-                    plugins=c_plugins  # 添加插件信息
-                )
-                c_points.append(cr_point)
-                # 记录最近的C点日期
-                last_c_point_date = kline.time
+                # CR关系校验：检查C点是否符合规则
+                can_add_c = True
+                rejection_reason = ""
+                
+                if last_valid_point_type == 'C' and last_valid_point_date:
+                    # 两个C之间必须间隔至少3天
+                    days_diff = (kline.time - last_valid_point_date).days
+                    if days_diff < 3:
+                        can_add_c = False
+                        rejection_reason = f"距离上一个C点仅{days_diff}天，不足3天"
+                        logger.info(f"[CR关系校验] C点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
+                
+                if can_add_c:
+                    # 正常触发的C点
+                    cr_point = CRPoint(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        point_type='C',
+                        trigger_date=kline.time,
+                        trigger_price=kline.close,
+                        open_price=kline.open,
+                        high_price=kline.high,
+                        low_price=kline.low,
+                        close_price=kline.close,
+                        volume=kline.volume,
+                        a_value=abc.a,
+                        b_value=abc.b,
+                        c_value=abc.c,
+                        score=c_score,
+                        strategy_name=c_strategy,
+                        plugins=c_plugins  # 添加插件信息
+                    )
+                    c_points.append(cr_point)
+                    # 记录最近的C点日期
+                    last_c_point_date = kline.time
+                    # 更新CR关系状态
+                    last_valid_point_type = 'C'
+                    last_valid_point_date = kline.time
+                else:
+                    # 因CR关系规则被拒绝的C点
+                    rejected_point = CRPoint(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        point_type='C_REJECTED',
+                        trigger_date=kline.time,
+                        trigger_price=kline.close,
+                        open_price=kline.open,
+                        high_price=kline.high,
+                        low_price=kline.low,
+                        close_price=kline.close,
+                        volume=kline.volume,
+                        a_value=abc.a,
+                        b_value=abc.b,
+                        c_value=abc.c,
+                        score=c_score,
+                        strategy_name=c_strategy + f" (CR关系校验: {rejection_reason})",
+                        plugins=c_plugins
+                    )
+                    rejected_c_points.append(rejected_point)
+                    
             elif is_strategy2_c:
-                # 策略2触发的C点（只添加到strategy2_c_points，不添加到c_points避免重复）
-                strategy2_point = CRPoint(
-                    stock_code=stock_code,
-                    stock_name=stock_name,
-                    point_type='C_STRATEGY2',  # 标记为策略2
-                    trigger_date=kline.time,
-                    trigger_price=kline.close,
-                    open_price=kline.open,
-                    high_price=kline.high,
-                    low_price=kline.low,
-                    close_price=kline.close,
-                    volume=kline.volume,
-                    a_value=abc.a,
-                    b_value=abc.b,
-                    c_value=abc.c,
-                    score=strategy2_score,
-                    strategy_name=f"策略2: {strategy2_reason}",
-                    plugins=[]  # 策略2暂不使用插件结构
-                )
-                strategy2_c_points.append(strategy2_point)
-                # 记录最近的C点日期
-                last_c_point_date = kline.time
+                # CR关系校验：检查C点是否符合规则
+                can_add_c = True
+                rejection_reason = ""
+                
+                if last_valid_point_type == 'C' and last_valid_point_date:
+                    # 两个C之间必须间隔至少3天
+                    days_diff = (kline.time - last_valid_point_date).days
+                    if days_diff < 3:
+                        can_add_c = False
+                        rejection_reason = f"距离上一个C点仅{days_diff}天，不足3天"
+                        logger.info(f"[CR关系校验] 策略2 C点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
+                
+                if can_add_c:
+                    # 策略2触发的C点（只添加到strategy2_c_points，不添加到c_points避免重复）
+                    strategy2_point = CRPoint(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        point_type='C_STRATEGY2',  # 标记为策略2
+                        trigger_date=kline.time,
+                        trigger_price=kline.close,
+                        open_price=kline.open,
+                        high_price=kline.high,
+                        low_price=kline.low,
+                        close_price=kline.close,
+                        volume=kline.volume,
+                        a_value=abc.a,
+                        b_value=abc.b,
+                        c_value=abc.c,
+                        score=strategy2_score,
+                        strategy_name=f"策略2: {strategy2_reason}",
+                        plugins=[]  # 策略2暂不使用插件结构
+                    )
+                    strategy2_c_points.append(strategy2_point)
+                    # 记录最近的C点日期
+                    last_c_point_date = kline.time
+                    # 更新CR关系状态
+                    last_valid_point_type = 'C'
+                    last_valid_point_date = kline.time
+                else:
+                    # 因CR关系规则被拒绝的C点
+                    rejected_point = CRPoint(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        point_type='C_REJECTED',
+                        trigger_date=kline.time,
+                        trigger_price=kline.close,
+                        open_price=kline.open,
+                        high_price=kline.high,
+                        low_price=kline.low,
+                        close_price=kline.close,
+                        volume=kline.volume,
+                        a_value=abc.a,
+                        b_value=abc.b,
+                        c_value=abc.c,
+                        score=strategy2_score,
+                        strategy_name=f"策略2: {strategy2_reason} (CR关系校验: {rejection_reason})",
+                        plugins=[]
+                    )
+                    rejected_c_points.append(rejected_point)
             elif is_rejected:
                 # 被插件否决的C点（基础分>=70但最终分<70）
                 rejected_point = CRPoint(
@@ -190,29 +269,64 @@ class CRPointService:
             )
             
             if is_r_point:
-                # 触发R点
-                r_strategy_name = ", ".join([p.plugin_name for p in r_plugins])
-                r_reason = " | ".join([p.reason for p in r_plugins])
+                # CR关系校验：检查R点是否符合规则（不允许RR连续出现）
+                can_add_r = True
+                rejection_reason = ""
                 
-                cr_point = CRPoint(
-                    stock_code=stock_code,
-                    stock_name=stock_name,
-                    point_type='R',
-                    trigger_date=kline.time,
-                    trigger_price=kline.close,
-                    open_price=kline.open,
-                    high_price=kline.high,
-                    low_price=kline.low,
-                    close_price=kline.close,
-                    volume=kline.volume,
-                    a_value=abc.a,
-                    b_value=abc.b,
-                    c_value=abc.c,
-                    score=0,  # R点不需要分数
-                    strategy_name=r_strategy_name,
-                    plugins=[p.to_dict() for p in r_plugins]  # 添加插件信息
-                )
-                r_points.append(cr_point)
+                if last_valid_point_type == 'R':
+                    # 不允许两个R点连续出现
+                    can_add_r = False
+                    rejection_reason = "上一个点是R点，不允许RR连续出现"
+                    logger.info(f"[CR关系校验] R点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
+                
+                if can_add_r:
+                    # 触发R点
+                    r_strategy_name = ", ".join([p.plugin_name for p in r_plugins])
+                    r_reason = " | ".join([p.reason for p in r_plugins])
+                    
+                    cr_point = CRPoint(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        point_type='R',
+                        trigger_date=kline.time,
+                        trigger_price=kline.close,
+                        open_price=kline.open,
+                        high_price=kline.high,
+                        low_price=kline.low,
+                        close_price=kline.close,
+                        volume=kline.volume,
+                        a_value=abc.a,
+                        b_value=abc.b,
+                        c_value=abc.c,
+                        score=0,  # R点不需要分数
+                        strategy_name=r_strategy_name,
+                        plugins=[p.to_dict() for p in r_plugins]  # 添加插件信息
+                    )
+                    r_points.append(cr_point)
+                    # 更新CR关系状态
+                    last_valid_point_type = 'R'
+                    last_valid_point_date = kline.time
+                else:
+                    # 因CR关系规则被拒绝的R点（记录在rejected_c_points中）
+                    rejected_r_point = CRPoint(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        point_type='R_REJECTED',
+                        trigger_date=kline.time,
+                        trigger_price=kline.close,
+                        open_price=kline.open,
+                        high_price=kline.high,
+                        low_price=kline.low,
+                        close_price=kline.close,
+                        volume=kline.volume,
+                        a_value=abc.a,
+                        b_value=abc.b,
+                        c_value=abc.c,
+                        score=0,
+                        strategy_name=", ".join([p.plugin_name for p in r_plugins]) + f" (CR关系校验: {rejection_reason})",
+                        plugins=[p.to_dict() for p in r_plugins]
+                    )
+                    rejected_c_points.append(rejected_r_point)
         
         # 计算总C点数（策略1 + 策略2）
         total_c_count = len(c_points) + len(strategy2_c_points)
