@@ -458,7 +458,7 @@ class RPointPluginService:
             
             # 检查今日赔率
             day_win_ratio_score = current_chance.day_win_ratio_score or 0
-            if day_win_ratio_score >= 25:
+            if day_win_ratio_score >= 10:
                 return RPointPluginResult("上冲乏力", False, "")
             
             # 获取前一日数据
