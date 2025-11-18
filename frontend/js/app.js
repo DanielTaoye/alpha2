@@ -795,32 +795,31 @@ function renderChart(klineData, analysisData, period) {
                             // 显示策略1的评分和插件信息（如果存在）
                             if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
                                 const s1Data = crPointsData.strategy1_scores[dateOnly];
-                                result += `<span style="color: #00BFFF; font-weight: bold;">📊 策略1评分</span><br/>`;
-                                result += `<span style="color: #FFA500; font-size: 11px;">最终分: ${s1Data.score.toFixed(2)}</span><br/>`;
-                                result += `<span style="color: #FFA500; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
+                                result += `<span style="color: #2196F3; font-weight: bold;">📊 策略1评分</span><br/>`;
+                                result += `<span style="color: #2196F3; font-size: 11px;">最终分: ${s1Data.score.toFixed(2)}</span><br/>`;
+                                result += `<span style="color: #2196F3; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
                                 
                                 // 显示触发的插件
                                 if (s1Data.plugins && s1Data.plugins.length > 0) {
-                                    result += `<span style="color: #FFEB3B; font-size: 11px;">🔌 触发插件:</span><br/>`;
+                                    result += `<span style="color: #2196F3; font-size: 11px;">🔌 触发插件:</span><br/>`;
                                     s1Data.plugins.forEach(plugin => {
                                         const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✅';
-                                        const color = plugin.scoreAdjustment < 0 ? '#FF9800' : '#4CAF50';
-                                        result += `<span style="color: ${color}; font-size: 10px; margin-left: 10px;">${icon} ${plugin.pluginName}</span><br/>`;
-                                        result += `<span style="color: #999; font-size: 9px; margin-left: 15px;">${plugin.reason}</span><br/>`;
+                                        result += `<span style="color: #2196F3; font-size: 10px; margin-left: 10px;">${icon} ${plugin.pluginName}</span><br/>`;
+                                        result += `<span style="color: #64B5F6; font-size: 9px; margin-left: 15px;">${plugin.reason}</span><br/>`;
                                         if (plugin.scoreAdjustment !== 0 && plugin.scoreAdjustment !== -999) {
                                             const scoreText = plugin.scoreAdjustment > 0 ? `+${plugin.scoreAdjustment}` : plugin.scoreAdjustment;
-                                            result += `<span style="color: #999; font-size: 9px; margin-left: 15px;">分数: ${scoreText}分</span><br/>`;
+                                            result += `<span style="color: #64B5F6; font-size: 9px; margin-left: 15px;">分数: ${scoreText}分</span><br/>`;
                                         }
                                     });
                                 }
                                 
                                 // 显示是否触发C点
                                 if (s1Data.is_c_point) {
-                                    result += `<span style="color: #4CAF50; font-size: 11px;">✅ 触发C点</span><br/>`;
+                                    result += `<span style="color: #2196F3; font-size: 11px;">✅ 触发C点</span><br/>`;
                                 } else if (s1Data.is_rejected) {
-                                    result += `<span style="color: #FF5722; font-size: 11px;">❌ 被插件否决</span><br/>`;
+                                    result += `<span style="color: #2196F3; font-size: 11px;">❌ 被插件否决</span><br/>`;
                                 } else {
-                                    result += `<span style="color: #999; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
+                                    result += `<span style="color: #64B5F6; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
                                 }
                             }
                             
@@ -831,7 +830,7 @@ function renderChart(klineData, analysisData, period) {
                                 
                                 // 显示赔率总分
                                 if (winRatioScore !== undefined && winRatioScore !== null) {
-                                    result += `<span style="color: #FFD700;">赔率总分: ${winRatioScore.toFixed(2)}</span><br/>`;
+                                    result += `<span style="color: #2196F3;">赔率总分: ${winRatioScore.toFixed(2)}</span><br/>`;
                                 }
                                 
                                 // 计算并显示成交量总分
@@ -845,11 +844,11 @@ function renderChart(klineData, analysisData, period) {
                                         return 0;
                                     }
                                     const volumeScore = calculateVolumeScore(volumeType);
-                                    result += `<span style="color: #4a90e2;">成交量总分: ${volumeScore}分</span><br/>`;
+                                    result += `<span style="color: #2196F3;">成交量总分: ${volumeScore}分</span><br/>`;
                                     
                                     // 显示成交量类型（只显示字母）
                                     const types = volumeType.split(',').map(t => t.trim());
-                                    result += `<span style="color: #4a90e2; font-weight: bold;">成交量类型: ${types.join(', ')}</span><br/>`;
+                                    result += `<span style="color: #2196F3; font-weight: bold;">成交量类型: ${types.join(', ')}</span><br/>`;
                                 }
                             }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
@@ -907,11 +906,10 @@ function renderChart(klineData, analysisData, period) {
                             const strategy2Score = crPointsData.strategy2_scores[dateOnly];
                             
                             if (strategy2Score) {
-                                const scoreColor = strategy2Score.score >= 20 ? '#9C27B0' : (strategy2Score.score >= 10 ? '#FF9800' : '#999');
                                 const triggeredText = strategy2Score.triggered ? ' ✓ 已触发' : '';
-                                result += `<span style="color: ${scoreColor}; font-weight: bold;">策略二: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span><br/>`;
+                                result += `<span style="color: #9C27B0; font-weight: bold;">策略二: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span><br/>`;
                                 if (strategy2Score.reason) {
-                                    result += `<span style="color: #999; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span><br/>`;
+                                    result += `<span style="color: #B968C7; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span><br/>`;
                                 }
                             }
                         }
@@ -919,16 +917,16 @@ function renderChart(klineData, analysisData, period) {
                         // 显示R点信息（在策略2之后、支撑压力线之前）
                         if (rPointInfo) {
                             if (rPointInfo.simple) {
-                                result += `<span style="color: #00cc00;">R点</span><br/>`;
+                                result += `<span style="color: #4CAF50;">R点</span><br/>`;
                             } else {
-                                result += `<span style="color: #00cc00; font-weight: bold;">R点触发</span><br/>`;
+                                result += `<span style="color: #4CAF50; font-weight: bold;">R点触发</span><br/>`;
                                 
                                 // 显示触发的插件信息
                                 if (rPointInfo.plugins && rPointInfo.plugins.length > 0) {
-                                    result += `<span style="color: #ffeb3b; font-weight: bold;">风险插件:</span><br/>`;
+                                    result += `<span style="color: #4CAF50; font-weight: bold;">风险插件:</span><br/>`;
                                     rPointInfo.plugins.forEach(plugin => {
-                                        result += `<span style="color: #ff5722; font-size: 11px; margin-left: 10px;">🛑 ${plugin.pluginName}</span><br/>`;
-                                        result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
+                                        result += `<span style="color: #4CAF50; font-size: 11px; margin-left: 10px;">🛑 ${plugin.pluginName}</span><br/>`;
+                                        result += `<span style="color: #81C784; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
                                     });
                                 }
                             }
