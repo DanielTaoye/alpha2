@@ -795,13 +795,13 @@ function renderChart(klineData, analysisData, period) {
                             // 显示策略1的评分和插件信息（如果存在）
                             if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
                                 const s1Data = crPointsData.strategy1_scores[dateOnly];
-                                result += `<br/><span style="color: #00BFFF; font-weight: bold;">📊 策略1评分</span><br/>`;
+                                result += `<span style="color: #00BFFF; font-weight: bold;">📊 策略1评分</span><br/>`;
                                 result += `<span style="color: #FFA500; font-size: 11px;">最终分: ${s1Data.score.toFixed(2)}</span><br/>`;
                                 result += `<span style="color: #FFA500; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
                                 
                                 // 显示触发的插件
                                 if (s1Data.plugins && s1Data.plugins.length > 0) {
-                                    result += `<br/><span style="color: #FFEB3B; font-size: 11px;">🔌 触发插件:</span><br/>`;
+                                    result += `<span style="color: #FFEB3B; font-size: 11px;">🔌 触发插件:</span><br/>`;
                                     s1Data.plugins.forEach(plugin => {
                                         const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✅';
                                         const color = plugin.scoreAdjustment < 0 ? '#FF9800' : '#4CAF50';
@@ -816,11 +816,11 @@ function renderChart(klineData, analysisData, period) {
                                 
                                 // 显示是否触发C点
                                 if (s1Data.is_c_point) {
-                                    result += `<br/><span style="color: #4CAF50; font-size: 11px;">✅ 触发C点</span><br/>`;
+                                    result += `<span style="color: #4CAF50; font-size: 11px;">✅ 触发C点</span><br/>`;
                                 } else if (s1Data.is_rejected) {
-                                    result += `<br/><span style="color: #FF5722; font-size: 11px;">❌ 被插件否决</span><br/>`;
+                                    result += `<span style="color: #FF5722; font-size: 11px;">❌ 被插件否决</span><br/>`;
                                 } else {
-                                    result += `<br/><span style="color: #999; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
+                                    result += `<span style="color: #999; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
                                 }
                             }
                             
@@ -831,7 +831,7 @@ function renderChart(klineData, analysisData, period) {
                                 
                                 // 显示赔率总分
                                 if (winRatioScore !== undefined && winRatioScore !== null) {
-                                    result += `<br/><span style="color: #FFD700;">赔率总分: ${winRatioScore.toFixed(2)}</span><br/>`;
+                                    result += `<span style="color: #FFD700;">赔率总分: ${winRatioScore.toFixed(2)}</span><br/>`;
                                 }
                                 
                                 // 计算并显示成交量总分
@@ -847,26 +847,9 @@ function renderChart(klineData, analysisData, period) {
                                     const volumeScore = calculateVolumeScore(volumeType);
                                     result += `<span style="color: #4a90e2;">成交量总分: ${volumeScore}分</span><br/>`;
                                     
-                                    // 显示成交量类型详情
-                                    const types = volumeType.split(',');
-                                    const typeNames = {
-                                        'A': 'A(前1日2-3倍)',
-                                        'B': 'B(前3日均量2倍+)',
-                                        'C': 'C(前5日均量2倍+)',
-                                        'D': 'D(前5日ABC放量后1.2倍+)',
-                                        'E': 'E(前1日及前5日均值4倍+)',
-                                        'F': 'F(前5日ABCD放量后3倍+)',
-                                        'G': 'G(前5日ABCD放量后0.7倍+)',
-                                        'H': 'H(前5日ABCD放量后大于)',
-                                        'X': 'X(前3日均量1.5倍+)',
-                                        'Y': 'Y(前5日均量1.5倍+)',
-                                        'Z': 'Z(前10日ABC放量+昨日1.3倍+今日1.08倍)'
-                                    };
-                                    result += `<span style="color: #4a90e2; font-weight: bold;">成交量类型:</span><br/>`;
-                                    types.forEach(t => {
-                                        const typeLabel = typeNames[t.trim()] || t.trim();
-                                        result += `<span style="color: #4a90e2; margin-left: 10px;">• ${typeLabel}</span><br/>`;
-                                    });
+                                    // 显示成交量类型（只显示字母）
+                                    const types = volumeType.split(',').map(t => t.trim());
+                                    result += `<span style="color: #4a90e2; font-weight: bold;">成交量类型: ${types.join(', ')}</span><br/>`;
                                 }
                             }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
@@ -909,11 +892,11 @@ function renderChart(klineData, analysisData, period) {
                         
                         // 显示多头组合
                         if (bullishPattern) {
-                            result += `<br/><span style="color: #26a69a; font-weight: bold;">多头组合:</span>`;
+                            result += `<span style="color: #26a69a; font-weight: bold;">多头组合:</span><br/>`;
                             const patterns = bullishPattern.split(',');
                             patterns.forEach(p => {
                                 const patternLabel = p.trim();
-                                result += `<br/><span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span>`;
+                                result += `<span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span><br/>`;
                             });
                         }
                         
@@ -926,9 +909,9 @@ function renderChart(klineData, analysisData, period) {
                             if (strategy2Score) {
                                 const scoreColor = strategy2Score.score >= 20 ? '#9C27B0' : (strategy2Score.score >= 10 ? '#FF9800' : '#999');
                                 const triggeredText = strategy2Score.triggered ? ' ✓ 已触发' : '';
-                                result += `<br/><span style="color: ${scoreColor}; font-weight: bold;">策略二: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span>`;
+                                result += `<span style="color: ${scoreColor}; font-weight: bold;">策略二: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span><br/>`;
                                 if (strategy2Score.reason) {
-                                    result += `<br/><span style="color: #999; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span>`;
+                                    result += `<span style="color: #999; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span><br/>`;
                                 }
                             }
                         }
@@ -936,20 +919,18 @@ function renderChart(klineData, analysisData, period) {
                         // 显示R点信息（在策略2之后、支撑压力线之前）
                         if (rPointInfo) {
                             if (rPointInfo.simple) {
-                                result += `<br/><span style="color: #00cc00;">R点</span><br/>`;
+                                result += `<span style="color: #00cc00;">R点</span><br/>`;
                             } else {
-                                result += `<br/><span style="color: #00cc00; font-weight: bold;">R点触发</span><br/>`;
+                                result += `<span style="color: #00cc00; font-weight: bold;">R点触发</span><br/>`;
                                 
                                 // 显示触发的插件信息
                                 if (rPointInfo.plugins && rPointInfo.plugins.length > 0) {
-                                    result += `<br/><span style="color: #ffeb3b; font-weight: bold;">风险插件:</span><br/>`;
+                                    result += `<span style="color: #ffeb3b; font-weight: bold;">风险插件:</span><br/>`;
                                     rPointInfo.plugins.forEach(plugin => {
                                         result += `<span style="color: #ff5722; font-size: 11px; margin-left: 10px;">🛑 ${plugin.pluginName}</span><br/>`;
                                         result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
                                     });
                                 }
-                                
-                                result += `<br/><span style="color: #ff5722; font-size: 11px;"></span>`;
                             }
                         }
                         
@@ -961,17 +942,16 @@ function renderChart(klineData, analysisData, period) {
                             const pressurePrice = pressurePriceMap[dateOnly];
                             
                             if (supportPrice !== undefined || pressurePrice !== undefined) {
-                                result += `<br/>`;
                                 if (supportPrice !== undefined && supportPrice !== null) {
                                     // 数据库存储的是整数，需要除以100转换为实际价格
                                     const actualSupportPrice = supportPrice / 100;
-                                    result += `<br/><span style="color: #26a69a; font-weight: bold;">支撑线: ${actualSupportPrice.toFixed(2)}</span>`;
+                                    result += `<span style="color: #26a69a; font-weight: bold;">支撑线: ${actualSupportPrice.toFixed(2)}</span><br/>`;
                                 }
                                 
                                 if (pressurePrice !== undefined && pressurePrice !== null) {
                                     // 数据库存储的是整数，需要除以100转换为实际价格
                                     const actualPressurePrice = pressurePrice / 100;
-                                    result += `<br/><span style="color: #ef5350; font-weight: bold;">压力线: ${actualPressurePrice.toFixed(2)}</span>`;
+                                    result += `<span style="color: #ef5350; font-weight: bold;">压力线: ${actualPressurePrice.toFixed(2)}</span><br/>`;
                                 }
                             }
                         }
@@ -979,7 +959,6 @@ function renderChart(klineData, analysisData, period) {
                     
                     // 最后显示MA均线
                     if (maLines.length > 0) {
-                        result += '<br/>';
                         maLines.forEach(line => {
                             result += line + '<br/>';
                         });
