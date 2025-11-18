@@ -781,6 +781,10 @@ function renderChart(klineData, analysisData, period) {
                     // 提取纯日期部分（去掉时间）
                     const dateOnly = currentDate.split(' ')[0];
                     
+                    // 收集MA数据和R点数据，最后显示
+                    let maLines = [];
+                    let rPointInfo = null;
+                    
                     params.forEach(param => {
                         if (param.seriesName === 'K线') {
                             result += `开盘: ${param.value[1]}<br/>`;
@@ -792,8 +796,8 @@ function renderChart(klineData, analysisData, period) {
                             if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
                                 const s1Data = crPointsData.strategy1_scores[dateOnly];
                                 result += `<br/><span style="color: #00BFFF; font-weight: bold;">📊 策略1评分</span><br/>`;
-                                result += `<span style="color: #FFA500; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
                                 result += `<span style="color: #FFA500; font-size: 11px;">最终分: ${s1Data.score.toFixed(2)}</span><br/>`;
+                                result += `<span style="color: #FFA500; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
                                 
                                 // 显示触发的插件
                                 if (s1Data.plugins && s1Data.plugins.length > 0) {
@@ -819,8 +823,54 @@ function renderChart(klineData, analysisData, period) {
                                     result += `<br/><span style="color: #999; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
                                 }
                             }
+                            
+                            // 显示赔率总分、成交量总分、成交量类型（仅日K线）
+                            if (period === 'day') {
+                                const winRatioScore = winRatioScoreMap[dateOnly];
+                                const volumeType = volumeTypeMap[dateOnly];
+                                
+                                // 显示赔率总分
+                                if (winRatioScore !== undefined && winRatioScore !== null) {
+                                    result += `<br/><span style="color: #FFD700;">赔率总分: ${winRatioScore.toFixed(2)}</span><br/>`;
+                                }
+                                
+                                // 计算并显示成交量总分
+                                if (volumeType) {
+                                    function calculateVolumeScore(volumeType) {
+                                        if (!volumeType) return 0;
+                                        const types = volumeType.split(',').map(t => t.trim());
+                                        if (types.includes('E') || types.includes('F')) return 0;
+                                        if (types.some(t => ['A', 'B', 'C', 'D'].includes(t))) return 40;
+                                        if (types.includes('H')) return 28;
+                                        return 0;
+                                    }
+                                    const volumeScore = calculateVolumeScore(volumeType);
+                                    result += `<span style="color: #4a90e2;">成交量总分: ${volumeScore}分</span><br/>`;
+                                    
+                                    // 显示成交量类型详情
+                                    const types = volumeType.split(',');
+                                    const typeNames = {
+                                        'A': 'A(前1日2-3倍)',
+                                        'B': 'B(前3日均量2倍+)',
+                                        'C': 'C(前5日均量2倍+)',
+                                        'D': 'D(前5日ABC放量后1.2倍+)',
+                                        'E': 'E(前1日及前5日均值4倍+)',
+                                        'F': 'F(前5日ABCD放量后3倍+)',
+                                        'G': 'G(前5日ABCD放量后0.7倍+)',
+                                        'H': 'H(前5日ABCD放量后大于)',
+                                        'X': 'X(前3日均量1.5倍+)',
+                                        'Y': 'Y(前5日均量1.5倍+)',
+                                        'Z': 'Z(前10日ABC放量+昨日1.3倍+今日1.08倍)'
+                                    };
+                                    result += `<span style="color: #4a90e2; font-weight: bold;">成交量类型:</span><br/>`;
+                                    types.forEach(t => {
+                                        const typeLabel = typeNames[t.trim()] || t.trim();
+                                        result += `<span style="color: #4a90e2; margin-left: 10px;">• ${typeLabel}</span><br/>`;
+                                    });
+                                }
+                            }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
-                            // MA均线，只在值存在时显示
+                            // MA均线，收集起来最后显示
                             if (param.value !== null && param.value !== undefined) {
                                 // 统一颜色：MA5白色、MA10黄色、MA20紫色
                                 let maColor = '#FFFFFF';  // 默认白色
@@ -831,64 +881,19 @@ function renderChart(klineData, analysisData, period) {
                                 } else if (param.seriesName === 'MA20') {
                                     maColor = '#9C27B0';  // 紫色
                                 }
-                                result += `<span style="color: ${maColor};">${param.seriesName}: ${param.value.toFixed(2)}</span><br/>`;
+                                maLines.push(`<span style="color: ${maColor};">${param.seriesName}: ${param.value.toFixed(2)}</span>`);
                             }
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
                         } else if (param.seriesName === 'C点' || param.seriesName === '被否决C点' || param.seriesName === '策略2C') {
-                            // C点显示得分信息
-                            if (param.data && param.data.cPointInfo) {
-                                const isRejected = param.data.cPointInfo.isRejected;
-                                const isStrategy2 = param.seriesName === '策略2C';
-                                const titleColor = isRejected ? '#ff9800' : (isStrategy2 ? '#9C27B0' : '#ff4444');
-                                const titleText = isRejected ? '⚠️ 被插件否决的C点' : (isStrategy2 ? '🟣 策略2 C点触发' : '⚫ C点触发');
-                                
-                                result += `<span style="color: ${titleColor}; font-weight: bold;">${titleText}</span><br/>`;
-                                const threshold = isStrategy2 ? 20 : 70;
-                                result += `<span style="color: #ffa500;">得分: ${param.data.cPointInfo.score.toFixed(2)} / ${threshold}</span><br/>`;
-                                result += `<span style="color: #888; font-size: 11px;">${param.data.cPointInfo.strategy}</span><br/>`;
-                                
-                                // 显示触发的插件信息（仅策略1有插件）
-                                if (!isStrategy2 && param.data.cPointInfo.plugins && param.data.cPointInfo.plugins.length > 0) {
-                                    result += `<br/><span style="color: #ffeb3b; font-weight: bold;">🔌 触发的插件:</span><br/>`;
-                                    param.data.cPointInfo.plugins.forEach(plugin => {
-                                        const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✓';
-                                        const color = plugin.scoreAdjustment < 0 ? '#ff9800' : '#4caf50';
-                                        result += `<span style="color: ${color}; font-size: 11px; margin-left: 10px;">${icon} ${plugin.pluginName}</span><br/>`;
-                                        result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
-                                        if (plugin.scoreAdjustment !== 0 && plugin.scoreAdjustment !== -999) {
-                                            const scoreText = plugin.scoreAdjustment > 0 ? `+${plugin.scoreAdjustment}` : plugin.scoreAdjustment;
-                                            result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">分数调整: ${scoreText}分</span><br/>`;
-                                        }
-                                    });
-                                }
-                                
-                                if (isRejected) {
-                                    result += `<br/><span style="color: #ff5722; font-size: 11px;">💡 基础分达标但被插件规则否决</span>`;
-                                } else if (isStrategy2) {
-                                    result += `<br/><span style="color: #9C27B0; font-size: 11px;">💡 基于多维度评分系统触发</span>`;
-                                }
-                            } else {
-                                result += `<span style="color: #ff4444;">⚫ C点</span><br/>`;
-                            }
+                            // C点标记（不显示详细信息，因为K线部分已经显示了）
+                            // 仅保留简单标识
                         } else if (param.seriesName === 'R点') {
-                            // R点显示风险信息
+                            // R点收集信息，稍后显示
                             if (param.data && param.data.rPointInfo) {
-                                result += `<span style="color: #00cc00; font-weight: bold;">⚠️ R点触发（卖出信号）</span><br/>`;
-                                result += `<span style="color: #888; font-size: 11px;">${param.data.rPointInfo.strategy}</span><br/>`;
-                                
-                                // 显示触发的插件信息
-                                if (param.data.rPointInfo.plugins && param.data.rPointInfo.plugins.length > 0) {
-                                    result += `<br/><span style="color: #ffeb3b; font-weight: bold;">⚠️ 风险插件:</span><br/>`;
-                                    param.data.rPointInfo.plugins.forEach(plugin => {
-                                        result += `<span style="color: #ff5722; font-size: 11px; margin-left: 10px;">🛑 ${plugin.pluginName}</span><br/>`;
-                                        result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
-                                    });
-                                }
-                                
-                                result += `<br/><span style="color: #ff5722; font-size: 11px;">💡 建议考虑卖出或止盈</span>`;
+                                rPointInfo = param.data.rPointInfo;
                             } else {
-                                result += `<span style="color: #00cc00;">⚠️ R点（卖出信号）</span><br/>`;
+                                rPointInfo = { simple: true };
                             }
                         } else if (param.seriesName !== '支撑线' && param.seriesName !== '压力线') {
                             // 过滤掉支撑线和压力线系列（只显示底部的历史数据）
@@ -896,77 +901,20 @@ function renderChart(klineData, analysisData, period) {
                         }
                     });
                     
-                    // 显示策略一相关信息（仅日K线）
+                    // 显示多头组合（仅日K线）
                     if (period === 'day' && params[0] && params[0].name) {
                         const dateStr = params[0].name;
-                        // 处理日期格式，可能是 "2025-09-23 00:00:00" 或 "2025-09-23"
                         const dateOnly = dateStr.split(' ')[0];
-                        
-                        // 获取基础数据
-                        const winRatioScore = winRatioScoreMap[dateOnly];
-                        const volumeType = volumeTypeMap[dateOnly];
                         const bullishPattern = bullishPatternMap[dateOnly];
                         
-                        // 计算成交量总分（根据成交量类型）
-                        function calculateVolumeScore(volumeType) {
-                            if (!volumeType) return 0;
-                            const types = volumeType.split(',').map(t => t.trim());
-                            // E或F：0分
-                            if (types.includes('E') || types.includes('F')) return 0;
-                            // ABCD任意一种：40分
-                            if (types.some(t => ['A', 'B', 'C', 'D'].includes(t))) return 40;
-                            // H：28分
-                            if (types.includes('H')) return 28;
-                            // 其他：0分
-                            return 0;
-                        }
-                        
-                        const volumeScore = calculateVolumeScore(volumeType);
-                        const strategy1TotalScore = (winRatioScore || 0) + volumeScore;
-                        
-                        // 显示策略一标题和总分
-                        if (winRatioScore !== undefined || volumeType) {
-                            result += `<br/><span style="color: #FFD700; font-weight: bold;">策略一: ${strategy1TotalScore.toFixed(2)}分</span>`;
-                            
-                            // 显示赔率总分
-                            if (winRatioScore !== undefined && winRatioScore !== null) {
-                                result += `<br/><span style="color: #FFD700; margin-left: 10px;">赔率总分: ${winRatioScore.toFixed(2)}</span>`;
-                            }
-                            
-                            // 显示成交量总分
-                            if (volumeType) {
-                                result += `<br/><span style="color: #4a90e2; margin-left: 10px;">成交量总分: ${volumeScore}分</span>`;
-                                // 显示成交量类型详情
-                                const types = volumeType.split(',');
-                                const typeNames = {
-                                    'A': 'A(前1日2-3倍)',
-                                    'B': 'B(前3日均量2倍+)',
-                                    'C': 'C(前5日均量2倍+)',
-                                    'D': 'D(前5日ABC放量后1.2倍+)',
-                                    'E': 'E(前1日及前5日均值4倍+)',
-                                    'F': 'F(前5日ABCD放量后3倍+)',
-                                    'G': 'G(前5日ABCD放量后0.7倍+)',
-                                    'H': 'H(前5日ABCD放量后大于)',
-                                    'X': 'X(前3日均量1.5倍+)',
-                                    'Y': 'Y(前5日均量1.5倍+)',
-                                    'Z': 'Z(前10日ABC放量+昨日1.3倍+今日1.08倍)'
-                                };
-                                result += `<br/><span style="color: #4a90e2; font-weight: bold; margin-left: 10px;">成交量类型:</span>`;
-                                types.forEach(t => {
-                                    const typeLabel = typeNames[t.trim()] || t.trim();
-                                    result += `<br/><span style="color: #4a90e2; margin-left: 20px;">• ${typeLabel}</span>`;
-                                });
-                            }
-                            
-                            // 显示多头组合
-                            if (bullishPattern) {
-                                result += `<br/><span style="color: #26a69a; font-weight: bold; margin-left: 10px;">多头组合:</span>`;
-                                const patterns = bullishPattern.split(',');
-                                patterns.forEach(p => {
-                                    const patternLabel = p.trim();
-                                    result += `<br/><span style="color: #26a69a; margin-left: 20px;">• ${patternLabel}</span>`;
-                                });
-                            }
+                        // 显示多头组合
+                        if (bullishPattern) {
+                            result += `<br/><span style="color: #26a69a; font-weight: bold;">多头组合:</span>`;
+                            const patterns = bullishPattern.split(',');
+                            patterns.forEach(p => {
+                                const patternLabel = p.trim();
+                                result += `<br/><span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span>`;
+                            });
                         }
                         
                         // 显示策略2评分（所有日K线）
@@ -982,6 +930,27 @@ function renderChart(klineData, analysisData, period) {
                                 if (strategy2Score.reason) {
                                     result += `<br/><span style="color: #999; font-size: 11px; margin-left: 10px;">${strategy2Score.reason}</span>`;
                                 }
+                            }
+                        }
+                        
+                        // 显示R点信息（在策略2之后、支撑压力线之前）
+                        if (rPointInfo) {
+                            if (rPointInfo.simple) {
+                                result += `<br/><span style="color: #00cc00;">⚠️ R点（卖出信号）</span><br/>`;
+                            } else {
+                                result += `<br/><span style="color: #00cc00; font-weight: bold;">⚠️ R点触发（卖出信号）</span><br/>`;
+                                result += `<span style="color: #888; font-size: 11px;">${rPointInfo.strategy}</span><br/>`;
+                                
+                                // 显示触发的插件信息
+                                if (rPointInfo.plugins && rPointInfo.plugins.length > 0) {
+                                    result += `<br/><span style="color: #ffeb3b; font-weight: bold;">风险插件:</span><br/>`;
+                                    rPointInfo.plugins.forEach(plugin => {
+                                        result += `<span style="color: #ff5722; font-size: 11px; margin-left: 10px;">🛑 ${plugin.pluginName}</span><br/>`;
+                                        result += `<span style="color: #999; font-size: 10px; margin-left: 20px;">${plugin.reason}</span><br/>`;
+                                    });
+                                }
+                                
+                                result += `<br/><span style="color: #ff5722; font-size: 11px;"></span>`;
                             }
                         }
                         
@@ -1007,6 +976,14 @@ function renderChart(klineData, analysisData, period) {
                                 }
                             }
                         }
+                    }
+                    
+                    // 最后显示MA均线
+                    if (maLines.length > 0) {
+                        result += '<br/>';
+                        maLines.forEach(line => {
+                            result += line + '<br/>';
+                        });
                     }
                     
                     return result;
