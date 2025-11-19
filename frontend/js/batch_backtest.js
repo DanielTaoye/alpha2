@@ -322,8 +322,8 @@ function displayResults(results, successCount, failCount) {
             // 创建每个单元格
             const cells = [
                 index + 1,
-                result.stock.code || '未知',
-                result.stock.name || '未知',
+                result.stock?.code || '未知',
+                result.stock?.name || '未知',
                 summary.total_trades || 0,
                 `<span class="${totalReturn >= 0 ? 'positive' : 'negative'}">${totalReturn.toFixed(2)}%</span>`,
                 `<span class="${avgReturn >= 0 ? 'positive' : 'negative'}">${avgReturn.toFixed(2)}%</span>`,

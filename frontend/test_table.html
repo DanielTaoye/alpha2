@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>测试表格显示</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: bold; }
+        .positive { color: #e74c3c; }
+        .negative { color: #27ae60; }
+    </style>
+</head>
+<body>
+    <h1>表格显示测试</h1>
+    
+    <h3>测试1：静态HTML表格</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>序号</th>
+                <th>股票代码</th>
+                <th>股票名称</th>
+                <th>交易次数</th>
+                <th>总收益率</th>
+                <th>平均收益率</th>
+                <th>胜率</th>
+                <th>最大收益</th>
+                <th>最大亏损</th>
+                <th>状态</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>1</td>
+                <td>SZ002475</td>
+                <td>立讯精密</td>
+                <td>4</td>
+                <td><span class="positive">87.30%</span></td>
+                <td><span class="positive">21.82%</span></td>
+                <td>50.00%</td>
+                <td><span class="positive">73.24%</span></td>
+                <td><span class="negative">-26.99%</span></td>
+                <td>✓ 成功</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>测试2：JavaScript生成表格</h3>
+    <table id="jsTable">
+        <thead>
+            <tr>
+                <th>序号</th>
+                <th>股票代码</th>
+                <th>股票名称</th>
+                <th>交易次数</th>
+                <th>总收益率</th>
+                <th>平均收益率</th>
+                <th>胜率</th>
+                <th>最大收益</th>
+                <th>最大亏损</th>
+                <th>状态</th>
+            </tr>
+        </thead>
+        <tbody id="jsTableBody">
+        </tbody>
+    </table>
+
+    <button onclick="generateTable()">生成表格</button>
+
+    <script>
+        function generateTable() {
+            const tbody = document.getElementById('jsTableBody');
+            
+            const mockResult = {
+                stock: {
+                    code: 'SZ002475',
+                    name: '立讯精密',
+                    table_name: 'basic_data_sz002475'
+                },
+                success: true,
+                data: {
+                    summary: {
+                        total_trades: 4,
+                        total_return: 87.30,
+                        avg_return: 21.82,
+                        win_rate: 50.00,
+                        max_return: 73.24,
+                        min_return: -26.99
+                    }
+                }
+            };
+            
+            const row = document.createElement('tr');
+            const summary = mockResult.data.summary;
+            
+            const cells = [
+                1,
+                mockResult.stock.code,
+                mockResult.stock.name,
+                summary.total_trades,
+                `<span class="positive">${summary.total_return.toFixed(2)}%</span>`,
+                `<span class="positive">${summary.avg_return.toFixed(2)}%</span>`,
+                `${summary.win_rate.toFixed(2)}%`,
+                `<span class="positive">${summary.max_return.toFixed(2)}%</span>`,
+                `<span class="negative">${summary.min_return.toFixed(2)}%</span>`,
+                '✓ 成功'
+            ];
+            
+            console.log('生成的单元格数据:', cells);
+            row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('');
+            console.log('生成的HTML:', row.innerHTML);
+            
+            tbody.appendChild(row);
+        }
+        
+        // 自动生成
+        generateTable();
+    </script>
+</body>
+</html>
+

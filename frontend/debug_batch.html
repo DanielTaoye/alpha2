@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>调试批量回测数据</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+        button { padding: 12px 24px; margin: 10px 5px; background: #4a90e2; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #357abd; }
+        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        h3 { color: #333; margin-top: 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 调试批量回测数据结构</h1>
+        
+        <button onclick="debugData()">开始调试</button>
+        
+        <div id="output"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        
+        async function debugData() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p>正在调试...</p>';
+            
+            let html = '';
+            
+            try {
+                // 1. 获取股票列表
+                html += '<div class="section"><h3>步骤1: 获取股票列表</h3>';
+                const response = await fetch(API_BASE_URL + '/stock_groups');
+                const data = await response.json();
+                
+                html += '<p><strong>API返回的完整数据：</strong></p>';
+                html += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+                
+                if (data.code === 200 && data.data) {
+                    const strategies = Object.keys(data.data);
+                    const firstStrategy = strategies[0];
+                    const stocks = data.data[firstStrategy];
+                    const firstStock = stocks[0];
+                    
+                    html += '<p><strong>第一个策略：</strong>' + firstStrategy + '</p>';
+                    html += '<p><strong>第一支股票的数据：</strong></p>';
+                    html += '<pre>' + JSON.stringify(firstStock, null, 2) + '</pre>';
+                    
+                    html += '<p><strong>检查字段：</strong></p>';
+                    html += '<ul>';
+                    html += '<li>firstStock.code = ' + (firstStock.code || '❌ 不存在') + '</li>';
+                    html += '<li>firstStock.name = ' + (firstStock.name || '❌ 不存在') + '</li>';
+                    html += '<li>firstStock.table = ' + (firstStock.table || '❌ 不存在') + '</li>';
+                    html += '<li>firstStock.table_name = ' + (firstStock.table_name || '❌ 不存在') + '</li>';
+                    html += '</ul>';
+                    
+                    html += '</div>';
+                    
+                    // 2. 测试CR分析
+                    html += '<div class="section"><h3>步骤2: 测试CR分析</h3>';
+                    html += '<p>测试股票: ' + firstStock.name + ' (' + firstStock.code + ')</p>';
+                    
+                    const crRequestBody = {
+                        stockCode: firstStock.code,
+                        stockName: firstStock.name,
+                        tableName: firstStock.table_name,
+                        period: 'day'
+                    };
+                    
+                    html += '<p><strong>CR分析请求参数：</strong></p>';
+                    html += '<pre>' + JSON.stringify(crRequestBody, null, 2) + '</pre>';
+                    
+                    const crResponse = await fetch(API_BASE_URL + '/cr_analysis', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(crRequestBody)
+                    });
+                    
+                    const crData = await crResponse.json();
+                    
+                    html += '<p><strong>CR分析响应状态：</strong>' + crResponse.status + '</p>';
+                    html += '<p><strong>CR分析响应数据：</strong></p>';
+                    html += '<pre>' + JSON.stringify(crData, null, 2).substring(0, 1000) + '...</pre>';
+                    
+                    html += '</div>';
+                    
+                    // 3. 模拟批量回测结果数据结构
+                    html += '<div class="section"><h3>步骤3: 模拟结果对象</h3>';
+                    
+                    const mockResult = {
+                        stock: firstStock,
+                        success: true,
+                        data: {
+                            summary: {
+                                total_trades: 5,
+                                total_return: 25.5,
+                                avg_return: 5.1,
+                                win_rate: 60,
+                                max_return: 15.2,
+                                min_return: -3.5
+                            }
+                        }
+                    };
+                    
+                    html += '<p><strong>模拟的结果对象：</strong></p>';
+                    html += '<pre>' + JSON.stringify(mockResult, null, 2) + '</pre>';
+                    
+                    html += '<p><strong>访问字段测试：</strong></p>';
+                    html += '<ul>';
+                    html += '<li>result.stock.code = ' + (mockResult.stock.code || '❌ undefined') + '</li>';
+                    html += '<li>result.stock.name = ' + (mockResult.stock.name || '❌ undefined') + '</li>';
+                    html += '<li>result.stock.table_name = ' + (mockResult.stock.table_name || '❌ undefined') + '</li>';
+                    html += '</ul>';
+                    
+                    html += '<p><strong>生成表格HTML测试：</strong></p>';
+                    const summary = mockResult.data.summary;
+                    const testRow = `
+                        <td>1</td>
+                        <td>${mockResult.stock.code}</td>
+                        <td>${mockResult.stock.name}</td>
+                        <td>${summary.total_trades}</td>
+                        <td>${summary.total_return.toFixed(2)}%</td>
+                        <td>${summary.avg_return.toFixed(2)}%</td>
+                        <td>${summary.win_rate.toFixed(2)}%</td>
+                        <td>${summary.max_return.toFixed(2)}%</td>
+                        <td>${summary.min_return.toFixed(2)}%</td>
+                        <td>✓ 成功</td>
+                    `;
+                    
+                    html += '<p>生成的表格行HTML：</p>';
+                    html += '<pre>' + testRow + '</pre>';
+                    
+                    html += '<p><strong>实际渲染效果：</strong></p>';
+                    html += '<table border="1" cellpadding="10">';
+                    html += '<tr><th>序号</th><th>股票代码</th><th>股票名称</th><th>交易次数</th><th>总收益率</th><th>平均收益率</th><th>胜率</th><th>最大收益</th><th>最大亏损</th><th>状态</th></tr>';
+                    html += '<tr>' + testRow + '</tr>';
+                    html += '</table>';
+                    
+                    html += '</div>';
+                }
+                
+                output.innerHTML = html;
+                
+            } catch (error) {
+                output.innerHTML = '<div class="section"><h3>❌ 错误</h3><p>' + error.message + '</p><pre>' + error.stack + '</pre></div>';
+            }
+        }
+    </script>
+</body>
+</html>
+
