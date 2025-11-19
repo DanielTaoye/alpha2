@@ -18,6 +18,7 @@ from interfaces.controllers.analysis_controller import AnalysisController
 from interfaces.controllers.cr_point_controller import CRPointController
 from interfaces.controllers.daily_chance_controller import DailyChanceController
 from interfaces.controllers.config_controller import ConfigController
+from interfaces.controllers.backtest_controller import BacktestController
 from infrastructure.config.app_config import SERVER_CONFIG
 
 # 初始化日志
@@ -34,6 +35,7 @@ analysis_controller = AnalysisController()
 cr_point_controller = CRPointController()
 daily_chance_controller = DailyChanceController()
 config_controller = ConfigController()
+backtest_controller = BacktestController()
 
 
 # ============ 路由定义 ============
@@ -114,6 +116,12 @@ def update_config():
 def reload_config():
     """重新加载配置"""
     return config_controller.reload_config()
+
+
+@app.route('/api/backtest', methods=['POST'])
+def run_backtest():
+    """执行回测"""
+    return backtest_controller.run_backtest()
 
 
 if __name__ == '__main__':

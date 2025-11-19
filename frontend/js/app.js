@@ -228,6 +228,16 @@ function renderStockView(stockCode, stockName, tableName) {
                 </div>
             </div>
         </div>
+        
+        <div class="backtest-section">
+            <button class="backtest-btn" id="backtestBtn" onclick="runBacktest()">
+                📊 运行回测
+            </button>
+            <div class="backtest-hint" style="text-align: center; color: #8899aa; font-size: 13px; margin-top: 10px;">
+                💡 回测功能仅支持日K线，会在切换到日K线时自动启用
+            </div>
+            <div id="backtestResult" class="backtest-result"></div>
+        </div>
     `;
 }
 
@@ -257,6 +267,9 @@ async function changePeriod(period) {
                 btn.classList.add('active');
             }
         });
+        
+        // 更新回测按钮状态
+        updateBacktestButtonState(period);
 
         await loadStockData(currentStockCode, currentTableName, period);
         
@@ -725,6 +738,9 @@ function updateActivePeriodButton(period) {
             btn.classList.add('active');
         }
     });
+    
+    // 更新回测按钮状态
+    updateBacktestButtonState(period);
 }
 
 // 获取周期名称
@@ -1609,6 +1625,15 @@ async function loadCRPoints(existingData = null) {
         // 更新统计信息
         updateCRPointsStats();
         
+        // 如果有C点数据且当前是日K线，更新回测提示
+        if (c_points.length > 0 && currentPeriod === 'day') {
+            const backtestHint = document.querySelector('.backtest-hint');
+            if (backtestHint) {
+                backtestHint.innerHTML = `✅ 已加载${c_points.length}个C点和${r_points.length}个R点，现在可以运行回测了！`;
+                backtestHint.style.color = '#28a745';
+            }
+        }
+        
     } catch (error) {
         console.error('加载CR点失败:', error);
     }
@@ -1875,6 +1900,259 @@ function updateCRPointsStats() {
         text += ` | R点(卖出): ${rCount}`;
         statsEl.textContent = text;
     }
+}
+
+// 更新回测按钮状态
+function updateBacktestButtonState(period) {
+    const backtestBtn = document.getElementById('backtestBtn');
+    const backtestHint = document.querySelector('.backtest-hint');
+    
+    if (!backtestBtn) return;
+    
+    if (period === 'day') {
+        backtestBtn.disabled = false;
+        backtestBtn.style.opacity = '1';
+        backtestBtn.style.cursor = 'pointer';
+        if (backtestHint) {
+            backtestHint.innerHTML = '💡 当前为日K线，可以运行回测';
+            backtestHint.style.color = '#28a745';
+        }
+    } else {
+        backtestBtn.disabled = true;
+        backtestBtn.style.opacity = '0.5';
+        backtestBtn.style.cursor = 'not-allowed';
+        if (backtestHint) {
+            backtestHint.innerHTML = '⚠️ 回测功能仅支持日K线，请切换到日K线周期';
+            backtestHint.style.color = '#ffc107';
+        }
+    }
+}
+
+// 回测功能
+async function runBacktest() {
+    try {
+        // 检查是否有股票数据
+        if (!currentStockCode || !currentTableName) {
+            alert('请先选择股票');
+            return;
+        }
+        
+        // 检查是否是日K线
+        if (currentPeriod !== 'day') {
+            alert('回测功能仅支持日K线，请切换到日K线周期后再试');
+            return;
+        }
+        
+        // 检查是否有CR点数据
+        if (!crPointsData || !crPointsData.c_points || crPointsData.c_points.length === 0) {
+            alert('当前没有C点数据，无法进行回测\n\n提示：\n1. 请确保已切换到日K线\n2. 系统会自动分析日K线的CR点\n3. 等待CR点加载完成后再点击回测');
+            return;
+        }
+        
+        const backtestResult = document.getElementById('backtestResult');
+        backtestResult.innerHTML = `
+            <div class="loading" style="padding: 20px;">
+                <div class="spinner"></div>
+                <p>正在计算回测结果...</p>
+            </div>
+        `;
+        
+        console.log('='.repeat(60));
+        console.log('开始回测:');
+        console.log('  股票代码:', currentStockCode);
+        console.log('  表名:', currentTableName);
+        
+        // 合并策略1和策略2的C点
+        const allCPoints = [
+            ...(crPointsData.c_points || []),
+            ...(crPointsData.strategy2_c_points || [])
+        ];
+        
+        console.log('  策略1 C点数量:', (crPointsData.c_points || []).length);
+        console.log('  策略2 C点数量:', (crPointsData.strategy2_c_points || []).length);
+        console.log('  总C点数量:', allCPoints.length);
+        console.log('  R点数量:', crPointsData.r_points.length);
+        console.log('  所有C点详情:', allCPoints);
+        console.log('  R点详情:', crPointsData.r_points);
+        
+        // 调用回测API
+        const response = await fetch(`${API_BASE_URL}/backtest`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stockCode: currentStockCode,
+                tableName: currentTableName,
+                cPoints: allCPoints,
+                rPoints: crPointsData.r_points
+            })
+        });
+        
+        const result = await response.json();
+        console.log('回测响应:', result);
+        
+        // 检查业务逻辑是否成功（无论HTTP状态码）
+        if (result.code !== 200 || !response.ok) {
+            // 显示详细的错误信息
+            backtestResult.innerHTML = `
+                <div class="error" style="padding: 30px; text-align: center;">
+                    <h3>❌ 回测失败</h3>
+                    <p style="margin-top: 15px; font-size: 14px; color: #ff6b6b; line-height: 1.6;">
+                        ${result.message || '回测失败'}
+                    </p>
+                    <div style="margin-top: 20px; padding: 15px; background: rgba(255,107,107,0.1); border-radius: 8px; font-size: 13px; color: #ffa07a;">
+                        <strong>💡 提示：</strong><br>
+                        1. 该股票可能没有30分钟K线数据<br>
+                        2. 尝试选择其他股票进行回测<br>
+                        3. 或联系管理员检查数据同步
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        // 显示回测结果
+        displayBacktestResult(result.data);
+        
+    } catch (error) {
+        console.error('回测失败:', error);
+        const backtestResult = document.getElementById('backtestResult');
+        backtestResult.innerHTML = `
+            <div class="error" style="padding: 20px;">
+                <h3>❌ 回测失败</h3>
+                <p>${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+// 显示回测结果
+function displayBacktestResult(data) {
+    const backtestResult = document.getElementById('backtestResult');
+    const summary = data.summary;
+    const trades = data.trades;
+    
+    // 如果没有任何交易数据
+    if (!trades || trades.length === 0) {
+        backtestResult.innerHTML = `
+            <div class="error" style="padding: 30px; text-align: center;">
+                <h3>⚠️ 无法生成回测数据</h3>
+                <p style="margin-top: 15px; font-size: 14px; color: #8899aa;">
+                    可能的原因：<br><br>
+                    1. 该股票数据库中没有30分钟K线数据<br>
+                    2. C点触发日期之后没有30分钟K线数据<br>
+                    3. 数据不完整<br><br>
+                    回测需要30分钟K线数据来计算买卖价格
+                </p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = `
+        <div class="backtest-summary">
+            <h3>📊 回测汇总</h3>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span class="summary-label">总交易次数</span>
+                    <span class="summary-value">${summary.total_trades || 0}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">已完成</span>
+                    <span class="summary-value">${summary.completed_trades || 0}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">持仓中</span>
+                    <span class="summary-value">${summary.holding_trades || 0}</span>
+                </div>
+                <div class="summary-item ${summary.win_rate >= 50 ? 'positive' : 'negative'}">
+                    <span class="summary-label">胜率</span>
+                    <span class="summary-value">${summary.win_rate || 0}%</span>
+                </div>
+                <div class="summary-item ${summary.avg_return >= 0 ? 'positive' : 'negative'}">
+                    <span class="summary-label">平均收益率</span>
+                    <span class="summary-value">${summary.avg_return >= 0 ? '+' : ''}${summary.avg_return || 0}%</span>
+                </div>
+                <div class="summary-item ${summary.total_return >= 0 ? 'positive' : 'negative'}">
+                    <span class="summary-label">累计收益率</span>
+                    <span class="summary-value">${summary.total_return >= 0 ? '+' : ''}${summary.total_return || 0}%</span>
+                </div>
+                <div class="summary-item positive">
+                    <span class="summary-label">最大收益</span>
+                    <span class="summary-value">+${summary.max_return || 0}%</span>
+                </div>
+                <div class="summary-item negative">
+                    <span class="summary-label">最大亏损</span>
+                    <span class="summary-value">${summary.min_return || 0}%</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">平均持仓天数</span>
+                    <span class="summary-value">${summary.avg_holding_days || 0}天</span>
+                </div>
+                <div class="summary-item positive">
+                    <span class="summary-label">盈利笔数</span>
+                    <span class="summary-value">${summary.win_count || 0}</span>
+                </div>
+                <div class="summary-item negative">
+                    <span class="summary-label">亏损笔数</span>
+                    <span class="summary-value">${summary.loss_count || 0}</span>
+                </div>
+                <div class="summary-item ${summary.holding_return >= 0 ? 'positive' : 'negative'}">
+                    <span class="summary-label">持仓浮动盈亏</span>
+                    <span class="summary-value">${summary.holding_return >= 0 ? '+' : ''}${summary.holding_return || 0}%</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="backtest-trades">
+            <h3>📋 交易明细</h3>
+            <div class="trades-table-container">
+                <table class="trades-table">
+                    <thead>
+                        <tr>
+                            <th>序号</th>
+                            <th>C点日期</th>
+                            <th>策略</th>
+                            <th>买入价</th>
+                            <th>R点日期</th>
+                            <th>卖出价</th>
+                            <th>收益率</th>
+                            <th>持仓天数</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+    
+    trades.forEach((trade, index) => {
+        const returnClass = trade.return_rate > 0 ? 'positive' : (trade.return_rate < 0 ? 'negative' : '');
+        const statusText = trade.status === 'holding' ? '持仓中' : '已完成';
+        const statusClass = trade.status === 'holding' ? 'holding' : 'completed';
+        
+        html += `
+            <tr>
+                <td>${index + 1}</td>
+                <td>${trade.c_date}</td>
+                <td>${trade.c_strategy}</td>
+                <td>¥${trade.buy_price}</td>
+                <td>${trade.r_date || '-'}</td>
+                <td>${trade.sell_price ? '¥' + trade.sell_price : '-'}</td>
+                <td class="${returnClass}">${trade.return_rate !== null ? (trade.return_rate >= 0 ? '+' : '') + trade.return_rate + '%' : '-'}</td>
+                <td>${trade.days !== null ? trade.days + '天' : '-'}</td>
+                <td><span class="status-badge ${statusClass}">${statusText}${trade.status === 'holding' && trade.return_rate !== null ? ' (浮盈亏' + (trade.return_rate >= 0 ? '+' : '') + trade.return_rate + '%)' : ''}</span></td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+    
+    backtestResult.innerHTML = html;
 }
 
 // 页面加载时初始化
