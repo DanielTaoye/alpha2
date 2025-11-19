@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>测试批量回测API</title>
+</head>
+<body>
+    <h1>测试批量回测API</h1>
+    <button onclick="testAPI()">测试API</button>
+    <pre id="result"></pre>
+
+    <script>
+        async function testAPI() {
+            const result = document.getElementById('result');
+            result.textContent = '测试中...';
+            
+            try {
+                // 1. 测试获取股票分组
+                result.textContent += '\n\n1. 测试获取股票分组...';
+                const response1 = await fetch('http://localhost:5000/api/stock_groups');
+                const data1 = await response1.json();
+                result.textContent += '\n✅ 成功: ' + JSON.stringify(data1, null, 2).substring(0, 300);
+                
+                if (data1.code === 200 && data1.data) {
+                    const firstStrategy = Object.keys(data1.data)[0];
+                    const firstStock = data1.data[firstStrategy][0];
+                    
+                    // 2. 测试CR分析
+                    result.textContent += '\n\n2. 测试CR分析API...';
+                    result.textContent += '\n股票: ' + firstStock.name + ' (' + firstStock.code + ')';
+                    
+                    const response2 = await fetch('http://localhost:5000/api/cr_analysis', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            stockCode: firstStock.code,
+                            stockName: firstStock.name,
+                            tableName: firstStock.table_name,
+                            period: 'day'
+                        })
+                    });
+                    
+                    const contentType2 = response2.headers.get('content-type');
+                    result.textContent += '\nContent-Type: ' + contentType2;
+                    
+                    if (contentType2 && contentType2.includes('application/json')) {
+                        const data2 = await response2.json();
+                        result.textContent += '\n✅ 成功: ' + JSON.stringify(data2, null, 2).substring(0, 500);
+                    } else {
+                        const text = await response2.text();
+                        result.textContent += '\n❌ 错误: 返回了非JSON响应\n' + text.substring(0, 500);
+                    }
+                }
+            } catch (error) {
+                result.textContent += '\n\n❌ 错误: ' + error.message;
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>
+

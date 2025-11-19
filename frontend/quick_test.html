@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>快速诊断工具</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        button { padding: 12px 24px; margin: 10px 5px; background: #4a90e2; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #357abd; }
+        .result { margin: 20px 0; padding: 15px; border-radius: 5px; font-family: monospace; white-space: pre-wrap; }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+        .error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+        .info { background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 快速诊断工具</h1>
+        <p>帮助诊断批量回测405错误</p>
+        
+        <button onclick="testCRAnalysisAPI()">🧪 测试 /api/cr_analysis</button>
+        <button onclick="testBacktestAPI()">🧪 测试 /api/backtest</button>
+        <button onclick="checkServerTime()">⏰ 检查服务器时间</button>
+        <button onclick="clearCache()">🗑️ 清除缓存并重载</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            const timestamp = new Date().toLocaleTimeString();
+            resultDiv.innerHTML = `<div class="result ${type}">[${timestamp}] ${message}</div>`;
+        }
+        
+        async function testCRAnalysisAPI() {
+            showResult('正在测试 /api/cr_analysis API...', 'info');
+            
+            try {
+                // 先测试OPTIONS请求
+                showResult('步骤1: 测试OPTIONS预检请求...', 'info');
+                const optionsResponse = await fetch(API_BASE_URL + '/cr_analysis', {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'content-type'
+                    }
+                });
+                
+                showResult(`OPTIONS请求结果: 
+状态码: ${optionsResponse.status}
+状态文本: ${optionsResponse.statusText}
+允许的方法: ${optionsResponse.headers.get('Allow') || '未指定'}
+
+步骤2: 测试POST请求...`, 'info');
+                
+                // 测试POST请求
+                const postResponse = await fetch(API_BASE_URL + '/cr_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stockCode: 'test001',
+                        stockName: '测试股票',
+                        tableName: 'test_table',
+                        period: 'day'
+                    })
+                });
+                
+                const contentType = postResponse.headers.get('content-type');
+                
+                let message = `POST请求结果:
+状态码: ${postResponse.status}
+状态文本: ${postResponse.statusText}
+Content-Type: ${contentType}
+`;
+                
+                if (postResponse.status === 405) {
+                    message += `\n❌ 错误：405 Method Not Allowed
+                    
+可能原因：
+1. 后端服务没有重启
+2. 路由配置错误
+3. CORS配置问题
+
+解决方法：
+1. 完全关闭后端服务（Ctrl+C）
+2. 重新运行 start.bat
+3. 等待服务完全启动
+4. 刷新此页面（Ctrl+F5强制刷新）`;
+                    showResult(message, 'error');
+                } else if (postResponse.ok || postResponse.status === 400 || postResponse.status === 404) {
+                    // 200, 400, 404都说明路由是工作的
+                    message += '\n✅ API路由工作正常！\n';
+                    if (contentType && contentType.includes('application/json')) {
+                        const result = await postResponse.json();
+                        message += '\n返回数据: ' + JSON.stringify(result, null, 2);
+                    }
+                    showResult(message, 'success');
+                } else {
+                    message += '\n⚠️ 意外的状态码';
+                    showResult(message, 'warning');
+                }
+                
+            } catch (error) {
+                showResult(`❌ 测试失败: ${error.message}\n\n请确认：
+1. 后端服务是否正在运行？
+2. 端口5000是否正确？
+3. 是否有防火墙阻止？`, 'error');
+            }
+        }
+        
+        async function testBacktestAPI() {
+            showResult('正在测试 /api/backtest API...', 'info');
+            
+            try {
+                const response = await fetch(API_BASE_URL + '/backtest', {
+                    method: 'OPTIONS'
+                });
+                
+                let message = `OPTIONS请求结果:
+状态码: ${response.status}
+状态文本: ${response.statusText}
+允许的方法: ${response.headers.get('Allow') || '未指定'}
+`;
+                
+                if (response.status === 405) {
+                    message += '\n❌ 错误：405 Method Not Allowed';
+                    showResult(message, 'error');
+                } else if (response.status === 204 || response.status === 200) {
+                    message += '\n✅ API路由工作正常！';
+                    showResult(message, 'success');
+                } else {
+                    message += '\n⚠️ 意外的状态码';
+                    showResult(message, 'warning');
+                }
+                
+            } catch (error) {
+                showResult(`❌ 测试失败: ${error.message}`, 'error');
+            }
+        }
+        
+        async function checkServerTime() {
+            showResult('正在检查服务器状态...', 'info');
+            
+            try {
+                const response = await fetch(API_BASE_URL + '/stock_groups');
+                const serverTime = response.headers.get('date');
+                
+                let message = `服务器状态: ${response.ok ? '✅ 正常' : '❌ 异常'}
+服务器时间: ${serverTime}
+客户端时间: ${new Date().toString()}
+
+这可以确认后端服务是否在运行。`;
+                
+                showResult(message, response.ok ? 'success' : 'error');
+                
+            } catch (error) {
+                showResult(`❌ 无法连接到服务器！\n\n${error.message}\n\n请确认后端服务是否启动（运行 start.bat）`, 'error');
+            }
+        }
+        
+        function clearCache() {
+            showResult('正在清除缓存并重新加载页面...', 'info');
+            setTimeout(() => {
+                location.reload(true);
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
+

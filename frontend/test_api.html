@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API测试工具</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 10px 5px; background: #4a90e2; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #357abd; }
+        pre { background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .success { color: #27ae60; }
+        .error { color: #e74c3c; }
+        .info { color: #3498db; }
+    </style>
+</head>
+<body>
+    <h1>🔧 API测试工具</h1>
+    <p>用于测试批量回测功能的API接口</p>
+    
+    <div>
+        <button onclick="testStockGroups()">1️⃣ 测试获取股票分组</button>
+        <button onclick="testCRAnalysis()">2️⃣ 测试CR分析</button>
+        <button onclick="testBacktest()">3️⃣ 测试回测</button>
+        <button onclick="clearLog()">🗑️ 清空日志</button>
+    </div>
+    
+    <h3>测试结果：</h3>
+    <pre id="log">等待测试...</pre>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        let testStock = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').textContent = '等待测试...';
+        }
+
+        async function testStockGroups() {
+            log('=== 测试1: 获取股票分组 ===');
+            
+            try {
+                log('发送请求到: ' + API_BASE_URL + '/stock_groups');
+                const response = await fetch(API_BASE_URL + '/stock_groups');
+                
+                log('响应状态: ' + response.status + ' ' + response.statusText);
+                log('Content-Type: ' + response.headers.get('content-type'));
+                
+                if (!response.ok) {
+                    const text = await response.text();
+                    log('错误响应: ' + text.substring(0, 300), 'error');
+                    return;
+                }
+                
+                const result = await response.json();
+                log('✅ 成功获取股票分组', 'success');
+                log('返回代码: ' + result.code);
+                
+                if (result.code === 200 && result.data) {
+                    const strategies = Object.keys(result.data);
+                    log('找到策略: ' + strategies.join(', '));
+                    
+                    for (const strategy of strategies) {
+                        log(`  - ${strategy}: ${result.data[strategy].length}支股票`);
+                    }
+                    
+                    // 保存第一个股票用于测试
+                    const firstStrategy = strategies[0];
+                    testStock = result.data[firstStrategy][0];
+                    log('已保存测试股票: ' + testStock.name + ' (' + testStock.code + ')', 'success');
+                    log('表名: ' + testStock.table_name);
+                } else {
+                    log('返回数据格式异常', 'error');
+                    log(JSON.stringify(result, null, 2));
+                }
+                
+            } catch (error) {
+                log('❌ 测试失败: ' + error.message, 'error');
+                console.error(error);
+            }
+        }
+
+        async function testCRAnalysis() {
+            log('\n=== 测试2: CR分析 ===');
+            
+            if (!testStock) {
+                log('❌ 请先运行测试1获取股票数据', 'error');
+                return;
+            }
+            
+            try {
+                const requestBody = {
+                    stockCode: testStock.code,
+                    stockName: testStock.name,
+                    tableName: testStock.table_name,
+                    period: 'day'
+                };
+                
+                log('测试股票: ' + testStock.name + ' (' + testStock.code + ')');
+                log('请求参数: ' + JSON.stringify(requestBody, null, 2));
+                log('发送请求到: ' + API_BASE_URL + '/cr_analysis');
+                
+                const response = await fetch(API_BASE_URL + '/cr_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                log('响应状态: ' + response.status + ' ' + response.statusText);
+                log('Content-Type: ' + response.headers.get('content-type'));
+                
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    log('❌ API返回非JSON响应', 'error');
+                    log('响应内容: ' + text.substring(0, 500), 'error');
+                    return;
+                }
+                
+                const result = await response.json();
+                log('返回代码: ' + result.code);
+                
+                if (result.code === 200) {
+                    log('✅ CR分析成功', 'success');
+                    log('C点数量: ' + (result.data.c_points ? result.data.c_points.length : 0));
+                    log('R点数量: ' + (result.data.r_points ? result.data.r_points.length : 0));
+                } else {
+                    log('❌ CR分析失败: ' + result.message, 'error');
+                }
+                
+            } catch (error) {
+                log('❌ 测试失败: ' + error.message, 'error');
+                console.error(error);
+            }
+        }
+
+        async function testBacktest() {
+            log('\n=== 测试3: 回测功能 ===');
+            
+            if (!testStock) {
+                log('❌ 请先运行测试1获取股票数据', 'error');
+                return;
+            }
+            
+            try {
+                log('步骤1: 获取CR点数据...');
+                
+                // 先获取CR点
+                const crResponse = await fetch(API_BASE_URL + '/cr_analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        stockCode: testStock.code,
+                        stockName: testStock.name,
+                        tableName: testStock.table_name,
+                        period: 'day'
+                    })
+                });
+                
+                const crResult = await crResponse.json();
+                
+                if (crResult.code !== 200) {
+                    log('❌ 获取CR点失败: ' + crResult.message, 'error');
+                    return;
+                }
+                
+                const cPoints = crResult.data.c_points || [];
+                const rPoints = crResult.data.r_points || [];
+                log(`找到C点${cPoints.length}个, R点${rPoints.length}个`);
+                
+                if (cPoints.length === 0) {
+                    log('⚠️ 该股票没有C点，无法测试回测', 'error');
+                    return;
+                }
+                
+                log('步骤2: 执行回测...');
+                
+                const backtestResponse = await fetch(API_BASE_URL + '/backtest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        stockCode: testStock.code,
+                        tableName: testStock.table_name,
+                        cPoints: cPoints,
+                        rPoints: rPoints
+                    })
+                });
+                
+                const backtestResult = await backtestResponse.json();
+                
+                if (backtestResult.code === 200) {
+                    log('✅ 回测成功', 'success');
+                    const summary = backtestResult.data.summary;
+                    log('总交易次数: ' + summary.total_trades);
+                    log('平均收益率: ' + summary.avg_return + '%');
+                    log('胜率: ' + summary.win_rate + '%');
+                } else {
+                    log('❌ 回测失败: ' + backtestResult.message, 'error');
+                }
+                
+            } catch (error) {
+                log('❌ 测试失败: ' + error.message, 'error');
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>
+

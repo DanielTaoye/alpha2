@@ -25,7 +25,7 @@ class StockApplicationService:
                 {
                     'name': stock.name,
                     'code': stock.code,
-                    'table': stock.table_name
+                    'table_name': stock.table_name  # 修改为table_name以匹配前端
                 }
                 for stock in stocks
             ]

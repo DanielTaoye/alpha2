@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>检查路由配置</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+        h1 { color: #333; }
+        button { padding: 12px 24px; background: #4a90e2; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #357abd; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #4a90e2; color: white; }
+        tr:hover { background: #f5f5f5; }
+        .found { color: #27ae60; font-weight: bold; }
+        .not-found { color: #e74c3c; font-weight: bold; }
+        .methods { color: #3498db; font-family: monospace; }
+        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 检查服务器路由配置</h1>
+        <p>这个工具会检查服务器是否正确注册了批量回测所需的API路由</p>
+        
+        <button onclick="checkRoutes()">🔎 检查路由配置</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function checkRoutes() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<p>正在检查...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:5000/api/debug/routes');
+                const data = await response.json();
+                
+                const routes = data.routes;
+                
+                // 检查关键路由
+                const crAnalysisRoute = routes.find(r => r.path === '/api/cr_analysis');
+                const backtestRoute = routes.find(r => r.path === '/api/backtest');
+                
+                let html = '<h2>路由检查结果</h2>';
+                
+                // 检查 cr_analysis
+                html += '<h3>1. /api/cr_analysis</h3>';
+                if (crAnalysisRoute) {
+                    html += `<p class="found">✅ 已找到</p>`;
+                    html += `<p class="methods">支持的方法: ${crAnalysisRoute.methods.join(', ')}</p>`;
+                    
+                    if (crAnalysisRoute.methods.includes('POST') && crAnalysisRoute.methods.includes('OPTIONS')) {
+                        html += '<p class="found">✅ POST和OPTIONS方法都已配置</p>';
+                    } else if (crAnalysisRoute.methods.includes('POST')) {
+                        html += '<p class="not-found">❌ 只有POST，缺少OPTIONS方法</p>';
+                        html += '<p><strong>这就是405错误的原因！</strong></p>';
+                    } else {
+                        html += '<p class="not-found">❌ 缺少POST方法</p>';
+                    }
+                } else {
+                    html += '<p class="not-found">❌ 未找到此路由</p>';
+                }
+                
+                // 检查 backtest
+                html += '<h3>2. /api/backtest</h3>';
+                if (backtestRoute) {
+                    html += `<p class="found">✅ 已找到</p>`;
+                    html += `<p class="methods">支持的方法: ${backtestRoute.methods.join(', ')}</p>`;
+                    
+                    if (backtestRoute.methods.includes('POST') && backtestRoute.methods.includes('OPTIONS')) {
+                        html += '<p class="found">✅ POST和OPTIONS方法都已配置</p>';
+                    } else {
+                        html += '<p class="not-found">⚠️ 可能缺少OPTIONS方法</p>';
+                    }
+                } else {
+                    html += '<p class="not-found">❌ 未找到此路由</p>';
+                }
+                
+                // 显示所有API路由
+                html += '<h3>所有API路由列表</h3>';
+                html += '<table>';
+                html += '<tr><th>路径</th><th>方法</th><th>端点</th></tr>';
+                
+                routes
+                    .filter(r => r.path.startsWith('/api/'))
+                    .sort((a, b) => a.path.localeCompare(b.path))
+                    .forEach(route => {
+                        const methodsList = route.methods.filter(m => m !== 'HEAD').join(', ');
+                        html += `<tr>
+                            <td><code>${route.path}</code></td>
+                            <td class="methods">${methodsList}</td>
+                            <td>${route.endpoint}</td>
+                        </tr>`;
+                    });
+                
+                html += '</table>';
+                
+                // 诊断结论
+                html += '<h2>🔍 诊断结论</h2>';
+                if (crAnalysisRoute && crAnalysisRoute.methods.includes('POST') && crAnalysisRoute.methods.includes('OPTIONS')) {
+                    html += '<div style="background: #d4edda; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745;">';
+                    html += '<p class="found">✅ 路由配置正确！</p>';
+                    html += '<p>如果仍然出现405错误，请：</p>';
+                    html += '<ol>';
+                    html += '<li>清除浏览器缓存（Ctrl+Shift+Delete）</li>';
+                    html += '<li>使用无痕模式重试</li>';
+                    html += '<li>检查是否有代理或VPN干扰</li>';
+                    html += '</ol>';
+                    html += '</div>';
+                } else {
+                    html += '<div style="background: #f8d7da; padding: 20px; border-radius: 8px; border-left: 5px solid #dc3545;">';
+                    html += '<p class="not-found">❌ 路由配置有问题</p>';
+                    html += '<p><strong>问题原因：</strong></p>';
+                    if (!crAnalysisRoute) {
+                        html += '<p>• /api/cr_analysis 路由未注册</p>';
+                    } else if (!crAnalysisRoute.methods.includes('OPTIONS')) {
+                        html += '<p>• /api/cr_analysis 缺少OPTIONS方法支持</p>';
+                    }
+                    html += '<p><strong>解决方法：</strong></p>';
+                    html += '<ol>';
+                    html += '<li><strong style="color: red;">确认backend/app.py文件已保存</strong></li>';
+                    html += '<li>完全关闭后端服务（在命令行窗口按Ctrl+C）</li>';
+                    html += '<li>重新运行 start.bat</li>';
+                    html += '<li>等待服务完全启动（看到"Running on..."）</li>';
+                    html += '<li>重新加载本页面检查</li>';
+                    html += '</ol>';
+                    html += '</div>';
+                }
+                
+                resultDiv.innerHTML = html;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div style="background: #f8d7da; padding: 20px; border-radius: 8px;">
+                        <h2 class="not-found">❌ 无法连接到服务器</h2>
+                        <p>错误: ${error.message}</p>
+                        <p><strong>请确认：</strong></p>
+                        <ol>
+                            <li>后端服务是否正在运行？</li>
+                            <li>是否运行了 start.bat？</li>
+                            <li>端口5000是否被其他程序占用？</li>
+                        </ol>
+                    </div>
+                `;
+            }
+        }
+        
+        // 页面加载时自动检查
+        window.addEventListener('DOMContentLoaded', checkRoutes);
+    </script>
+</body>
+</html>
+

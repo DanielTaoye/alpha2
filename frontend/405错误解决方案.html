@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>405错误解决方案</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        h1 { color: #e74c3c; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
+        h2 { color: #3498db; margin-top: 30px; }
+        h3 { color: #2c3e50; }
+        .step { background: #f8f9fa; padding: 20px; margin: 15px 0; border-radius: 10px; border-left: 5px solid #3498db; }
+        .step-number { display: inline-block; width: 30px; height: 30px; background: #3498db; color: white; text-align: center; line-height: 30px; border-radius: 50%; font-weight: bold; margin-right: 10px; }
+        .warning { background: #fff3cd; border: 2px solid #ffc107; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        .success { background: #d4edda; border: 2px solid #28a745; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        .error { background: #f8d7da; border: 2px solid #dc3545; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        code { background: #e9ecef; padding: 3px 8px; border-radius: 4px; font-family: 'Courier New', monospace; color: #e74c3c; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        .btn { display: inline-block; padding: 12px 30px; margin: 10px 5px; background: #3498db; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: all 0.3s; }
+        .btn:hover { background: #2980b9; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(52,152,219,0.3); }
+        .btn-danger { background: #e74c3c; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-success { background: #27ae60; }
+        .btn-success:hover { background: #229954; }
+        ul { line-height: 1.8; }
+        .highlight { background: #fff59d; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚨 405 Method Not Allowed 错误解决方案</h1>
+        
+        <div class="error">
+            <strong>❌ 当前问题：</strong><br>
+            批量回测时出现 <code>405 Method Not Allowed</code> 错误，提示"API返回格式错误"
+        </div>
+
+        <h2>🔧 完整解决步骤</h2>
+
+        <div class="step">
+            <span class="step-number">1</span>
+            <strong>完全关闭现有后端服务</strong>
+            <ul>
+                <li>找到运行 <code>start.bat</code> 的命令行窗口</li>
+                <li>按 <code class="highlight">Ctrl + C</code></li>
+                <li>如果提示"终止批处理操作吗？"，输入 <code>Y</code> 并回车</li>
+                <li>确认窗口已完全停止（没有新的日志输出）</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">2</span>
+            <strong>检查端口是否被占用</strong>
+            <ul>
+                <li>打开新的命令行窗口（以管理员身份运行）</li>
+                <li>运行命令：<pre>netstat -ano | findstr :5000</pre></li>
+                <li>如果有输出，说明端口仍被占用，记下最后一列的PID号</li>
+                <li>强制结束进程：<pre>taskkill /F /PID [PID号]</pre></li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">3</span>
+            <strong>重新启动后端服务</strong>
+            <ul>
+                <li>在项目根目录下运行：<pre>start.bat</pre></li>
+                <li>等待看到类似以下的输出：
+<pre>* Running on http://127.0.0.1:5000
+* Restarting with stat
+阿尔法策略2.0系统启动
+服务器地址: 0.0.0.0:5000</pre>
+                </li>
+                <li><span class="highlight">重要：</span>必须等待完全启动！</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">4</span>
+            <strong>清除浏览器缓存</strong>
+            <ul>
+                <li>在浏览器中按 <code class="highlight">Ctrl + Shift + Delete</code></li>
+                <li>或者直接强制刷新：<code class="highlight">Ctrl + F5</code></li>
+                <li>或者使用无痕/隐私模式打开页面</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">5</span>
+            <strong>运行诊断测试</strong>
+            <ul>
+                <li>打开快速诊断工具：
+                    <a href="/quick_test.html" class="btn" target="_blank">打开诊断工具</a>
+                </li>
+                <li>按顺序点击测试按钮，确认都返回 ✅</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">6</span>
+            <strong>重新测试批量回测</strong>
+            <ul>
+                <li>打开批量回测页面：
+                    <a href="/batch_backtest.html" class="btn btn-success" target="_blank">打开批量回测</a>
+                </li>
+                <li>选择股性类型，先测试3-5支股票</li>
+                <li>按 F12 打开控制台，查看详细日志</li>
+            </ul>
+        </div>
+
+        <h2>✅ 成功标志</h2>
+        
+        <div class="success">
+            如果一切正常，你应该看到：
+            <ul>
+                <li>✅ 诊断工具显示：<code>状态码: 200</code> 或 <code>204</code></li>
+                <li>✅ 控制台日志显示：<code>CR分析响应状态: 200 OK</code></li>
+                <li>✅ 进度条正常增长，没有红色错误</li>
+                <li>✅ 结果表格显示股票数据</li>
+            </ul>
+        </div>
+
+        <h2>🐛 如果仍然失败</h2>
+
+        <div class="warning">
+            <strong>⚠️ 检查清单：</strong>
+            <ol>
+                <li>后端日志中是否有Python错误？</li>
+                <li>数据库连接是否正常？</li>
+                <li>是否正确导入了所有模块？</li>
+                <li>Flask-CORS是否正确安装？运行：<code>pip install flask-cors</code></li>
+            </ol>
+        </div>
+
+        <h2>📞 获取更多帮助</h2>
+        
+        <p>如果按照上述步骤仍然无法解决，请提供：</p>
+        <ul>
+            <li>后端命令行窗口的完整输出</li>
+            <li>浏览器控制台（F12）的错误信息</li>
+            <li>诊断工具的测试结果截图</li>
+        </ul>
+
+        <hr style="margin: 40px 0;">
+        
+        <div style="text-align: center;">
+            <a href="/quick_test.html" class="btn">🧪 运行诊断</a>
+            <a href="/batch_backtest.html" class="btn btn-success">📊 批量回测</a>
+            <a href="/test_api.html" class="btn">🔬 详细API测试</a>
+        </div>
+    </div>
+</body>
+</html>
+

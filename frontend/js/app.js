@@ -100,7 +100,7 @@ function updateStockList() {
         option.value = stock.code;
         option.textContent = `${stock.name} (${stock.code})`;
         option.dataset.name = stock.name;
-        option.dataset.table = stock.table;
+        option.dataset.table = stock.table_name;
         stockSelect.appendChild(option);
     });
 }
@@ -132,7 +132,7 @@ function filterStocks() {
                 option.value = stock.code;
                 option.textContent = `${stock.name} (${stock.code}) - ${strategyName}`;
                 option.dataset.name = stock.name;
-                option.dataset.table = stock.table;
+                option.dataset.table = stock.table_name;
                 stockSelect.appendChild(option);
                 matchCount++;
             }

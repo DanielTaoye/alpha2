@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批量回测 - 阿尔法策略2.0系统</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="css/styles.css?v=20251118020">
+    <style>
+        .batch-container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+
+        .control-panel {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .control-label {
+            font-weight: bold;
+            min-width: 100px;
+            color: #333;
+        }
+
+        .strategy-select {
+            flex: 1;
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .strategy-select:focus {
+            border-color: #4a90e2;
+        }
+
+        .run-btn {
+            padding: 12px 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .run-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .run-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #f0f0f0;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4a90e2, #667eea);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .progress-text {
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .results-container {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .summary-title {
+            font-size: 18px;
+            margin-bottom: 20px;
+            opacity: 0.9;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .results-table th,
+        .results-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .results-table th {
+            background: #f8f9fa;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .results-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .positive {
+            color: #e74c3c;
+        }
+
+        .negative {
+            color: #27ae60;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .back-btn {
+            display: inline-block;
+            padding: 10px 25px;
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+
+        .back-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .stock-limit-input {
+            width: 100px;
+            padding: 8px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .stock-limit-input:focus {
+            border-color: #4a90e2;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <a href="/index.html" class="back-btn">← 返回主页</a>
+        </div>
+        <div class="header-center">
+            <h1>📊 批量回测系统</h1>
+        </div>
+        <div class="header-right">
+            <span class="status-indicator online" id="status-indicator"></span>
+            <span id="status-text">就绪</span>
+        </div>
+    </div>
+
+    <div class="batch-container">
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <h2 style="margin-bottom: 20px; color: #333;">回测参数设置</h2>
+            
+            <div class="control-row">
+                <label class="control-label">选择股性分组:</label>
+                <select class="strategy-select" id="strategySelect">
+                    <option value="">-- 请选择股性类型 --</option>
+                    <option value="all">所有策略（包含全部股性）</option>
+                    <option value="波段">波段策略</option>
+                    <option value="短线">短线策略</option>
+                    <option value="中长线">中长线策略</option>
+                </select>
+            </div>
+
+            <div class="control-row">
+                <label class="control-label">股票数量限制:</label>
+                <input type="number" class="stock-limit-input" id="stockLimit" value="20" min="1" max="100">
+                <span style="color: #666; font-size: 14px;">支（默认20支，可调整）</span>
+            </div>
+
+            <div class="control-row">
+                <button class="run-btn" id="runBtn" onclick="startBatchBacktest()">
+                    🚀 开始批量回测
+                </button>
+            </div>
+
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <!-- 进度显示 -->
+        <div class="progress-container" id="progressContainer">
+            <h3 style="margin-bottom: 15px; color: #333;">回测进度</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div class="progress-text" id="progressText">准备开始...</div>
+        </div>
+
+        <!-- 结果显示 -->
+        <div class="results-container" id="resultsContainer">
+            <h2 style="margin-bottom: 20px; color: #333;">回测结果</h2>
+            
+            <!-- 汇总卡片 -->
+            <div class="summary-card">
+                <div class="summary-title">📈 批量回测汇总</div>
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <div class="stat-label">回测股票数</div>
+                        <div class="stat-value" id="totalStocks">0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">平均收益率</div>
+                        <div class="stat-value" id="avgReturn">0%</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">总交易次数</div>
+                        <div class="stat-value" id="totalTrades">0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">平均胜率</div>
+                        <div class="stat-value" id="avgWinRate">0%</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">成功股票数</div>
+                        <div class="stat-value" id="successCount">0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">失败股票数</div>
+                        <div class="stat-value" id="failCount">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 详细结果表格 -->
+            <h3 style="margin-bottom: 15px; color: #333;">各股票详细数据</h3>
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>股票代码</th>
+                        <th>股票名称</th>
+                        <th>交易次数</th>
+                        <th>总收益率</th>
+                        <th>平均收益率</th>
+                        <th>胜率</th>
+                        <th>最大收益</th>
+                        <th>最大亏损</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsTableBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>© 2025 阿尔法策略2.0系统 | 数据仅供参考，不构成投资建议</p>
+    </div>
+
+    <script src="js/batch_backtest.js"></script>
+</body>
+</html>
+

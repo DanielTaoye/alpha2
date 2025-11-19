@@ -1,5 +1,5 @@
 """应用入口文件 - DDD架构"""
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 import sys
 import os
@@ -26,7 +26,7 @@ logger = get_app_logger()
 
 # 创建Flask应用
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": "*"}})
 
 # 实例化控制器
 stock_controller = StockController()
@@ -44,6 +44,25 @@ backtest_controller = BacktestController()
 def index():
     """返回首页"""
     return send_from_directory(app.static_folder, 'index.html')
+
+
+@app.route('/batch_backtest.html')
+def batch_backtest():
+    """返回批量回测页面"""
+    return send_from_directory(app.static_folder, 'batch_backtest.html')
+
+
+@app.route('/api/debug/routes')
+def debug_routes():
+    """调试：显示所有注册的路由"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'path': str(rule)
+        })
+    return jsonify({'routes': routes}), 200
 
 
 @app.route('/api/stock_groups', methods=['GET'])
@@ -73,6 +92,14 @@ def get_stock_analysis():
 @app.route('/api/cr_points/analyze', methods=['POST'])
 def analyze_cr_points():
     """分析股票CR点（买入卖出点）"""
+    return cr_point_controller.analyze_cr_points()
+
+
+@app.route('/api/cr_analysis', methods=['POST', 'OPTIONS'])
+def cr_analysis():
+    """CR点分析（批量回测使用）"""
+    if request.method == 'OPTIONS':
+        return '', 204
     return cr_point_controller.analyze_cr_points()
 
 
@@ -118,9 +145,11 @@ def reload_config():
     return config_controller.reload_config()
 
 
-@app.route('/api/backtest', methods=['POST'])
+@app.route('/api/backtest', methods=['POST', 'OPTIONS'])
 def run_backtest():
     """执行回测"""
+    if request.method == 'OPTIONS':
+        return '', 204
     return backtest_controller.run_backtest()
 
 

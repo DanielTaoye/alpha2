@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>清除缓存指南</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #e74c3c;
+            text-align: center;
+            font-size: 32px;
+            margin-bottom: 30px;
+        }
+        .step {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+        }
+        .step-number {
+            display: inline-block;
+            width: 35px;
+            height: 35px;
+            background: #3498db;
+            color: white;
+            text-align: center;
+            line-height: 35px;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 18px;
+            margin-right: 15px;
+        }
+        .highlight {
+            background: #fff59d;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .btn {
+            display: inline-block;
+            padding: 15px 40px;
+            margin: 10px;
+            background: #27ae60;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 16px;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        .btn:hover {
+            background: #229954;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39,174,96,0.3);
+        }
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+        .success {
+            background: #d4edda;
+            border: 2px solid #28a745;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .text-center {
+            text-align: center;
+        }
+        ul {
+            line-height: 2;
+            font-size: 16px;
+        }
+        code {
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #e74c3c;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚠️ 重要：清除浏览器缓存</h1>
+        
+        <div class="warning">
+            <strong>为什么需要清除缓存？</strong><br>
+            修改了后端代码后，浏览器可能仍在使用旧的JavaScript文件。<br>
+            必须清除缓存才能加载最新的代码。
+        </div>
+
+        <h2 style="color: #3498db; margin-top: 40px;">📋 清除缓存方法</h2>
+
+        <div class="step">
+            <span class="step-number">1</span>
+            <strong>方法一：强制刷新（最快）</strong>
+            <ul>
+                <li>按住 <code class="highlight">Ctrl + F5</code></li>
+                <li>或按住 <code class="highlight">Ctrl + Shift + R</code></li>
+                <li>这会忽略缓存，重新下载所有文件</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">2</span>
+            <strong>方法二：清除浏览器缓存（彻底）</strong>
+            <ul>
+                <li>按 <code class="highlight">Ctrl + Shift + Delete</code></li>
+                <li>选择"缓存的图片和文件"</li>
+                <li>时间范围选择"全部时间"</li>
+                <li>点击"清除数据"</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">3</span>
+            <strong>方法三：使用无痕模式（推荐测试）</strong>
+            <ul>
+                <li>按 <code class="highlight">Ctrl + Shift + N</code>（Chrome）</li>
+                <li>或 <code class="highlight">Ctrl + Shift + P</code>（Firefox）</li>
+                <li>在无痕窗口中打开批量回测页面</li>
+                <li>无痕模式不使用缓存，每次都是最新的</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">4</span>
+            <strong>方法四：开发者工具（开发调试用）</strong>
+            <ul>
+                <li>按 <code>F12</code> 打开开发者工具</li>
+                <li>右键点击刷新按钮</li>
+                <li>选择"清空缓存并硬性重新加载"</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <h3 style="margin-top: 0;">✅ 清除缓存后的验证步骤</h3>
+            <ol style="text-align: left; display: inline-block;">
+                <li>清除缓存（使用上述任一方法）</li>
+                <li>打开批量回测页面</li>
+                <li>按 F12 打开控制台</li>
+                <li>在 Network 标签下，确认所有 .js 文件都重新下载了</li>
+                <li>运行批量回测，检查表格是否显示完整</li>
+            </ol>
+        </div>
+
+        <div class="text-center" style="margin-top: 40px;">
+            <a href="javascript:location.reload(true)" class="btn">🔄 强制刷新本页</a>
+            <a href="/batch_backtest.html" class="btn">📊 打开批量回测</a>
+        </div>
+
+        <div class="warning" style="margin-top: 40px;">
+            <strong>💡 开发提示：</strong><br>
+            在开发调试时，建议：
+            <ul>
+                <li>使用无痕模式进行测试</li>
+                <li>或在正常模式下打开 F12，勾选 Network 标签的 "Disable cache"</li>
+                <li>这样可以确保每次都加载最新代码</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
+
