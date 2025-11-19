@@ -1,13 +1,13 @@
 {
   "strategy1": {
-    "c_point_threshold": 100.0,
+    "c_point_threshold": 69.0,
     "description": "策略1 C点触发阈值（基于赔率分+胜率分+插件）"
   },
   "strategy2": {
     "c_point_threshold": 70.0,
     "description": "策略2 C点触发阈值（基于MA+MACD+成交量+K线组合）"
   },
-  "market_type": "bear",
+  "market_type": "bull",
   "market_type_description": "市场类型：bull=牛市, bear=熊市（人工判断）",
-  "last_updated": "2025-11-19 11:37:13"
+  "last_updated": "2025-11-19 11:40:09"
 }

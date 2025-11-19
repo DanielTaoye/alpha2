@@ -1943,8 +1943,13 @@ async function runBacktest() {
             return;
         }
         
-        // 检查是否有CR点数据
-        if (!crPointsData || !crPointsData.c_points || crPointsData.c_points.length === 0) {
+        // 检查是否有CR点数据（策略1或策略2的C点）
+        const hasCPoints = crPointsData && (
+            (crPointsData.c_points && crPointsData.c_points.length > 0) ||
+            (crPointsData.strategy2_c_points && crPointsData.strategy2_c_points.length > 0)
+        );
+        
+        if (!hasCPoints) {
             alert('当前没有C点数据，无法进行回测\n\n提示：\n1. 请确保已切换到日K线\n2. 系统会自动分析日K线的CR点\n3. 等待CR点加载完成后再点击回测');
             return;
         }

@@ -722,11 +722,11 @@ body {
 }
 
 .summary-item.positive {
-    border-color: #28a745;
+    border-color: #ef5350;  /* 红色表示盈利（中国股市习惯）*/
 }
 
 .summary-item.negative {
-    border-color: #dc3545;
+    border-color: #26a69a;  /* 绿色表示亏损（中国股市习惯）*/
 }
 
 .summary-label {
@@ -742,11 +742,11 @@ body {
 }
 
 .summary-item.positive .summary-value {
-    color: #28a745;
+    color: #ef5350;  /* 红色表示盈利（中国股市习惯）*/
 }
 
 .summary-item.negative .summary-value {
-    color: #dc3545;
+    color: #26a69a;  /* 绿色表示亏损（中国股市习惯）*/
 }
 
 .backtest-trades {
@@ -798,12 +798,12 @@ body {
 }
 
 .trades-table .positive {
-    color: #28a745;
+    color: #ef5350;  /* 红色表示盈利（中国股市习惯）*/
     font-weight: bold;
 }
 
 .trades-table .negative {
-    color: #dc3545;
+    color: #26a69a;  /* 绿色表示亏损（中国股市习惯）*/
     font-weight: bold;
 }
 
