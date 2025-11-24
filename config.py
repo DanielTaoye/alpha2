@@ -1,23 +1,17 @@
-# 数据库配置
-DATABASE_CONFIG = {
-    'host': 'localhost',  # 本地MySQL
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'stock',
-    'charset': 'utf8mb4'
-}
+# 环境配置自动加载
+import os
 
-# API配置
-EXTERNAL_API = {
-    'url': 'https://apiprod.mtygs.cn/api/stock/getStockAnalysis',
-    'token': '2025102013283854160ae6136c47da8d6c065f7919e66a_17721044150'
-}
+# 通过环境变量 ENV 判断是本地还是服务器
+# 本地开发: ENV=local (默认)
+# 服务器生产: ENV=server
+ENV = os.getenv('ENV', 'local')
 
-# 服务器配置
-SERVER_CONFIG = {
-    'host': '0.0.0.0',
-    'port': 5000,
-    'debug': True
-}
+if ENV == 'server':
+    # 服务器环境 - 使用内网数据库
+    from config_server import DATABASE_CONFIG, EXTERNAL_API, SERVER_CONFIG
+    print(f"[配置] 加载服务器环境配置 (数据库: {DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']})")
+else:
+    # 本地环境
+    from config_local import DATABASE_CONFIG, EXTERNAL_API, SERVER_CONFIG
+    print(f"[配置] 加载本地环境配置 (数据库: {DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']})")
 

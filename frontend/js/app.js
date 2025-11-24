@@ -484,9 +484,14 @@ async function loadVolumeTypes(stockCode) {
         bearishPatternMap = {};
         supportPriceMap = {};
         pressurePriceMap = {};
+        
+        let missingDataCount = 0;
+        let totalDataCount = 0;
+        
         if (result.data && Array.isArray(result.data)) {
             result.data.forEach(item => {
                 if (item.date) {
+                    totalDataCount++;
                     // 处理日期格式，确保是 YYYY-MM-DD 格式
                     const dateStr = item.date.split(' ')[0];
                     if (item.volumeType) {
@@ -501,15 +506,35 @@ async function loadVolumeTypes(stockCode) {
                     if (item.bearishPattern) {
                         bearishPatternMap[dateStr] = item.bearishPattern;
                     }
-                    if (item.supportPrice !== undefined && item.supportPrice !== null) {
+                    
+                    // 记录缺少压力支撑线数据的日期
+                    const hasSupportPrice = item.supportPrice !== undefined && item.supportPrice !== null;
+                    const hasPressurePrice = item.pressurePrice !== undefined && item.pressurePrice !== null;
+                    
+                    if (hasSupportPrice) {
                         supportPriceMap[dateStr] = item.supportPrice;
                     }
-                    if (item.pressurePrice !== undefined && item.pressurePrice !== null) {
+                    if (hasPressurePrice) {
                         pressurePriceMap[dateStr] = item.pressurePrice;
+                    }
+                    
+                    // 调试：记录缺少数据的情况
+                    if (!hasSupportPrice && !hasPressurePrice) {
+                        missingDataCount++;
+                        if (missingDataCount <= 5) {  // 只打印前5个
+                            console.log(`[压力支撑线] ${dateStr} 缺少数据 - support: ${item.supportPrice}, pressure: ${item.pressurePrice}`);
+                        }
                     }
                 }
             });
-            console.log(`每日机会数据加载成功，成交量类型: ${Object.keys(volumeTypeMap).length} 条，赔率总分: ${Object.keys(winRatioScoreMap).length} 条，多头组合: ${Object.keys(bullishPatternMap).length} 条，空头组合: ${Object.keys(bearishPatternMap).length} 条，支撑线: ${Object.keys(supportPriceMap).length} 条，压力线: ${Object.keys(pressurePriceMap).length} 条`);
+            console.log(`每日机会数据加载成功，总数据: ${totalDataCount} 条`);
+            console.log(`  - 成交量类型: ${Object.keys(volumeTypeMap).length} 条`);
+            console.log(`  - 赔率总分: ${Object.keys(winRatioScoreMap).length} 条`);
+            console.log(`  - 多头组合: ${Object.keys(bullishPatternMap).length} 条`);
+            console.log(`  - 空头组合: ${Object.keys(bearishPatternMap).length} 条`);
+            console.log(`  - 支撑线: ${Object.keys(supportPriceMap).length} 条`);
+            console.log(`  - 压力线: ${Object.keys(pressurePriceMap).length} 条`);
+            console.log(`  - ⚠️ 缺少压力/支撑线数据: ${missingDataCount} 条`);
         }
     } catch (error) {
         console.error('加载成交量类型数据失败:', error);
@@ -1300,6 +1325,29 @@ function renderChart(klineData, analysisData, period) {
             ]
         };
 
+        // 添加K线的markLine配置（用于动态显示压力/支撑线）
+        option.series[0].markLine = {
+            silent: true,
+            symbol: 'none',
+            label: {
+                show: true,
+                position: 'end',
+                formatter: function(params) {
+                    return params.name + ': ' + params.value.toFixed(2);
+                },
+                fontSize: 11,
+                color: '#fff',
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                padding: [4, 8],
+                borderRadius: 3
+            },
+            lineStyle: {
+                type: 'solid',
+                width: 2
+            },
+            data: []  // 初始为空，鼠标悬停时动态更新
+        };
+
         if (supportLine) {
             option.series.push({
                 name: '支撑线',
@@ -1338,6 +1386,96 @@ function renderChart(klineData, analysisData, period) {
             console.error('设置图表配置失败:', error);
             throw error;
         }
+
+        // 使用updateAxisPointer来动态显示压力/支撑线（优化后：整个日期区域都能触发）
+        let lastHoverDate = null;  // 记录上次悬停的日期，避免重复更新
+        
+        chart.off('updateAxisPointer');  // 移除旧的监听器
+        chart.on('updateAxisPointer', function(event) {
+            // 获取当前鼠标指向的数据点
+            const xAxisInfo = event.axesInfo[0];
+            if (xAxisInfo && xAxisInfo.value !== undefined) {
+                const dataIndex = xAxisInfo.value;
+                if (dataIndex >= 0 && dataIndex < dates.length) {
+                    const dateStr = dates[dataIndex];
+                    const dateOnly = dateStr.split(' ')[0];
+                    
+                    // 如果是同一个日期，不重复更新（性能优化）
+                    if (dateOnly === lastHoverDate) {
+                        return;
+                    }
+                    lastHoverDate = dateOnly;
+                    
+                    const supportPrice = supportPriceMap[dateOnly];
+                    const pressurePrice = pressurePriceMap[dateOnly];
+                    
+                    const markLineData = [];
+                    
+                    // 添加支撑线（黄色）
+                    if (supportPrice !== undefined && supportPrice !== null) {
+                        const actualSupportPrice = supportPrice / 100;
+                        markLineData.push({
+                            name: '支撑',
+                            yAxis: actualSupportPrice,
+                            lineStyle: {
+                                color: '#FFD700',
+                                width: 2
+                            },
+                            label: {
+                                color: '#000',
+                                backgroundColor: '#FFD700'
+                            }
+                        });
+                        console.log(`[压力支撑线] 支撑: ${actualSupportPrice.toFixed(2)} (日期: ${dateOnly})`);
+                    }
+                    
+                    // 添加压力线（黄色）
+                    if (pressurePrice !== undefined && pressurePrice !== null) {
+                        const actualPressurePrice = pressurePrice / 100;
+                        markLineData.push({
+                            name: '压力',
+                            yAxis: actualPressurePrice,
+                            lineStyle: {
+                                color: '#FFD700',
+                                width: 2
+                            },
+                            label: {
+                                color: '#000',
+                                backgroundColor: '#FFD700'
+                            }
+                        });
+                        console.log(`[压力支撑线] 压力: ${actualPressurePrice.toFixed(2)} (日期: ${dateOnly})`);
+                    } else {
+                        // 调试：没有数据的情况（降低日志频率）
+                        if (Math.random() < 0.1) {  // 只打印10%的情况，避免刷屏
+                            console.log(`[压力支撑线] 日期 ${dateOnly} 没有压力/支撑线数据`);
+                        }
+                    }
+                    
+                    // 更新markLine
+                    chart.setOption({
+                        series: [{
+                            markLine: {
+                                data: markLineData
+                            }
+                        }]
+                    });
+                }
+            }
+        });
+
+        // 监听鼠标移出图表区域，清除markLine
+        chart.off('globalout');
+        chart.on('globalout', function() {
+            lastHoverDate = null;  // 重置记录
+            chart.setOption({
+                series: [{
+                    markLine: {
+                        data: []
+                    }
+                }]
+            });
+        });
 
         if (analysisData && Object.keys(analysisData).length > 0) {
             updateAnalysisInfo(analysisData, latestData);

@@ -1,0 +1,64 @@
+# ===================================
+# 腾讯云服务器快速部署命令清单
+# ===================================
+
+# ============ 1. 本地上传项目 ============
+# Windows PowerShell执行：
+scp -r C:\Users\lenovo\Desktop\alpha_strategy_v2 ubuntu@124.222.103.102:/home/ubuntu/
+# 密码: Mty@123456
+
+
+# ============ 2. 登录服务器 ============
+ssh ubuntu@124.222.103.102
+# 密码: Mty@123456
+
+
+# ============ 3. 安装环境 ============
+sudo apt update
+sudo apt install python3 python3-pip mysql-client -y
+cd /home/ubuntu/alpha_strategy_v2
+pip3 install -r requirements.txt
+
+
+# ============ 4. 部署服务 ============
+chmod +x deploy.sh stop.sh
+./deploy.sh
+
+
+# ============ 5. 验证访问 ============
+# 浏览器访问: http://124.222.103.102:5000
+
+
+# ===================================
+# 常用管理命令
+# ===================================
+
+# 查看日志
+tail -f logs/app.log
+
+# 停止服务
+./stop.sh
+
+# 重启服务
+./stop.sh && ./deploy.sh
+
+# 查看进程
+ps aux | grep python3
+
+# 查看端口
+netstat -tlnp | grep 5000
+
+
+# ===================================
+# 更新代码
+# ===================================
+
+# 本地打包上传（PowerShell）
+scp -r backend frontend config*.py requirements.txt *.sh ubuntu@124.222.103.102:/home/ubuntu/alpha_strategy_v2/
+
+# 服务器重启服务
+ssh ubuntu@124.222.103.102
+cd /home/ubuntu/alpha_strategy_v2
+./stop.sh
+./deploy.sh
+

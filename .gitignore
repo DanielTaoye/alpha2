@@ -40,8 +40,19 @@ Thumbs.db
 
 # Config
 config_local.py
+config_server.py
 *.db
 
 # Logs
 *.log
+logs/
+backend/scripts/logs/
+
+# Deployment
+app.pid
+nohup.out
+
+# Backups
+backup_*.sql
+backup_*.json
 
