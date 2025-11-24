@@ -16,7 +16,7 @@ def check_daily_chance(stock_code: str, date_str: str):
         query = """
         SELECT stock_code, date, volume_type, bearish_pattern, bullish_pattern, 
                day_win_ratio_score, total_win_ratio_score
-        FROM daily_chance
+        FROM b_daily_chance
         WHERE stock_code = %s AND DATE(date) = %s
         """
         cursor.execute(query, (stock_code, date_str))

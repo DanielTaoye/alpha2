@@ -25,7 +25,7 @@ def get_all_stock_codes() -> List[str]:
     try:
         with DatabaseConnection.get_connection_context() as conn:
             cursor = conn.cursor()
-            sql = "SELECT DISTINCT stock_code FROM daily_chance ORDER BY stock_code"
+            sql = "SELECT DISTINCT stock_code FROM b_daily_chance ORDER BY stock_code"
             cursor.execute(sql)
             results = cursor.fetchall()
             return [row['stock_code'] for row in results]
