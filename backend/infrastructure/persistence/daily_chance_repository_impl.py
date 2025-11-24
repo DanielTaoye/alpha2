@@ -2,8 +2,8 @@
 from typing import List, Optional
 from datetime import datetime
 import pymysql.cursors
-from domain.repositories.b_daily_chance_repository import IDailyChanceRepository
-from domain.models.b_daily_chance import DailyChance
+from domain.repositories.daily_chance_repository import IDailyChanceRepository
+from domain.models.daily_chance import DailyChance
 from infrastructure.persistence.database import DatabaseConnection
 from infrastructure.logging.logger import get_logger
 
@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 class DailyChanceRepositoryImpl(IDailyChanceRepository):
     """每日机会仓储实现"""
     
-    def save(self, b_daily_chance: DailyChance) -> bool:
+    def save(self, daily_chance: DailyChance) -> bool:
         """保存每日机会数据"""
         try:
             with DatabaseConnection.get_connection_context() as conn:
@@ -41,31 +41,31 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                 """
                 
                 cursor.execute(sql, (
-                    b_daily_chance.stock_code,
-                    b_daily_chance.stock_name,
-                    b_daily_chance.stock_nature,
-                    b_daily_chance.date.strftime('%Y-%m-%d') if b_daily_chance.date else None,
-                    b_daily_chance.chance,
-                    b_daily_chance.day_win_ratio_score,
-                    b_daily_chance.week_win_ratio_score,
-                    b_daily_chance.total_win_ratio_score,
-                    b_daily_chance.support_price,
-                    b_daily_chance.pressure_price,
-                    b_daily_chance.volume_type,
-                    b_daily_chance.bullish_pattern,
-                    b_daily_chance.bearish_pattern
+                    daily_chance.stock_code,
+                    daily_chance.stock_name,
+                    daily_chance.stock_nature,
+                    daily_chance.date.strftime('%Y-%m-%d') if daily_chance.date else None,
+                    daily_chance.chance,
+                    daily_chance.day_win_ratio_score,
+                    daily_chance.week_win_ratio_score,
+                    daily_chance.total_win_ratio_score,
+                    daily_chance.support_price,
+                    daily_chance.pressure_price,
+                    daily_chance.volume_type,
+                    daily_chance.bullish_pattern,
+                    daily_chance.bearish_pattern
                 ))
                 
-                logger.debug(f"保存每日机会数据成功: {b_daily_chance.stock_code} {b_daily_chance.date}")
+                logger.debug(f"保存每日机会数据成功: {daily_chance.stock_code} {daily_chance.date}")
                 return True
                 
         except Exception as e:
             logger.error(f"保存每日机会数据失败: {e}", exc_info=True)
             return False
     
-    def save_batch(self, b_daily_chances: List[DailyChance]) -> int:
+    def save_batch(self, daily_chances: List[DailyChance]) -> int:
         """批量保存每日机会数据"""
-        if not b_daily_chances:
+        if not daily_chances:
             return 0
         
         try:
@@ -94,7 +94,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                 """
                 
                 values = []
-                for dc in b_daily_chances:
+                for dc in daily_chances:
                     values.append((
                         dc.stock_code,
                         dc.stock_name,
@@ -134,7 +134,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                 
                 row = cursor.fetchone()
                 if row:
-                    return self._row_to_b_daily_chance(row)
+                    return self._row_to_daily_chance(row)
                 return None
                 
         except Exception as e:
@@ -170,7 +170,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                     cursor.execute(sql, (stock_code,))
                 
                 results = cursor.fetchall()
-                return [self._row_to_b_daily_chance(row) for row in results]
+                return [self._row_to_daily_chance(row) for row in results]
                 
         except Exception as e:
             logger.error(f"查询每日机会数据失败: {e}", exc_info=True)
@@ -190,7 +190,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
                 cursor.execute(sql, (date,))
                 
                 results = cursor.fetchall()
-                return [self._row_to_b_daily_chance(row) for row in results]
+                return [self._row_to_daily_chance(row) for row in results]
                 
         except Exception as e:
             logger.error(f"查询每日机会数据失败: {e}", exc_info=True)
@@ -343,7 +343,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             logger.error(f"批量更新成交量类型失败: {e}", exc_info=True)
             return 0
     
-    def _row_to_b_daily_chance(self, row: dict) -> DailyChance:
+    def _row_to_daily_chance(self, row: dict) -> DailyChance:
         """将数据库行转换为DailyChance对象"""
         return DailyChance(
             id=row['id'],
