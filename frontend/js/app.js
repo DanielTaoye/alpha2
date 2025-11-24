@@ -1,5 +1,5 @@
 // 阿尔法策略2.0系统 - 主应用脚本
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = '/api';
 let allStockGroups = {};
 let currentStrategy = '波段';
 let currentStockCode = '';
