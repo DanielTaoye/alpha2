@@ -160,7 +160,7 @@ class RPointPluginService:
             is_volume_xyzh = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
             
             # 判断当日K线形态
-            is_bearish_divergence = self._check_bearish_divergence_kline(current_data, is_main_board)
+            is_bearish_divergence = self._check_bearish_divergence_kline(stock_code, current_data, is_main_board)
             is_bearish_line = self._check_bearish_line_above_threshold(current_data, is_main_board)
             has_bearish_pattern = self._check_bearish_pattern(current_chance)
             
@@ -325,7 +325,7 @@ class RPointPluginService:
             
             if is_volume_xyzh:
                 # 检查K线形态
-                is_bearish_divergence = self._check_bearish_divergence_kline(current_data, is_main_board)
+                is_bearish_divergence = self._check_bearish_divergence_kline(stock_code, current_data, is_main_board)
                 is_bearish_doji = self._check_bearish_doji(current_data, is_main_board)
                 is_high_open_low_close = self._check_high_open_low_close(current_data, is_main_board)
                 is_bearish_line_3pct = self._check_bearish_line_above_threshold(current_data, is_main_board, 3)
@@ -485,7 +485,7 @@ class RPointPluginService:
                 return RPointPluginResult("上冲乏力", False, "")
             
             # 检查今日K线形态
-            is_bearish_divergence = self._check_bearish_divergence_kline(current_data, is_main_board)
+            is_bearish_divergence = self._check_bearish_divergence_kline(stock_code, current_data, is_main_board)
             is_bearish_doji = self._check_bearish_doji(current_data, is_main_board)
             is_high_open_low_close = self._check_high_open_low_close(current_data, is_main_board)
             is_bearish_line_3pct = self._check_bearish_line_above_threshold(current_data, is_main_board, 3)
@@ -531,27 +531,50 @@ class RPointPluginService:
             return False
         return len(daily_chance.bearish_pattern.strip()) > 0
     
-    def _check_bearish_divergence_kline(self, daily_data, is_main_board: bool) -> bool:
+    def _check_bearish_divergence_kline(self, stock_code: str, daily_data, is_main_board: bool) -> bool:
         """
         检查是否为空头分歧K线（冲高回落）
-        振幅>6%/8% 且有明显上影线
+        
+        判断条件：
+        1. 振幅 > 6%（主板）或 8%（非主板）
+        2. K线形态必须是以下之一：
+           - 冲高回落阳线
+           - 冲高回落阴线
+           - 冲高回落阳十字星
+           - 冲高回落阴十字星
+           - 高开低走
         """
         if not daily_data or not daily_data.pre_close or daily_data.pre_close == 0:
             return False
         
+        # 1. 检查振幅
         amplitude_threshold = 6 if is_main_board else 8
         amplitude = ((daily_data.high - daily_data.low) / daily_data.pre_close * 100)
         
         if amplitude < amplitude_threshold:
             return False
         
-        # 计算上影线比例
-        body_high = max(daily_data.open, daily_data.close)
-        upper_shadow = daily_data.high - body_high
-        upper_shadow_ratio = (upper_shadow / (daily_data.high - daily_data.low)) if (daily_data.high - daily_data.low) > 0 else 0
+        # 2. 检查K线形态
+        from domain.services.kline_pattern_service import KLinePatternService
         
-        # 上影线占比>30%视为冲高回落
-        return upper_shadow_ratio > 0.3
+        pattern = KLinePatternService.identify_pattern(
+            stock_code,
+            daily_data.open,
+            daily_data.close,
+            daily_data.high,
+            daily_data.low
+        )
+        
+        # 符合条件的K线形态
+        valid_patterns = [
+            "冲高回落阳线",
+            "冲高回落阴线",
+            "冲高回落阳十字星",
+            "冲高回落阴十字星",
+            "高开低走"
+        ]
+        
+        return pattern in valid_patterns
     
     def _check_bearish_doji(self, daily_data, is_main_board: bool) -> bool:
         """
@@ -576,27 +599,19 @@ class RPointPluginService:
     def _check_high_open_low_close(self, daily_data, is_main_board: bool) -> bool:
         """
         检查是否为高开低走
-        振幅>6%/8% 且开盘价接近最高价、收盘价接近最低价
+        定义：开盘价>收盘价，A=0（无上影线），C<2B
         """
-        if not daily_data or not daily_data.pre_close or daily_data.pre_close == 0:
+        if not daily_data:
             return False
         
-        amplitude_threshold = 6 if is_main_board else 8
-        amplitude = ((daily_data.high - daily_data.low) / daily_data.pre_close * 100)
+        # 计算ABC
+        from domain.services.kline_pattern_service import KLinePatternService
+        abc = KLinePatternService.calculate_abc(
+            daily_data.open, daily_data.close, daily_data.high, daily_data.low
+        )
         
-        if amplitude < amplitude_threshold:
-            return False
-        
-        # 判断高开低走：开盘价在高位，收盘价在低位
-        range_val = daily_data.high - daily_data.low
-        if range_val == 0:
-            return False
-        
-        open_position = (daily_data.open - daily_data.low) / range_val
-        close_position = (daily_data.close - daily_data.low) / range_val
-        
-        # 开盘价在上70%，收盘价在下30%
-        return open_position > 0.7 and close_position < 0.3
+        # 判断高开低走：开盘价>收盘价，A=0，C<2B
+        return abc.open > abc.close and abc.a == 0 and abc.c < 2 * abc.b
     
     def _check_bearish_line_above_threshold(self, daily_data, is_main_board: bool, threshold: float = 3) -> bool:
         """

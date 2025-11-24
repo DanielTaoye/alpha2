@@ -256,7 +256,7 @@ class CPointPluginService:
     def _check_risk_kline(self, stock_code: str, date: datetime) -> CPointPluginResult:
         """
         插件3: 风险K线
-        振幅＞6%/8%的冲高回落阳线、冲高回落阳十字星、带上影线的阳线不发C
+        振幅＞6%/8%的冲高回落阳线、冲高回落阳十字星、带上影线的阳线 减40分
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -284,18 +284,37 @@ class CPointPluginService:
             if amplitude_pct <= amplitude_threshold:
                 return CPointPluginResult("风险K线", False, 0, "")
             
-            # 计算上影线比例
+            # 使用K线形态识别服务
+            from domain.services.kline_pattern_service import KLinePatternService
+            
+            pattern = KLinePatternService.identify_pattern(
+                stock_code,
+                daily_data.open,
+                daily_data.close,
+                daily_data.high,
+                daily_data.low
+            )
+            
+            # 检查是否为冲高回落阳线或冲高回落阳十字星
+            if pattern in ["冲高回落阳线", "冲高回落阳十字星"]:
+                return CPointPluginResult(
+                    "风险K线",
+                    True,
+                    -40,  # 扣40分
+                    f"{pattern} (振幅:{amplitude_pct:.2f}%)"
+                )
+            
+            # 检查是否为带上影线的阳线（上影线占比>30%）
             body_high = max(daily_data.open, daily_data.close)
             upper_shadow = daily_data.high - body_high
             upper_shadow_ratio = (upper_shadow / (daily_data.high - daily_data.low)) if (daily_data.high - daily_data.low) > 0 else 0
             
-            # 判断是否有明显上影线（上影线占比>30%）
             if upper_shadow_ratio > 0.3:
                 return CPointPluginResult(
                     "风险K线",
                     True,
-                    -999,  # 一票否决
-                    f"冲高回落带上影线 (振幅:{amplitude_pct:.2f}%, 上影线比例:{upper_shadow_ratio*100:.1f}%)"
+                    -40,  # 扣40分
+                    f"带上影线的阳线 (振幅:{amplitude_pct:.2f}%, 上影线比例:{upper_shadow_ratio*100:.1f}%)"
                 )
             
             return CPointPluginResult("风险K线", False, 0, "")

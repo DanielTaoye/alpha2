@@ -197,8 +197,8 @@ class BearishPatternService:
         if not is_today_negative:
             return None
         
-        # 计算跌幅
-        decline = (today['close'] - today['open']) / today['open'] if today['open'] > 0 else 0
+        # 计算跌幅（相对前一天收盘价）
+        decline = (today['close'] - prev_day['close']) / prev_day['close'] if prev_day['close'] > 0 else 0
         decline_pct = abs(decline) * 100
         
         if decline_pct >= decline_threshold:
@@ -223,12 +223,12 @@ class BearishPatternService:
         if prev_pattern != "冲高回落阴线" or prev_amplitude <= 5.0:
             return None
         
-        # 当日为跌幅大于3%的阴线
+        # 当日为跌幅大于3%的阴线（相对前一天收盘价）
         is_today_negative = today['close'] < today['open']
         if not is_today_negative:
             return None
         
-        decline = (today['close'] - today['open']) / today['open'] if today['open'] > 0 else 0
+        decline = (today['close'] - prev_day['close']) / prev_day['close'] if prev_day['close'] > 0 else 0
         decline_pct = abs(decline) * 100
         
         if decline_pct > 3.0:
@@ -259,12 +259,12 @@ class BearishPatternService:
         if prev_pattern not in valid_patterns or prev_amplitude <= 5.0:
             return None
         
-        # 当日为跌幅大于3%的阴线
+        # 当日为跌幅大于3%的阴线（相对前一天收盘价）
         is_today_negative = today['close'] < today['open']
         if not is_today_negative:
             return None
         
-        decline = (today['close'] - today['open']) / today['open'] if today['open'] > 0 else 0
+        decline = (today['close'] - prev_day['close']) / prev_day['close'] if prev_day['close'] > 0 else 0
         decline_pct = abs(decline) * 100
         
         if decline_pct > 3.0:
@@ -313,9 +313,9 @@ class BearishPatternService:
             today['high'], today['low'], day_before_1['close']
         )
         
-        # 跌幅>3%的阴线
+        # 跌幅>3%的阴线（相对前一天收盘价）
         is_today_negative = today['close'] < today['open']
-        decline = (today['close'] - today['open']) / today['open'] if today['open'] > 0 else 0
+        decline = (today['close'] - day_before_1['close']) / day_before_1['close'] if day_before_1['close'] > 0 else 0
         decline_pct = abs(decline) * 100
         
         # 检查是否符合条件
@@ -488,12 +488,12 @@ class BearishPatternService:
         if not prev_day:
             return None
         
-        # 当日为大中阴，跌幅大于5%以上
+        # 当日为大中阴，跌幅大于5%以上（相对前一天收盘价）
         is_today_negative = today['close'] < today['open']
         if not is_today_negative:
             return None
         
-        decline = (today['close'] - today['open']) / today['open'] if today['open'] > 0 else 0
+        decline = (today['close'] - prev_day['close']) / prev_day['close'] if prev_day['close'] > 0 else 0
         decline_pct = abs(decline) * 100
         
         if decline_pct <= 5.0:
@@ -519,12 +519,12 @@ class BearishPatternService:
         if prev_pattern not in ["触底反弹十字星"]:
             return None
         
-        # 当日出现跌幅大于5%的阴线
+        # 当日出现跌幅大于5%的阴线（相对前一天收盘价）
         is_today_negative = today['close'] < today['open']
         if not is_today_negative:
             return None
         
-        decline = (today['close'] - today['open']) / today['open'] if today['open'] > 0 else 0
+        decline = (today['close'] - prev_day['close']) / prev_day['close'] if prev_day['close'] > 0 else 0
         decline_pct = abs(decline) * 100
         
         if decline_pct > 5.0:
@@ -549,7 +549,9 @@ class BearishPatternService:
         if prev_pattern != "冲高回落阴线":
             return None
         
-        prev_decline = (prev_day['close'] - prev_day['open']) / prev_day['open'] if prev_day['open'] > 0 else 0
+        # 前一日跌幅（相对前前一天收盘价）
+        prev_prev_close = prev_day.get('prev_close', prev_day['open'])
+        prev_decline = (prev_day['close'] - prev_prev_close) / prev_prev_close if prev_prev_close > 0 else 0
         prev_decline_pct = abs(prev_decline) * 100
         
         # 检查条件：(振幅>5%且跌幅>4.5%) 或 (振幅>10%且跌幅>2%)
