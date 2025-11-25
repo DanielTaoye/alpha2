@@ -19,6 +19,49 @@ class CRPointService:
         self.r_point_service = RPointPluginService()
         self.strategy2_service = Strategy2Service()
     
+    def _check_golden_c_point(self, current_index: int, kline_data: List[KLineData], 
+                              strategy1_scores: Dict, strategy2_scores: Dict) -> bool:
+        """
+        检查是否为金色C点
+        
+        条件：连续5个交易日内，策略一和策略二都至少有1次发C，且总次数>=2
+        
+        Args:
+            current_index: 当前K线索引
+            kline_data: K线数据列表
+            strategy1_scores: 策略一评分字典
+            strategy2_scores: 策略二评分字典
+        
+        Returns:
+            是否为金色C点
+        """
+        # 获取前5个交易日（包含当前日）
+        start_index = max(0, current_index - 4)
+        
+        strategy1_c_count = 0
+        strategy2_c_count = 0
+        
+        for i in range(start_index, current_index + 1):
+            date_str = kline_data[i].time.strftime('%Y-%m-%d')
+            
+            # 检查策略一是否发C（分数>=70或被插件触发）
+            if date_str in strategy1_scores:
+                s1_data = strategy1_scores[date_str]
+                if s1_data.get('is_c_point', False):
+                    strategy1_c_count += 1
+            
+            # 检查策略二是否发C（分数>=70）
+            if date_str in strategy2_scores:
+                s2_data = strategy2_scores[date_str]
+                if s2_data.get('triggered', False):
+                    strategy2_c_count += 1
+        
+        # 两个策略都至少有1次，且总次数>=2
+        total_count = strategy1_c_count + strategy2_c_count
+        has_both_strategies = strategy1_c_count >= 1 and strategy2_c_count >= 1
+        
+        return has_both_strategies and total_count >= 2
+    
     def analyze_cr_points(self, stock_code: str, stock_name: str, kline_data: List[KLineData],
                          ma_data: Optional[Dict] = None, macd_data: Optional[Dict] = None,
                          volume_types: Optional[Dict] = None, bullish_patterns: Optional[Dict] = None) -> Dict[str, Any]:
@@ -145,6 +188,9 @@ class CRPointService:
                         logger.info(f"[CR关系校验] C点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
                 
                 if can_add_c:
+                    # 检查是否为金色C点
+                    is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
+                    
                     # 正常触发的C点
                     cr_point = CRPoint(
                         stock_code=stock_code,
@@ -164,7 +210,8 @@ class CRPointService:
                         strategy_name=c_strategy,
                         plugins=c_plugins,  # 添加插件信息
                         strategy1_score=c_score,  # 策略一得分
-                        strategy2_score=strategy2_score  # 策略二得分
+                        strategy2_score=strategy2_score,  # 策略二得分
+                        is_golden=is_golden  # 是否为金色C点
                     )
                     c_points.append(cr_point)
                     # 记录最近的C点日期
@@ -173,6 +220,9 @@ class CRPointService:
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
                 else:
+                    # 检查是否为金色C点（即使被拒绝，也标记）
+                    is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
+                    
                     # 因CR关系规则被拒绝的C点
                     rejected_point = CRPoint(
                         stock_code=stock_code,
@@ -192,7 +242,8 @@ class CRPointService:
                         strategy_name=c_strategy + f" (CR关系校验: {rejection_reason})",
                         plugins=c_plugins,
                         strategy1_score=c_score,  # 策略一得分
-                        strategy2_score=strategy2_score  # 策略二得分
+                        strategy2_score=strategy2_score,  # 策略二得分
+                        is_golden=is_golden  # 是否为金色C点
                     )
                     rejected_c_points.append(rejected_point)
                     
@@ -210,6 +261,9 @@ class CRPointService:
                         logger.info(f"[CR关系校验] 策略2 C点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
                 
                 if can_add_c:
+                    # 检查是否为金色C点
+                    is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
+                    
                     # 策略2触发的C点（只添加到strategy2_c_points，不添加到c_points避免重复）
                     strategy2_point = CRPoint(
                         stock_code=stock_code,
@@ -229,7 +283,8 @@ class CRPointService:
                         strategy_name=f"策略2: {strategy2_reason}",
                         plugins=[],  # 策略2暂不使用插件结构
                         strategy1_score=c_score,  # 策略一得分
-                        strategy2_score=strategy2_score  # 策略二得分
+                        strategy2_score=strategy2_score,  # 策略二得分
+                        is_golden=is_golden  # 是否为金色C点
                     )
                     strategy2_c_points.append(strategy2_point)
                     # 记录最近的C点日期
@@ -238,6 +293,9 @@ class CRPointService:
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
                 else:
+                    # 检查是否为金色C点（即使被拒绝，也标记）
+                    is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
+                    
                     # 因CR关系规则被拒绝的C点
                     rejected_point = CRPoint(
                         stock_code=stock_code,
@@ -257,10 +315,14 @@ class CRPointService:
                         strategy_name=f"策略2: {strategy2_reason} (CR关系校验: {rejection_reason})",
                         plugins=[],
                         strategy1_score=c_score,  # 策略一得分
-                        strategy2_score=strategy2_score  # 策略二得分
+                        strategy2_score=strategy2_score,  # 策略二得分
+                        is_golden=is_golden  # 是否为金色C点
                     )
                     rejected_c_points.append(rejected_point)
             elif is_rejected:
+                # 检查是否为金色C点（即使被拒绝，也标记）
+                is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
+                
                 # 被插件否决的C点（基础分>=70但最终分<70）
                 rejected_point = CRPoint(
                     stock_code=stock_code,
@@ -278,7 +340,10 @@ class CRPointService:
                     c_value=abc.c,
                     score=c_score,
                     strategy_name=c_strategy + " (被插件否决)",
-                    plugins=c_plugins
+                    plugins=c_plugins,
+                    strategy1_score=c_score,  # 策略一得分
+                    strategy2_score=strategy2_score,  # 策略二得分
+                    is_golden=is_golden  # 是否为金色C点
                 )
                 rejected_c_points.append(rejected_point)
             

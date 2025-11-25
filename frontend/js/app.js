@@ -886,6 +886,7 @@ function renderChart(klineData, analysisData, period) {
                             let isC点 = false;
                             let strategy1Score = 0;
                             let strategy2Score = 0;
+                            let isGoldenC = false;
                             
                             // 从所有C点中查找当前日期的C点
                             if (crPointsData.c_points) {
@@ -894,6 +895,7 @@ function renderChart(klineData, analysisData, period) {
                                     isC点 = true;
                                     strategy1Score = cPoint.strategy1Score || 0;
                                     strategy2Score = cPoint.strategy2Score || 0;
+                                    isGoldenC = cPoint.isGolden || false;
                                 }
                             }
                             if (!isC点 && crPointsData.strategy2_c_points) {
@@ -902,6 +904,7 @@ function renderChart(klineData, analysisData, period) {
                                     isC点 = true;
                                     strategy1Score = s2cPoint.strategy1Score || 0;
                                     strategy2Score = s2cPoint.strategy2Score || 0;
+                                    isGoldenC = s2cPoint.isGolden || false;
                                 }
                             }
                             
@@ -910,6 +913,11 @@ function renderChart(klineData, analysisData, period) {
                                 const maxScore = Math.max(strategy1Score, strategy2Score);
                                 const probabilityValue = Math.min(maxScore * 1.2, 99);
                                 result += `<span style="color: #FFD700; font-weight: bold; font-size: 12px;">🎯 机会概率值: ${probabilityValue.toFixed(1)}%</span><br/>`;
+                                
+                                // 如果是金色C点，显示特殊标记
+                                if (isGoldenC) {
+                                    result += `<span style="color: #FFD700; font-weight: bold; font-size: 11px;">⭐ 金色C点（5日内策略一和策略二都有发C）</span><br/>`;
+                                }
                             }
                             
                             // 显示策略1的评分和插件信息（如果存在）
@@ -1851,22 +1859,27 @@ function updateChartWithCRPoints() {
             }
         });
         
-        // 添加C点标记（红色，在K线下方）
+        // 添加C点标记（金色或红色，在K线下方）
         if (crPointsData.c_points && crPointsData.c_points.length > 0) {
             const cPointData = crPointsData.c_points.map(point => {
                 const dateStr = point.triggerDate; // CR点日期格式是 'YYYY-MM-DD'
                 const index = dateMap.get(dateStr);
                 if (index !== undefined && index >= 0) {
+                    // 判断是否为金色C点
+                    const isGolden = point.isGolden || false;
+                    const cColor = isGolden ? '#FFD700' : '#ff0000';  // 金色或红色
+                    
                     return {
                         value: [index, point.lowPrice],
                         cPointInfo: {
                             score: point.score || 0,
                             strategy: point.strategyName || '策略一',
                             date: point.triggerDate,
-                            plugins: point.plugins || []
+                            plugins: point.plugins || [],
+                            isGolden: isGolden
                         },
                         itemStyle: {
-                            color: '#ff0000',
+                            color: cColor,
                             borderColor: '#fff',
                             borderWidth: 2
                         },
@@ -1947,22 +1960,27 @@ function updateChartWithCRPoints() {
         }
         */
         
-        // 添加策略2 C点标记（紫色矩形，在K线下方，标记为"C"）
+        // 添加策略2 C点标记（金色或紫色矩形，在K线下方，标记为"C"）
         if (crPointsData.strategy2_c_points && crPointsData.strategy2_c_points.length > 0) {
             const strategy2CPointData = crPointsData.strategy2_c_points.map(point => {
                 const dateStr = point.triggerDate;
                 const index = dateMap.get(dateStr);
                 if (index !== undefined && index >= 0) {
+                    // 判断是否为金色C点
+                    const isGolden = point.isGolden || false;
+                    const s2Color = isGolden ? '#FFD700' : '#9C27B0';  // 金色或紫色
+                    
                     return {
                         value: [index, point.lowPrice * 0.995],  // 略微降低位置，避免与策略1重叠
                         cPointInfo: {
                             score: point.score || 0,
                             strategy: point.strategyName || '策略二',
                             date: point.triggerDate,
-                            plugins: []
+                            plugins: [],
+                            isGolden: isGolden
                         },
                         itemStyle: {
-                            color: '#9C27B0',  // 紫色
+                            color: s2Color,  // 金色或紫色
                             borderColor: '#fff',
                             borderWidth: 2
                         },

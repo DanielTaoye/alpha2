@@ -42,6 +42,7 @@ class CRPoint:
     plugins: List[Dict[str, Any]] = field(default_factory=list)  # 触发的插件信息
     strategy1_score: float = 0  # 策略一得分
     strategy2_score: float = 0  # 策略二得分
+    is_golden: bool = False  # 是否为金色C点（连续5日内策略一和策略二都有发C）
     created_at: Optional[datetime] = None
     
     def to_dict(self) -> dict:
@@ -66,6 +67,7 @@ class CRPoint:
             'plugins': self.plugins,  # 插件信息
             'strategy1Score': self.strategy1_score,  # 策略一得分
             'strategy2Score': self.strategy2_score,  # 策略二得分
+            'isGolden': self.is_golden,  # 是否为金色C点
             'createdAt': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
         }
 
