@@ -162,7 +162,9 @@ class CRPointService:
                         c_value=abc.c,
                         score=c_score,
                         strategy_name=c_strategy,
-                        plugins=c_plugins  # 添加插件信息
+                        plugins=c_plugins,  # 添加插件信息
+                        strategy1_score=c_score,  # 策略一得分
+                        strategy2_score=strategy2_score  # 策略二得分
                     )
                     c_points.append(cr_point)
                     # 记录最近的C点日期
@@ -188,7 +190,9 @@ class CRPointService:
                         c_value=abc.c,
                         score=c_score,
                         strategy_name=c_strategy + f" (CR关系校验: {rejection_reason})",
-                        plugins=c_plugins
+                        plugins=c_plugins,
+                        strategy1_score=c_score,  # 策略一得分
+                        strategy2_score=strategy2_score  # 策略二得分
                     )
                     rejected_c_points.append(rejected_point)
                     
@@ -223,7 +227,9 @@ class CRPointService:
                         c_value=abc.c,
                         score=strategy2_score,
                         strategy_name=f"策略2: {strategy2_reason}",
-                        plugins=[]  # 策略2暂不使用插件结构
+                        plugins=[],  # 策略2暂不使用插件结构
+                        strategy1_score=c_score,  # 策略一得分
+                        strategy2_score=strategy2_score  # 策略二得分
                     )
                     strategy2_c_points.append(strategy2_point)
                     # 记录最近的C点日期
@@ -249,7 +255,9 @@ class CRPointService:
                         c_value=abc.c,
                         score=strategy2_score,
                         strategy_name=f"策略2: {strategy2_reason} (CR关系校验: {rejection_reason})",
-                        plugins=[]
+                        plugins=[],
+                        strategy1_score=c_score,  # 策略一得分
+                        strategy2_score=strategy2_score  # 策略二得分
                     )
                     rejected_c_points.append(rejected_point)
             elif is_rejected:

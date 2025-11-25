@@ -40,6 +40,8 @@ class CRPoint:
     score: float = 0  # 策略得分
     strategy_name: str = ''  # 策略名称
     plugins: List[Dict[str, Any]] = field(default_factory=list)  # 触发的插件信息
+    strategy1_score: float = 0  # 策略一得分
+    strategy2_score: float = 0  # 策略二得分
     created_at: Optional[datetime] = None
     
     def to_dict(self) -> dict:
@@ -62,6 +64,8 @@ class CRPoint:
             'score': self.score,
             'strategyName': self.strategy_name,
             'plugins': self.plugins,  # 插件信息
+            'strategy1Score': self.strategy1_score,  # 策略一得分
+            'strategy2Score': self.strategy2_score,  # 策略二得分
             'createdAt': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
         }
 

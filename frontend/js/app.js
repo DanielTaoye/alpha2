@@ -882,6 +882,36 @@ function renderChart(klineData, analysisData, period) {
                             result += `最低: ${param.value[3]}<br/>`;
                             result += `最高: ${param.value[4]}<br/>`;
                             
+                            // 检查是否是C点，如果是则显示机会概率值
+                            let isC点 = false;
+                            let strategy1Score = 0;
+                            let strategy2Score = 0;
+                            
+                            // 从所有C点中查找当前日期的C点
+                            if (crPointsData.c_points) {
+                                const cPoint = crPointsData.c_points.find(cp => cp.triggerDate === dateOnly);
+                                if (cPoint) {
+                                    isC点 = true;
+                                    strategy1Score = cPoint.strategy1Score || 0;
+                                    strategy2Score = cPoint.strategy2Score || 0;
+                                }
+                            }
+                            if (!isC点 && crPointsData.strategy2_c_points) {
+                                const s2cPoint = crPointsData.strategy2_c_points.find(cp => cp.triggerDate === dateOnly);
+                                if (s2cPoint) {
+                                    isC点 = true;
+                                    strategy1Score = s2cPoint.strategy1Score || 0;
+                                    strategy2Score = s2cPoint.strategy2Score || 0;
+                                }
+                            }
+                            
+                            // 如果是C点，计算并显示机会概率值
+                            if (isC点) {
+                                const maxScore = Math.max(strategy1Score, strategy2Score);
+                                const probabilityValue = Math.min(maxScore * 1.2, 99);
+                                result += `<span style="color: #FFD700; font-weight: bold; font-size: 12px;">🎯 机会概率值: ${probabilityValue.toFixed(1)}%</span><br/>`;
+                            }
+                            
                             // 显示策略1的评分和插件信息（如果存在）
                             if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
                                 const s1Data = crPointsData.strategy1_scores[dateOnly];
