@@ -367,8 +367,9 @@ class RPointPluginService:
             day_win_ratio_score = current_chance.day_win_ratio_score or 0
             
             # 根据股性判断是否临近压力位
+            # 要求：赔率得分不等于0，且小于阈值
             pressure_threshold = self._get_pressure_threshold(stock_nature)
-            is_near_pressure = day_win_ratio_score < pressure_threshold
+            is_near_pressure = 0 < day_win_ratio_score < pressure_threshold
             
             if not is_near_pressure:
                 return RPointPluginResult("临近压力位滞涨", False, "")
@@ -516,10 +517,11 @@ class RPointPluginService:
             stock_nature = current_chance.stock_nature or "波段"  # 默认波段
             
             # 检查今日赔率（根据股性判断）
+            # 要求：赔率得分不等于0，且小于阈值
             day_win_ratio_score = current_chance.day_win_ratio_score or 0
             win_ratio_threshold = self._get_win_ratio_threshold_for_weak_breakout(stock_nature)
             
-            if day_win_ratio_score >= win_ratio_threshold:
+            if not (0 < day_win_ratio_score < win_ratio_threshold):
                 return RPointPluginResult("上冲乏力", False, "")
             
             # 获取前一日数据
