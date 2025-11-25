@@ -160,14 +160,14 @@ class RPointPluginService:
             is_volume_xyzh = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
             
             # 判断当日K线形态
-            is_bearish_divergence = self._check_bearish_divergence_kline(stock_code, current_data, is_main_board)
-            is_bearish_line = self._check_bearish_line_above_threshold(current_data, is_main_board)
+            matched_patterns = self._check_bearish_kline_patterns(current_data, stock_code)
+            is_bearish_kline = len(matched_patterns) > 0
             has_bearish_pattern = self._check_bearish_pattern(current_chance)
             
             # 调试日志
             logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 基础检查: volume_type={current_chance.volume_type}, "
                         f"is_volume_xyh={is_volume_xyh}, is_volume_xyzh={is_volume_xyzh}, "
-                        f"is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}, "
+                        f"is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}, "
                         f"has_bearish_pattern={has_bearish_pattern}")
             
             # 获取前N日数据
@@ -202,12 +202,17 @@ class RPointPluginService:
             
             if consecutive_limits >= 2:
                 logger.debug(f"[R点-乖离率偏离-条件1] {stock_code} {date_str} 连续{consecutive_limits}个涨停, "
-                            f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
-                if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
+                            f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
+                if is_volume_xyh and is_bearish_kline:
+                    pattern_desc = "、".join(matched_patterns)
+                    # 计算振幅
+                    amplitude = 0
+                    if current_data.pre_close and current_data.pre_close > 0:
+                        amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
                     return RPointPluginResult(
                         "乖离率偏离",
                         True,
-                        f"条件1: 连续{consecutive_limits}个涨停+放量+空头K线"
+                        f"条件1: 连续{consecutive_limits}个涨停+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                     )
             
             # === 条件2: 前3日累计涨幅过大 ===
@@ -216,12 +221,17 @@ class RPointPluginService:
                 threshold_3days = 15 if is_main_board else 20
                 if cum_3days > threshold_3days:
                     logger.debug(f"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日涨幅{cum_3days:.2f}%>{threshold_3days}%, "
-                                f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
-                    if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
+                                f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
+                    if is_volume_xyh and is_bearish_kline:
+                        pattern_desc = "、".join(matched_patterns)
+                        # 计算振幅
+                        amplitude = 0
+                        if current_data.pre_close and current_data.pre_close > 0:
+                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件2: 前3日涨幅{cum_3days:.2f}%+放量+空头K线"
+                            f"条件2: 前3日涨幅{cum_3days:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                         )
             
             # === 条件3: 前5日累计涨幅过大 ===
@@ -230,12 +240,17 @@ class RPointPluginService:
                 threshold_5days = 20 if is_main_board else 25
                 if cum_5days > threshold_5days:
                     logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日涨幅{cum_5days:.2f}%>{threshold_5days}%, "
-                                f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
-                    if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
+                                f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
+                    if is_volume_xyh and is_bearish_kline:
+                        pattern_desc = "、".join(matched_patterns)
+                        # 计算振幅
+                        amplitude = 0
+                        if current_data.pre_close and current_data.pre_close > 0:
+                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件3: 前5日涨幅{cum_5days:.2f}%+放量+空头K线"
+                            f"条件3: 前5日涨幅{cum_5days:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                         )
             
             # === 条件4: 连续5连阳+涨幅过大 ===
@@ -245,12 +260,17 @@ class RPointPluginService:
                 threshold_yang = 20 if is_main_board else 25
                 if all_bullish and cum_5days_yang > threshold_yang:
                     logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳+涨幅{cum_5days_yang:.2f}%>{threshold_yang}%, "
-                                f"is_volume_xyh={is_volume_xyh}, is_bearish_divergence={is_bearish_divergence}, is_bearish_line={is_bearish_line}")
-                    if (is_volume_xyh and is_bearish_divergence) or (is_volume_xyh and is_bearish_line):
+                                f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
+                    if is_volume_xyh and is_bearish_kline:
+                        pattern_desc = "、".join(matched_patterns)
+                        # 计算振幅
+                        amplitude = 0
+                        if current_data.pre_close and current_data.pre_close > 0:
+                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件4: 连续5连阳+涨幅{cum_5days_yang:.2f}%+放量+空头K线"
+                            f"条件4: 连续5连阳+涨幅{cum_5days_yang:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                         )
             
             # === 条件5: 前15日累计涨幅>50% ===
@@ -258,12 +278,26 @@ class RPointPluginService:
                 cum_15days = sum(change_pcts[:15])
                 if cum_15days > 50:
                     logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日涨幅{cum_15days:.2f}%>50%, "
-                                f"is_volume_xyzh={is_volume_xyzh}, is_bearish_divergence={is_bearish_divergence}, has_bearish_pattern={has_bearish_pattern}")
-                    if is_volume_xyzh and (is_bearish_divergence or has_bearish_pattern):
+                                f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline={is_bearish_kline}, has_bearish_pattern={has_bearish_pattern}")
+                    if is_volume_xyzh and (is_bearish_kline or has_bearish_pattern):
+                        # 计算振幅
+                        amplitude = 0
+                        if current_data.pre_close and current_data.pre_close > 0:
+                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                        
+                        # 组合描述
+                        signal_desc = ""
+                        if is_bearish_kline:
+                            pattern_desc = "、".join(matched_patterns)
+                            signal_desc = f"空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                        elif has_bearish_pattern:
+                            bearish_patterns = current_chance.bearish_pattern.strip()
+                            signal_desc = f"空头组合({bearish_patterns})"
+                        
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件5: 前15日涨幅{cum_15days:.2f}%+放量+空头信号"
+                            f"条件5: 前15日涨幅{cum_15days:.2f}%+放量+{signal_desc}"
                         )
             
             # === 条件6: 前20日累计涨幅>50% ===
@@ -271,12 +305,26 @@ class RPointPluginService:
                 cum_20days = sum(change_pcts[:20])
                 if cum_20days > 50:
                     logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{cum_20days:.2f}%>50%, "
-                                f"is_volume_xyzh={is_volume_xyzh}, is_bearish_divergence={is_bearish_divergence}, has_bearish_pattern={has_bearish_pattern}")
-                    if is_volume_xyzh and (is_bearish_divergence or has_bearish_pattern):
+                                f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline={is_bearish_kline}, has_bearish_pattern={has_bearish_pattern}")
+                    if is_volume_xyzh and (is_bearish_kline or has_bearish_pattern):
+                        # 计算振幅
+                        amplitude = 0
+                        if current_data.pre_close and current_data.pre_close > 0:
+                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                        
+                        # 组合描述
+                        signal_desc = ""
+                        if is_bearish_kline:
+                            pattern_desc = "、".join(matched_patterns)
+                            signal_desc = f"空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                        elif has_bearish_pattern:
+                            bearish_patterns = current_chance.bearish_pattern.strip()
+                            signal_desc = f"空头组合({bearish_patterns})"
+                        
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件6: 前20日涨幅{cum_20days:.2f}%+放量+空头信号"
+                            f"条件6: 前20日涨幅{cum_20days:.2f}%+放量+{signal_desc}"
                         )
             
             return RPointPluginResult("乖离率偏离", False, "")
@@ -289,8 +337,8 @@ class RPointPluginService:
         """
         插件2: 临近压力位滞涨
         
-        条件1: 距离压力位近(<15%) + 放量(XYZH) + 特定K线
-        条件2: 距离压力位近(<15%) + 前3日无AXYZ放量 + 空头组合
+        条件1: 距离压力位近(按股性判断) + 放量(XYZH) + 特定K线
+        条件2: 距离压力位近(按股性判断) + 前3日无AXYZ放量 + 空头组合
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -312,10 +360,15 @@ class RPointPluginService:
             if not current_chance:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
+            # 获取股性
+            stock_nature = current_chance.stock_nature or "波段"  # 默认波段
+            
             # 计算日线赔率（距离压力位的空间）
             day_win_ratio_score = current_chance.day_win_ratio_score or 0
-            # 赔率分<6分视为距离压力位较近
-            is_near_pressure = day_win_ratio_score < 6
+            
+            # 根据股性判断是否临近压力位
+            pressure_threshold = self._get_pressure_threshold(stock_nature)
+            is_near_pressure = day_win_ratio_score < pressure_threshold
             
             if not is_near_pressure:
                 return RPointPluginResult("临近压力位滞涨", False, "")
@@ -324,17 +377,19 @@ class RPointPluginService:
             is_volume_xyzh = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
             
             if is_volume_xyzh:
-                # 检查K线形态
-                is_bearish_divergence = self._check_bearish_divergence_kline(stock_code, current_data, is_main_board)
-                is_bearish_doji = self._check_bearish_doji(current_data, is_main_board)
-                is_high_open_low_close = self._check_high_open_low_close(current_data, is_main_board)
-                is_bearish_line_3pct = self._check_bearish_line_above_threshold(current_data, is_main_board, 3)
+                # 检查K线形态，返回所有命中的形态
+                matched_patterns = self._check_bearish_kline_patterns(current_data, stock_code)
                 
-                if is_bearish_divergence or is_bearish_doji or is_high_open_low_close or is_bearish_line_3pct:
+                if matched_patterns:
+                    pattern_desc = "、".join(matched_patterns)
+                    # 计算振幅
+                    amplitude = 0
+                    if current_data.pre_close and current_data.pre_close > 0:
+                        amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"条件1: 距压力位近(赔率{day_win_ratio_score:.1f}<6)+放量+空头K线"
+                        f"条件1: 距压力位近(股性:{stock_nature},赔率{day_win_ratio_score:.1f}<{pressure_threshold})+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                     )
             
             # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
@@ -355,12 +410,13 @@ class RPointPluginService:
                                 break
                     
                     if not has_good_volume:
-                        has_bearish_pattern = self._check_bearish_pattern(current_chance)
-                        if has_bearish_pattern:
+                        # 检查当日是否有空头组合，并获取具体组合名称
+                        if current_chance.bearish_pattern and len(current_chance.bearish_pattern.strip()) > 0:
+                            bearish_patterns = current_chance.bearish_pattern.strip()
                             return RPointPluginResult(
                                 "临近压力位滞涨",
                                 True,
-                                f"条件2(熊市): 距压力位近(赔率{day_win_ratio_score:.1f}<6)+前3日无放量+空头组合"
+                                f"条件2(熊市): 距压力位近(股性:{stock_nature},赔率{day_win_ratio_score:.1f}<{pressure_threshold})+前3日无AXYZ放量+空头组合({bearish_patterns})"
                             )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
@@ -485,16 +541,18 @@ class RPointPluginService:
                 return RPointPluginResult("上冲乏力", False, "")
             
             # 检查今日K线形态
-            is_bearish_divergence = self._check_bearish_divergence_kline(stock_code, current_data, is_main_board)
-            is_bearish_doji = self._check_bearish_doji(current_data, is_main_board)
-            is_high_open_low_close = self._check_high_open_low_close(current_data, is_main_board)
-            is_bearish_line_3pct = self._check_bearish_line_above_threshold(current_data, is_main_board, 3)
+            matched_patterns = self._check_bearish_kline_patterns(current_data, stock_code)
             
-            if is_bearish_divergence or is_bearish_doji or is_high_open_low_close or is_bearish_line_3pct:
+            if matched_patterns:
+                pattern_desc = "、".join(matched_patterns)
+                # 计算振幅
+                amplitude = 0
+                if current_data.pre_close and current_data.pre_close > 0:
+                    amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
                 return RPointPluginResult(
                     "上冲乏力",
                     True,
-                    f"从C点涨幅{cumulative_gain:.2f}%+赔率{day_win_ratio_score:.1f}+昨日涨{yesterday_change:.2f}%+今日放量+空头K线"
+                    f"从C点涨幅{cumulative_gain:.2f}%+赔率{day_win_ratio_score:.1f}+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                 )
             
             return RPointPluginResult("上冲乏力", False, "")
@@ -531,107 +589,220 @@ class RPointPluginService:
             return False
         return len(daily_chance.bearish_pattern.strip()) > 0
     
-    def _check_bearish_divergence_kline(self, stock_code: str, daily_data, is_main_board: bool) -> bool:
+    def _get_pressure_threshold(self, stock_nature: str) -> float:
         """
-        检查是否为空头分歧K线（冲高回落）
-        
-        判断条件：
-        1. 振幅 > 6%（主板）或 8%（非主板）
-        2. K线形态必须是以下之一：
-           - 冲高回落阳线
-           - 冲高回落阴线
-           - 冲高回落阳十字星
-           - 冲高回落阴十字星
-           - 高开低走
-        """
-        if not daily_data or not daily_data.pre_close or daily_data.pre_close == 0:
-            return False
-        
-        # 1. 检查振幅
-        amplitude_threshold = 6 if is_main_board else 8
-        amplitude = ((daily_data.high - daily_data.low) / daily_data.pre_close * 100)
-        
-        if amplitude < amplitude_threshold:
-            return False
-        
-        # 2. 检查K线形态
-        from domain.services.kline_pattern_service import KLinePatternService
-        
-        pattern = KLinePatternService.identify_pattern(
-            stock_code,
-            daily_data.open,
-            daily_data.close,
-            daily_data.high,
-            daily_data.low
-        )
-        
-        # 符合条件的K线形态
-        valid_patterns = [
-            "冲高回落阳线",
-            "冲高回落阴线",
-            "冲高回落阳十字星",
-            "冲高回落阴十字星",
-            "高开低走"
-        ]
-        
-        return pattern in valid_patterns
-    
-    def _check_bearish_doji(self, daily_data, is_main_board: bool) -> bool:
-        """
-        检查是否为空头十字星
-        振幅>6%/8% 且实体很小
-        """
-        if not daily_data or not daily_data.pre_close or daily_data.pre_close == 0:
-            return False
-        
-        amplitude_threshold = 6 if is_main_board else 8
-        amplitude = ((daily_data.high - daily_data.low) / daily_data.pre_close * 100)
-        
-        if amplitude < amplitude_threshold:
-            return False
-        
-        # 实体占比<1%视为十字星
-        body = abs(daily_data.close - daily_data.open)
-        body_ratio = (body / daily_data.close * 100) if daily_data.close else 0
-        
-        return body_ratio < 1
-    
-    def _check_high_open_low_close(self, daily_data, is_main_board: bool) -> bool:
-        """
-        检查是否为高开低走
-        定义：开盘价>收盘价，A=0（无上影线），C<2B
-        """
-        if not daily_data:
-            return False
-        
-        # 计算ABC
-        from domain.services.kline_pattern_service import KLinePatternService
-        abc = KLinePatternService.calculate_abc(
-            daily_data.open, daily_data.close, daily_data.high, daily_data.low
-        )
-        
-        # 判断高开低走：开盘价>收盘价，A=0，C<2B
-        return abc.open > abc.close and abc.a == 0 and abc.c < 2 * abc.b
-    
-    def _check_bearish_line_above_threshold(self, daily_data, is_main_board: bool, threshold: float = 3) -> bool:
-        """
-        检查是否为阴线且跌幅超过阈值
+        根据股性获取压力位阈值
         
         Args:
-            threshold: 跌幅阈值（3%或5%）
+            stock_nature: 股性（短线、波段、中长线）
+            
+        Returns:
+            赔率得分阈值
+        """
+        thresholds = {
+            "短线": 6.0,
+            "波段": 4.8,
+            "中长线": 3.6
+        }
+        return thresholds.get(stock_nature, 4.8)  # 默认波段
+    
+    def _check_bearish_kline_patterns(self, daily_data, stock_code: str = None) -> List[str]:
+        """
+        检查所有空头K线形态，返回命中的形态列表
+        
+        Args:
+            daily_data: 日K线数据
+            stock_code: 股票代码（用于判断主板/非主板）
+        
+        Returns:
+            命中的K线形态列表，如 ["冲高回落阳线", "高开低走"]
         """
         if not daily_data or not daily_data.pre_close or daily_data.pre_close == 0:
+            return []
+        
+        matched_patterns = []
+        
+        # 判断主板还是非主板
+        is_main_board = True
+        if stock_code:
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+        
+        # 计算ABC
+        O = daily_data.open
+        C = daily_data.close
+        H = daily_data.high
+        L = daily_data.low
+        prev_close = daily_data.pre_close
+        
+        # A: 上影线 = 最高价 - max(开盘价, 收盘价)
+        A = H - max(O, C)
+        # B: 实体 = abs(收盘价 - 开盘价)
+        B = abs(C - O)
+        # C: 下影线 = min(开盘价, 收盘价) - 最低价
+        C_shadow = min(O, C) - L
+        
+        # 1. 冲高回落阳线（需要振幅>6%/8%）
+        if self._check_bullish_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("冲高回落阳线")
+        
+        # 2. 冲高回落阴线（需要振幅>6%/8%）
+        if self._check_bearish_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("冲高回落阴线")
+        
+        # 3. 冲高回落阳十字星（需要振幅>6%/8%）
+        if self._check_bullish_doji_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("冲高回落阳十字星")
+        
+        # 4. 冲高回落阴十字星（需要振幅>6%/8%）
+        if self._check_bearish_doji_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("冲高回落阴十字星")
+        
+        # 5. 高开低走（需要振幅>6%/8%）
+        if self._check_high_open_low_close_new(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("高开低走")
+        
+        # 6. 阴线跌幅>3%（相对昨收）- 不需要振幅条件
+        if self._check_bearish_line_3pct_new(O, C, prev_close):
+            matched_patterns.append("阴线跌幅>3%")
+        
+        return matched_patterns
+    
+    def _check_bullish_high_fallback(self, A: float, B: float, C: float, O: float, close: float, 
+                                     H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        冲高回落阳线
+        振幅 > 6%（主板）或 8%（非主板）
+        A >= 2C
+        A >= 2B
+        1% < B/最低价 < 3.3%
+        开盘价 < 收盘价
+        """
+        if O >= close:  # 不是阳线
+            return False
+        if L == 0 or prev_close == 0:
             return False
         
-        # 判断是否阴线
-        if daily_data.close >= daily_data.open:
+        # 检查振幅
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 6 if is_main_board else 8
+        if amplitude <= amplitude_threshold:
             return False
         
-        # 计算跌幅
-        change_pct = ((daily_data.close - daily_data.pre_close) / daily_data.pre_close * 100)
+        b_ratio = (B / L) * 100
         
-        # 阈值根据主板调整（如果需要）
-        actual_threshold = threshold if is_main_board else (threshold * 5 / 3)
+        return (A >= 2 * C and 
+                A >= 2 * B and 
+                1 < b_ratio < 3.3)
+    
+    def _check_bearish_high_fallback(self, A: float, B: float, C: float, O: float, close: float,
+                                     H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        冲高回落阴线
+        振幅 > 6%（主板）或 8%（非主板）
+        A >= 2C
+        A >= 2B
+        1% < B/最低价 < 3.3%
+        开盘价 > 收盘价
+        """
+        if O <= close:  # 不是阴线
+            return False
+        if L == 0 or prev_close == 0:
+            return False
         
-        return change_pct < -actual_threshold
+        # 检查振幅
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 6 if is_main_board else 8
+        if amplitude <= amplitude_threshold:
+            return False
+        
+        b_ratio = (B / L) * 100
+        
+        return (A >= 2 * C and 
+                A >= 2 * B and 
+                1 < b_ratio < 3.3)
+    
+    def _check_bullish_doji_high_fallback(self, A: float, B: float, C: float, O: float, close: float,
+                                          H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        冲高回落阳十字星
+        振幅 > 6%（主板）或 8%（非主板）
+        开盘价 < 收盘价
+        B/最低价 < 2%
+        C > 0
+        A > 2C
+        """
+        if O >= close:  # 不是阳线
+            return False
+        if L == 0 or C == 0 or prev_close == 0:
+            return False
+        
+        # 检查振幅
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 6 if is_main_board else 8
+        if amplitude <= amplitude_threshold:
+            return False
+        
+        b_ratio = (B / L) * 100
+        
+        return (b_ratio < 2 and 
+                A > 2 * C)
+    
+    def _check_bearish_doji_high_fallback(self, A: float, B: float, C: float, O: float, close: float,
+                                          H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        冲高回落阴十字星
+        振幅 > 6%（主板）或 8%（非主板）
+        开盘价 > 收盘价
+        B/最低价 < 2%
+        C > 0
+        A > 2C
+        """
+        if O <= close:  # 不是阴线
+            return False
+        if L == 0 or C == 0 or prev_close == 0:
+            return False
+        
+        # 检查振幅
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 6 if is_main_board else 8
+        if amplitude <= amplitude_threshold:
+            return False
+        
+        b_ratio = (B / L) * 100
+        
+        return (b_ratio < 2 and 
+                A > 2 * C)
+    
+    def _check_high_open_low_close_new(self, A: float, B: float, C: float, O: float, close: float,
+                                       H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        高开低走
+        振幅 > 6%（主板）或 8%（非主板）
+        开盘价 > 收盘价
+        A = 0
+        C < 2B
+        """
+        if O <= close:  # 不是阴线
+            return False
+        if prev_close == 0:
+            return False
+        
+        # 检查振幅
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 6 if is_main_board else 8
+        if amplitude <= amplitude_threshold:
+            return False
+        
+        return (A == 0 and C < 2 * B)
+    
+    def _check_bearish_line_3pct_new(self, O: float, close: float, prev_close: float) -> bool:
+        """
+        阴线跌幅>3%（相对昨收）
+        """
+        if prev_close == 0:
+            return False
+        
+        change_pct = ((close - prev_close) / prev_close) * 100
+        
+        return change_pct < -3
 
