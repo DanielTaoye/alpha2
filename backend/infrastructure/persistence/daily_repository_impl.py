@@ -37,6 +37,7 @@ class DailyRepositoryImpl:
                     SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang, shang_yu_bi
                     FROM `{table_name}`
                     WHERE DATE(shi_jian) = %s
+                      AND peroid_type = '1day'
                     LIMIT 1
                 """
                 cursor.execute(sql, (date_str,))
@@ -80,7 +81,7 @@ class DailyRepositoryImpl:
                     SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang, shang_yu_bi
                     FROM `{table_name}`
                     WHERE DATE(shi_jian) BETWEEN %s AND %s
-                      AND HOUR(shi_jian) = 0 AND MINUTE(shi_jian) = 0 AND SECOND(shi_jian) = 0
+                      AND peroid_type = '1day'
                     ORDER BY shi_jian ASC
                 """
                 cursor.execute(sql, (start_date, end_date))
