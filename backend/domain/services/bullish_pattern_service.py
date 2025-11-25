@@ -218,7 +218,9 @@ class BullishPatternService:
         prev_abc = KLinePatternService.calculate_abc(
             prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
         )
-        prev_change = (prev_day['close'] - prev_day['open']) / prev_day['open'] if prev_day['open'] > 0 else 0
+        # 计算前一天相对于前天收盘价的跌幅
+        prev_prev_close = prev_day.get('prev_close', prev_day['close'])
+        prev_change = (prev_day['close'] - prev_prev_close) / prev_prev_close if prev_prev_close > 0 else 0
         prev_change_pct = abs(prev_change) * 100
         
         is_prev_negative = prev_day['close'] < prev_day['open']
@@ -251,8 +253,9 @@ class BullishPatternService:
             prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
         )
         
-        # 计算跌幅：(收盘价-开盘价)/开盘价
-        prev_change = (prev_day['close'] - prev_day['open']) / prev_day['open'] if prev_day['open'] > 0 else 0
+        # 计算前一天相对于前天收盘价的跌幅
+        prev_prev_close = prev_day.get('prev_close', prev_day['close'])
+        prev_change = (prev_day['close'] - prev_prev_close) / prev_prev_close if prev_prev_close > 0 else 0
         prev_change_pct = abs(prev_change) * 100
         
         # 前一天必须是阴线（收盘价 < 开盘价）

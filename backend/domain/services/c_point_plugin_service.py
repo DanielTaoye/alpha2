@@ -340,10 +340,16 @@ class CPointPluginService:
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
-            # TODO: 判断股性（暂时先不考虑短线股）
-            # is_short_term = self._check_stock_nature(stock_code)
-            # if is_short_term:
-            #     return CPointPluginResult("不追涨", False, 0, "")
+            # 判断股性，如果是短线则不触发此插件
+            current_chance = self._daily_chance_cache.get(date_str)
+            if not current_chance:
+                current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            
+            if current_chance and current_chance.stock_nature:
+                stock_nature = current_chance.stock_nature
+                if stock_nature == "短线":
+                    logger.debug(f"[不追涨] {stock_code} {date_str}: 股性为短线，不触发此插件")
+                    return CPointPluginResult("不追涨", False, 0, "")
             
             # 判断主板还是非主板
             is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
@@ -793,7 +799,7 @@ class CPointPluginService:
             r_date_str = r_point_in_range.trigger_date.strftime('%Y-%m-%d')
             condition_text = []
             if volume_condition:
-                condition_text.append(f"当日量>{r_point_in_range.volume * 0.85:.0f}")
+                condition_text.append("当日成交量>R日成交量的0.85倍")
             if prev_bullish_condition:
                 condition_text.append("前日多头组合")
             

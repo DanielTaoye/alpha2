@@ -512,9 +512,14 @@ class RPointPluginService:
             if not current_chance:
                 return RPointPluginResult("上冲乏力", False, "")
             
-            # 检查今日赔率
+            # 获取股性
+            stock_nature = current_chance.stock_nature or "波段"  # 默认波段
+            
+            # 检查今日赔率（根据股性判断）
             day_win_ratio_score = current_chance.day_win_ratio_score or 0
-            if day_win_ratio_score >= 10:
+            win_ratio_threshold = self._get_win_ratio_threshold_for_weak_breakout(stock_nature)
+            
+            if day_win_ratio_score >= win_ratio_threshold:
                 return RPointPluginResult("上冲乏力", False, "")
             
             # 获取前一日数据
@@ -552,7 +557,7 @@ class RPointPluginService:
                 return RPointPluginResult(
                     "上冲乏力",
                     True,
-                    f"从C点涨幅{cumulative_gain:.2f}%+赔率{day_win_ratio_score:.1f}+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                    f"从C点涨幅{cumulative_gain:.2f}%+赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold})+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                 )
             
             return RPointPluginResult("上冲乏力", False, "")
@@ -591,7 +596,7 @@ class RPointPluginService:
     
     def _get_pressure_threshold(self, stock_nature: str) -> float:
         """
-        根据股性获取压力位阈值
+        根据股性获取压力位阈值（用于临近压力位滞涨）
         
         Args:
             stock_nature: 股性（短线、波段、中长线）
@@ -605,6 +610,23 @@ class RPointPluginService:
             "中长线": 3.6
         }
         return thresholds.get(stock_nature, 4.8)  # 默认波段
+    
+    def _get_win_ratio_threshold_for_weak_breakout(self, stock_nature: str) -> float:
+        """
+        根据股性获取赔率阈值（用于上冲乏力）
+        
+        Args:
+            stock_nature: 股性（短线、波段、中长线）
+            
+        Returns:
+            赔率得分阈值
+        """
+        thresholds = {
+            "短线": 9.6,
+            "波段": 8.0,
+            "中长线": 6.0
+        }
+        return thresholds.get(stock_nature, 8.0)  # 默认波段
     
     def _check_bearish_kline_patterns(self, daily_data, stock_code: str = None) -> List[str]:
         """

@@ -156,14 +156,13 @@ class Strategy2Service:
     def _calculate_macd_score(self, stock_code: str, date: datetime, macd_data: Dict, 
                              index: int, details: List[str]) -> float:
         """
-        计算MACD得分：最高30分
+        计算MACD得分：最高35分
         
         评分项：
-        1. DIF拐头向上（10分）
-        2. 金叉（10分）- DIF上穿DEA
-        3. 多头排列（10分）- DIF > DEA > 0 且 MACD > 0
-        4. 强势多头（5分）- 当日和前一日DIF > 前8日所有DIF（5日内有效）
-        5. 柱状图反转（5分）- 前日蓝柱今日红柱（5日内有效）
+        1. DIF拐头向上（10分）- 往前数10根K线，当日和前一日DIF均大于前8个交易日（5日内有效）
+        2. 金叉（10分）- DIF>DEA，前一日蓝柱，今日红柱（5日内有效）
+        3. 多头排列1（10分）- DIF≥DEA>0 且 MACD>0
+        4. 多头排列2（5分）- 0>DIF≥DEA 且 MACD>0
         """
         score = 0
         macd_details = []
@@ -183,58 +182,55 @@ class Strategy2Service:
         if dif_prev is None or dea_prev is None or macd_prev is None:
             return score
         
-        # 1. DIF拐头向上（10分）
-        # 需要前2日数据判断拐头
-        if index >= 2:
-            dif_prev2 = macd_data['dif'][index - 2]
-            if dif_prev2 is not None:
-                # 拐头：前天>昨天 且 昨天<今天
-                if dif_prev2 > dif_prev and dif_prev < dif_current:
-                    score += 10
-                    macd_details.append("DIF拐头10分")
-        
-        # 2. 金叉（10分）- DIF上穿DEA
-        golden_cross = dif_prev <= dea_prev and dif_current > dea_current
-        if golden_cross:
+        # 1. DIF拐头向上（10分）- 当日和前一日DIF均大于前8个交易日（5日内有效）
+        bonus_key_turn = f"{stock_code}_dif_turn_up"
+        if self._check_time_window_bonus(stock_code, date, bonus_key_turn, 5):
             score += 10
-            macd_details.append("MACD金叉10分")
-        
-        # 3. 多头排列（10分）- DIF > DEA > 0 且 MACD > 0
-        bullish_alignment = dif_current > dea_current and dea_current > 0 and macd_current > 0
-        if bullish_alignment:
-            score += 10
-            macd_details.append("多头排列10分")
-        
-        # 4. 强势多头（5分）- 当日和前一日DIF > 前8日所有DIF（5日内有效）
-        bonus_key = f"{stock_code}_strong_bull"
-        if self._check_time_window_bonus(stock_code, date, bonus_key, 5):
-            score += 5
-            macd_details.append("强势多头5分")
+            macd_details.append("DIF拐头10分")
         elif index >= 10:
-            # 检查是否触发新的强势多头
-            dif_list = [macd_data['dif'][i] for i in range(index - 9, index - 1) if macd_data['dif'][i] is not None]
+            # 往前数10根K线，取前8个交易日的DIF
+            dif_list = [macd_data['dif'][i] for i in range(index - 9, index - 1) 
+                       if macd_data['dif'][i] is not None]
             if len(dif_list) == 8:
                 max_prev_8 = max(dif_list)
+                # 当日和前一日DIF均大于前8个交易日
                 if dif_current > max_prev_8 and dif_prev > max_prev_8:
-                    score += 5
-                    macd_details.append("强势多头5分")
+                    score += 10
+                    macd_details.append("DIF拐头10分")
                     # 记录这个加分，5日内有效
-                    self._record_bonus(stock_code, bonus_key, date, 5)
+                    self._record_bonus(stock_code, bonus_key_turn, date, 5)
         
-        # 5. 柱状图反转（5分）- 前日蓝柱今日红柱（5日内有效）
-        bonus_key2 = f"{stock_code}_bar_reverse"
-        if self._check_time_window_bonus(stock_code, date, bonus_key2, 5):
-            score += 5
-            macd_details.append("柱反转5分")
+        # 2. 金叉（10分）- DIF>DEA，前一日蓝柱，今日红柱（5日内有效）
+        bonus_key_golden = f"{stock_code}_macd_golden"
+        if self._check_time_window_bonus(stock_code, date, bonus_key_golden, 5):
+            score += 10
+            macd_details.append("金叉10分")
         else:
-            # 检查是否触发新的反转
-            # 前日蓝柱（MACD<0）今日红柱（MACD>0）且DIF>DEA
-            bar_reverse = macd_prev < 0 and macd_current > 0 and dif_current > dea_current
-            if bar_reverse:
-                score += 5
-                macd_details.append("柱反转5分")
+            # 前一日蓝柱（MACD<0），今日红柱（MACD>0），且今日DIF>DEA
+            golden_cross = (macd_prev < 0 and 
+                          macd_current > 0 and 
+                          dif_current > dea_current)
+            if golden_cross:
+                score += 10
+                macd_details.append("金叉10分")
                 # 记录这个加分，5日内有效
-                self._record_bonus(stock_code, bonus_key2, date, 5)
+                self._record_bonus(stock_code, bonus_key_golden, date, 5)
+        
+        # 3. 多头排列1（10分）- DIF≥DEA>0 且 MACD>0
+        bullish_alignment_1 = (dif_current >= dea_current and 
+                               dea_current > 0 and 
+                               macd_current > 0)
+        if bullish_alignment_1:
+            score += 10
+            macd_details.append("多头排列1(10分)")
+        
+        # 4. 多头排列2（5分）- 0>DIF≥DEA 且 MACD>0
+        bullish_alignment_2 = (0 > dif_current and 
+                               dif_current >= dea_current and 
+                               macd_current > 0)
+        if bullish_alignment_2:
+            score += 5
+            macd_details.append("多头排列2(5分)")
         
         if macd_details:
             details.append(f"MACD{score}分({'+'.join(macd_details)})")
