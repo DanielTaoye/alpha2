@@ -468,17 +468,28 @@ class BearishPatternService:
             return None
         
         valid_today_patterns = [
-            "冲高回落阴线", "冲高回落阴十字星",
-            "高开低走"
+            "冲高回落阴线", "冲高回落阴十字星"
         ]
         
         # 检查是否为带上影的阴线
         if today_pattern in valid_today_patterns:
             return "T字板/一字板+带上影阴线/高开回落阴线"
         
-        # 或者检查是否为高开回落阴线（开盘价>前一日收盘价，收盘价<开盘价）
-        if today['open'] > prev_day['close'] and today['close'] < today['open']:
-            return "T字板/一字板+带上影阴线/高开回落阴线"
+        # 检查是否为带上影的阴线（任意阴线且有上影线）
+        is_today_negative = today['close'] < today['open']
+        if is_today_negative:
+            # 计算ABC
+            A = today['high'] - today['open']  # 上影线（阴线：最高-开盘）
+            B = today['open'] - today['close']  # 实体
+            C = today['close'] - today['low']   # 下影线（阴线：收盘-最低）
+            
+            # 带上影的阴线：A > 0
+            if A > 0:
+                return "T字板/一字板+带上影阴线/高开回落阴线"
+            
+            # 高开低走：A=0（无上影线），C<2B
+            if A == 0 and C < 2 * B:
+                return "T字板/一字板+带上影阴线/高开回落阴线"
         
         return None
     
@@ -536,12 +547,19 @@ class BearishPatternService:
         if not prev_day:
             return None
         
-        # 前一日为触底反弹阴十字星或阳十字星
+        # 前一日为触底反弹十字星，或者普通十字星且为阳（收盘>=开盘）
         prev_pattern = KLinePatternService.identify_pattern(
             stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
         )
         
-        if prev_pattern not in ["触底反弹十字星"]:
+        # 条件1：触底反弹十字星
+        is_rebound_doji = prev_pattern == "触底反弹十字星"
+        
+        # 条件2：普通十字星且为阳（收盘>=开盘）
+        is_bullish_doji = prev_pattern == "十字星" and prev_day['close'] >= prev_day['open']
+        
+        # 必须满足其中之一
+        if not (is_rebound_doji or is_bullish_doji):
             return None
         
         # 当日出现跌幅大于5%的阴线（相对前一天收盘价）
@@ -559,22 +577,30 @@ class BearishPatternService:
     
     @staticmethod
     def _check_pattern11(stock_code: str, prev_day: Optional[Dict], today: Dict) -> Optional[str]:
-        """11. 放量冲高回落阴线+次日未反包"""
+        """
+        11. 放量冲高回落阴线+次日未反包
+        
+        定义：
+        - 前一日为阴线
+        - 满足以下任意一种：
+          * 振幅>5% 且 跌幅>4.5%
+          * 振幅>10% 且 跌幅>2%
+        - 次日收盘价仍小于前一日收盘价
+        """
         if not prev_day:
             return None
         
-        # 前一日为振幅大于5%且跌幅大于4.5%的阴线，或振幅大于10%且跌幅大于2%的阴线
+        # 前一日必须是阴线
+        is_prev_negative = prev_day['close'] < prev_day['open']
+        if not is_prev_negative:
+            return None
+        
+        # 计算前一日振幅
         prev_amplitude = BearishPatternService._calculate_amplitude(
             prev_day['high'], prev_day['low'], prev_day.get('prev_close', prev_day['close'])
         )
-        prev_pattern = KLinePatternService.identify_pattern(
-            stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
-        )
         
-        if prev_pattern != "冲高回落阴线":
-            return None
-        
-        # 前一日跌幅（相对前前一天收盘价）
+        # 计算前一日跌幅（相对前前一天收盘价）
         prev_prev_close = prev_day.get('prev_close', prev_day['open'])
         prev_decline = (prev_day['close'] - prev_prev_close) / prev_prev_close if prev_prev_close > 0 else 0
         prev_decline_pct = abs(prev_decline) * 100
