@@ -590,8 +590,8 @@ class BearishPatternService:
             prev_day = daily_data[i - 1] if i > 0 else None
             
             if prev_day and day['close'] > prev_day['close']:
-                if first_positive_idx is None:
-                    first_positive_idx = i
+                # 持续更新，循环结束后保留最早的起始日索引
+                first_positive_idx = i
                 consecutive_positive_days += 1
             else:
                 break

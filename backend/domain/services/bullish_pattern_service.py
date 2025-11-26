@@ -349,8 +349,8 @@ class BullishPatternService:
         consecutive_negative_days = 0
         volumes = []
         max_high = 0.0
-        first_negative_idx = None  # 连续阴线的起始日（最早的那一天）
-        last_negative_idx = None   # 连续阴线的结束日（最晚的那一天，即昨天）
+        earliest_negative_idx = None  # 连续阴线的起始日（最早的那一天）
+        latest_negative_idx = None   # 连续阴线的结束日（最晚的那一天，即昨天）
         
         # 从目标日期往前找连续阴线（从昨天开始往前找）
         for i in range(target_idx - 1, start_idx - 1, -1):
@@ -360,9 +360,9 @@ class BullishPatternService:
             is_negative = day['close'] < day['open']
             
             if is_negative:
-                if first_negative_idx is None:
-                    first_negative_idx = i  # 记录连续阴线的起始日（最早的那一天）
-                last_negative_idx = i  # 更新连续阴线的结束日（最晚的那一天）
+                if latest_negative_idx is None:
+                    latest_negative_idx = i  # 记录连续阴线的结束日（最晚的那一天，即昨天）
+                earliest_negative_idx = i  # 持续更新，保留最早的起始日
                 consecutive_negative_days += 1
                 max_high = max(max_high, day['high'])
                 volumes.insert(0, day.get('volume', 0))  # 从前往后插入，保持时间顺序
@@ -376,16 +376,16 @@ class BullishPatternService:
             return None
         
         # 计算累计跌幅：从连续阴线的起始日到结束日的累计跌幅
-        # 起始日是first_negative_idx，结束日是last_negative_idx
+        # 起始日是earliest_negative_idx（最早），结束日是latest_negative_idx（最晚，即昨天）
         # 累计跌幅 = (结束日收盘价 - 起始日前一日收盘价) / 起始日前一日收盘价 * 100
-        if first_negative_idx is None or last_negative_idx is None:
+        if earliest_negative_idx is None or latest_negative_idx is None:
             return None
         
-        if first_negative_idx > 0:
+        if earliest_negative_idx > 0:
             # 起始日前一日的收盘价
-            start_prev_close = daily_data[first_negative_idx - 1]['close']
-            # 结束日的收盘价
-            end_close = daily_data[last_negative_idx]['close']
+            start_prev_close = daily_data[earliest_negative_idx - 1]['close']
+            # 结束日的收盘价（昨天）
+            end_close = daily_data[latest_negative_idx]['close']
             # 计算累计跌幅
             if start_prev_close > 0:
                 total_decline = abs((end_close - start_prev_close) / start_prev_close) * 100
