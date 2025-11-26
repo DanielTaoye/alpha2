@@ -226,9 +226,9 @@ class BullishPatternService:
         is_prev_negative = prev_day['close'] < prev_day['open']
         prev_b_ratio = (prev_abc.b / prev_day['low']) * 100 if prev_day['low'] > 0 else 0
         
-        # 今日为阳线收盘，且收盘价>=前一天开盘价
+        # 今日为阳线收盘，且收盘价>=前一天最高价（完全包覆）
         is_today_positive = today['close'] > today['open']
-        is_engulfing = today['close'] >= prev_day['open']
+        is_engulfing = today['close'] >= prev_day['high']
         
         if (is_prev_negative and prev_change_pct > 5.0 and prev_b_ratio >= 4.0 and
             is_today_positive and is_engulfing):

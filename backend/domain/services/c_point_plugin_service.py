@@ -136,7 +136,7 @@ class CPointPluginService:
         
         # 插件7: 阳包阴发C（直接发C）
         if historical_r_points is not None:
-            plugin7 = self._check_yang_bao_yin(stock_code, date, historical_r_points)
+            plugin7 = self._check_yang_bao_yin(stock_code, date, historical_r_points, historical_c_points)
             if plugin7.triggered:
                 triggered_plugins.append(plugin7)
                 logger.info(f"[插件-阳包阴] {stock_code} {date}: {plugin7.reason}, 强制发C")
@@ -712,15 +712,16 @@ class CPointPluginService:
             logger.error(f"插件-R后回支撑位检查失败: {e}")
             return CPointPluginResult("R后回支撑位", False, 0, "")
     
-    def _check_yang_bao_yin(self, stock_code: str, date: datetime, historical_r_points: List) -> CPointPluginResult:
+    def _check_yang_bao_yin(self, stock_code: str, date: datetime, historical_r_points: List, historical_c_points: Optional[List] = None) -> CPointPluginResult:
         """
         插件7: 阳包阴发C
         
         条件：
         1. 从当日往前数15根K线，若出现R
-        2. R日放量（XYZH）
-        3. 当日的收盘价 > R日的开盘价（阳包阴）
-        4. 叠加条件（满足其一）：
+        2. R点之后没有C点（前面最近的信号点是R，不是C）
+        3. R日放量（XYZH）
+        4. 当日的收盘价 > R日的最高价（阳包阴，完全突破）
+        5. 叠加条件（满足其一）：
            - 当日成交量 > R日成交量的0.85倍
            - 前一日为多头组合（任意）
         
@@ -770,8 +771,25 @@ class CPointPluginService:
             if not r_point_in_range:
                 return CPointPluginResult("阳包阴", False, 0, "")
             
-            # 检查阳包阴：当日收盘价 > R日开盘价
-            is_yang_bao_yin = current_data.close > r_point_in_range.open_price
+            # 检查R点之后是否有C点（前面最近的信号点必须是R，不能是C）
+            # 从R点日期到今天之间，检查是否有C点
+            r_date = r_point_in_range.trigger_date
+            has_c_after_r = False
+            
+            # 从历史C点中查找R点之后、今天之前的C点
+            if historical_c_points:
+                for c_point in historical_c_points:
+                    c_date = c_point.trigger_date if hasattr(c_point, 'trigger_date') else c_point.get('trigger_date')
+                    if c_date and r_date < c_date < date:
+                        has_c_after_r = True
+                        break
+            
+            # 如果R点之后已经有C点，则不再发C
+            if has_c_after_r:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 检查阳包阴：当日收盘价 > R日最高价（完全突破）
+            is_yang_bao_yin = current_data.close > r_point_in_range.high_price
             
             if not is_yang_bao_yin:
                 return CPointPluginResult("阳包阴", False, 0, "")
@@ -807,7 +825,7 @@ class CPointPluginService:
                 "阳包阴",
                 True,
                 0,  # 不调整分数，通过 force_c_point 标志直接发C
-                f"R点({r_date_str}), 阳包阴(收{current_data.close:.2f}>R开{r_point_in_range.open_price:.2f}), {', '.join(condition_text)}"
+                f"R点({r_date_str}), 阳包阴(收{current_data.close:.2f}>R高{r_point_in_range.high_price:.2f}), R后无C, {', '.join(condition_text)}"
             )
             
         except Exception as e:

@@ -337,8 +337,8 @@ class RPointPluginService:
         """
         插件2: 临近压力位滞涨
         
-        条件1: 距离压力位近(按股性判断) + 放量(XYZH) + 特定K线
-        条件2: 距离压力位近(按股性判断) + 前3日无AXYZ放量 + 空头组合
+        条件1: 距离压力位近(按股性判断，使用前一交易日赔率) + 放量(XYZH) + 特定K线
+        条件2: 距离压力位近(按股性判断，使用前一交易日赔率) + 前3日无AXYZ放量 + 空头组合
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -353,7 +353,7 @@ class RPointPluginService:
             if not current_data:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 获取当日daily_chance
+            # 获取当日daily_chance（用于获取股性和成交量类型）
             current_chance = self._daily_chance_cache.get(date_str)
             if not current_chance:
                 current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
@@ -363,8 +363,20 @@ class RPointPluginService:
             # 获取股性
             stock_nature = current_chance.stock_nature or "波段"  # 默认波段
             
-            # 计算日线赔率（距离压力位的空间）
-            day_win_ratio_score = current_chance.day_win_ratio_score or 0
+            # 获取前一交易日的数据，使用前一交易日的赔率得分来判断是否临近压力位
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if not prev_dates or len(prev_dates) < 1:
+                return RPointPluginResult("临近压力位滞涨", False, "")
+            
+            prev_date_str = prev_dates[0]
+            prev_chance = self._daily_chance_cache.get(prev_date_str)
+            if not prev_chance:
+                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            if not prev_chance:
+                return RPointPluginResult("临近压力位滞涨", False, "")
+            
+            # 使用前一交易日的日线赔率得分（距离压力位的空间）
+            day_win_ratio_score = prev_chance.day_win_ratio_score or 0
             
             # 根据股性判断是否临近压力位
             # 要求：赔率得分不等于0，且小于阈值
@@ -390,7 +402,7 @@ class RPointPluginService:
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"条件1: 距压力位近(股性:{stock_nature},赔率{day_win_ratio_score:.1f}<{pressure_threshold})+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                     )
             
             # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
@@ -417,7 +429,7 @@ class RPointPluginService:
                             return RPointPluginResult(
                                 "临近压力位滞涨",
                                 True,
-                                f"条件2(熊市): 距压力位近(股性:{stock_nature},赔率{day_win_ratio_score:.1f}<{pressure_threshold})+前3日无AXYZ放量+空头组合({bearish_patterns})"
+                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+前3日无AXYZ放量+空头组合({bearish_patterns})"
                             )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
@@ -477,7 +489,7 @@ class RPointPluginService:
         """
         插件4: 上冲乏力
         
-        条件: 从发C日起累计涨幅>15% + 今日赔率<25% + 前日涨幅>6%/8% + 今日放量 + 特定K线
+        条件: 从发C日起累计涨幅>15% + 前日赔率<阈值(按股性) + 前日涨幅>6%/8% + 今日放量 + 特定K线
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -506,7 +518,7 @@ class RPointPluginService:
             if cumulative_gain <= 15:
                 return RPointPluginResult("上冲乏力", False, "")
             
-            # 获取当日daily_chance
+            # 获取当日daily_chance（用于获取股性和成交量类型）
             current_chance = self._daily_chance_cache.get(date_str)
             if not current_chance:
                 current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
@@ -516,22 +528,30 @@ class RPointPluginService:
             # 获取股性
             stock_nature = current_chance.stock_nature or "波段"  # 默认波段
             
-            # 检查今日赔率（根据股性判断）
+            # 获取前一交易日数据，使用前一交易日的赔率得分
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if len(prev_dates) < 1:
+                return RPointPluginResult("上冲乏力", False, "")
+            
+            prev_date_str = prev_dates[0]
+            prev_chance = self._daily_chance_cache.get(prev_date_str)
+            if not prev_chance:
+                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            if not prev_chance:
+                return RPointPluginResult("上冲乏力", False, "")
+            
+            # 检查前一交易日的赔率（根据股性判断）
             # 要求：赔率得分不等于0，且小于阈值
-            day_win_ratio_score = current_chance.day_win_ratio_score or 0
+            day_win_ratio_score = prev_chance.day_win_ratio_score or 0
             win_ratio_threshold = self._get_win_ratio_threshold_for_weak_breakout(stock_nature)
             
             if not (0 < day_win_ratio_score < win_ratio_threshold):
                 return RPointPluginResult("上冲乏力", False, "")
             
-            # 获取前一日数据
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
-            if len(prev_dates) < 1:
-                return RPointPluginResult("上冲乏力", False, "")
-            
-            yesterday_data = self._daily_cache.get(prev_dates[0])
+            # 获取前一日的K线数据（用于检查涨幅）
+            yesterday_data = self._daily_cache.get(prev_date_str)
             if not yesterday_data:
-                yesterday_data = self.daily_repo.find_by_date(stock_code, prev_dates[0])
+                yesterday_data = self.daily_repo.find_by_date(stock_code, prev_date_str)
             if not yesterday_data:
                 return RPointPluginResult("上冲乏力", False, "")
             
@@ -559,7 +579,7 @@ class RPointPluginService:
                 return RPointPluginResult(
                     "上冲乏力",
                     True,
-                    f"从C点涨幅{cumulative_gain:.2f}%+赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold})+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                    f"从C点涨幅{cumulative_gain:.2f}%+前日赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold})+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                 )
             
             return RPointPluginResult("上冲乏力", False, "")
