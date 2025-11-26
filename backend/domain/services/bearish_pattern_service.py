@@ -129,7 +129,7 @@ class BearishPatternService:
             
             # 9. 乌云盖顶
             pattern9 = BearishPatternService._check_pattern9(
-                stock_code, prev_day, today
+                stock_code, daily_data, target_idx
             )
             if pattern9:
                 matched_patterns.append(pattern9)
@@ -483,8 +483,20 @@ class BearishPatternService:
         return None
     
     @staticmethod
-    def _check_pattern9(stock_code: str, prev_day: Optional[Dict], today: Dict) -> Optional[str]:
-        """9. 乌云盖顶"""
+    def _check_pattern9(stock_code: str, daily_data: List[Dict], target_idx: int) -> Optional[str]:
+        """
+        9. 乌云盖顶
+        
+        定义：
+        - 当日开盘价触及了前20个交易日的最高点（开盘价 >= 前20日最高点）
+        - 且当日为跌幅>5%的大中阴线
+        """
+        if target_idx < 1:
+            return None
+        
+        today = daily_data[target_idx]
+        prev_day = daily_data[target_idx - 1] if target_idx >= 1 else None
+        
         if not prev_day:
             return None
         
@@ -499,8 +511,21 @@ class BearishPatternService:
         if decline_pct <= 5.0:
             return None
         
-        # 且当日最高价>前一日收盘价
-        if today['high'] > prev_day['close']:
+        # 查找前20个交易日的最高点
+        start_idx = max(0, target_idx - 20)
+        max_high = 0.0
+        
+        for i in range(start_idx, target_idx):
+            if i >= 0 and i < len(daily_data):
+                max_high = max(max_high, daily_data[i]['high'])
+        
+        if max_high == 0:
+            return None
+        
+        # 当日开盘价触及前20日最高点（大于等于）
+        is_touch_high = today['open'] >= max_high
+        
+        if is_touch_high:
             return "乌云盖顶"
         
         return None
