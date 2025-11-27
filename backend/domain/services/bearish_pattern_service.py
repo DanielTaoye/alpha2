@@ -585,6 +585,7 @@ class BearishPatternService:
         - 满足以下任意一种：
           * 振幅>5% 且 跌幅>4.5%
           * 振幅>10% 且 跌幅>2%
+        - 叠加条件：前一日A > 2C（上影线 > 2倍下影线）
         - 次日收盘价仍小于前一日收盘价
         """
         if not prev_day:
@@ -594,6 +595,20 @@ class BearishPatternService:
         is_prev_negative = prev_day['close'] < prev_day['open']
         if not is_prev_negative:
             return None
+        
+        # 计算前一日ABC
+        prev_abc = KLinePatternService.calculate_abc(
+            prev_day['open'], prev_day['high'], prev_day['low'], prev_day['close']
+        )
+        
+        # 叠加条件：A > 2C（上影线 > 2倍下影线）
+        if prev_abc.c > 0:
+            if prev_abc.a <= 2 * prev_abc.c:
+                return None
+        else:
+            # 如果下影线为0，上影线必须大于0
+            if prev_abc.a <= 0:
+                return None
         
         # 计算前一日振幅
         prev_amplitude = BearishPatternService._calculate_amplitude(
