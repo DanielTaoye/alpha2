@@ -678,7 +678,8 @@ class CPointPluginService:
             if not daily_chance or not daily_chance.support_price:
                 return CPointPluginResult("R后回支撑位", False, 0, "")
             
-            support_price = daily_chance.support_price
+            # 支撑位需要除以100（数据库存储的是整数形式，如1463代表14.63元）
+            support_price = daily_chance.support_price / 100.0
             
             # 检查是否在支撑位上方（收盘价或最低价未跌破支撑位）
             is_above_support = current_data.close >= support_price or current_data.low >= support_price

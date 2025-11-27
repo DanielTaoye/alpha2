@@ -90,7 +90,7 @@ class RPointPluginService:
             return True, triggered_plugins
         
         # 插件2: 临近压力位滞涨
-        plugin2 = self._check_pressure_stagnation(stock_code, date)
+        plugin2 = self._check_pressure_stagnation(stock_code, date, c_point_date)
         if plugin2.triggered:
             triggered_plugins.append(plugin2)
             logger.info(f"[R点插件-临近压力位滞涨] {stock_code} {date}: {plugin2.reason}")
@@ -110,6 +110,13 @@ class RPointPluginService:
                 triggered_plugins.append(plugin4)
                 logger.info(f"[R点插件-上冲乏力] {stock_code} {date}: {plugin4.reason}")
                 return True, triggered_plugins
+        
+        # 插件5: 跌破支撑位
+        plugin5 = self._check_break_support(stock_code, date)
+        if plugin5.triggered:
+            triggered_plugins.append(plugin5)
+            logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin5.reason}")
+            return True, triggered_plugins
         
         return False, triggered_plugins
     
@@ -333,15 +340,16 @@ class RPointPluginService:
             logger.error(f"R点插件-乖离率偏离检查失败: {e}")
             return RPointPluginResult("乖离率偏离", False, "")
     
-    def _check_pressure_stagnation(self, stock_code: str, date: datetime) -> RPointPluginResult:
+    def _check_pressure_stagnation(self, stock_code: str, date: datetime, c_point_date: Optional[datetime] = None) -> RPointPluginResult:
         """
         插件2: 临近压力位滞涨
         
-        条件1: 距离压力位近(按股性判断，使用前一交易日赔率) + 放量(XYZH) + 特定K线
-        条件2: 距离压力位近(按股性判断，使用前一交易日赔率) + 前3日无AXYZ放量 + 空头组合
+        条件1: 距离压力位近(按股性判断，使用前一交易日赔率) + 放量(XYZH) + 特定K线 + C点日开盘价<当日收盘价
+        条件2: 距离压力位近(按股性判断，使用前一交易日赔率) + 前3日无AXYZ放量 + 空头组合 + C点日开盘价<当日收盘价
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            c_data = None  # 初始化C点日数据
             
             # 判断主板还是非主板
             is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
@@ -386,6 +394,20 @@ class RPointPluginService:
             if not is_near_pressure:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
+            # 检查上一个C点日的开盘价是否低于当日收盘价
+            if c_point_date:
+                c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else c_point_date
+                c_data = self._daily_cache.get(c_date_str)
+                if not c_data:
+                    c_data = self.daily_repo.find_by_date(stock_code, c_date_str)
+                
+                # 如果有C点数据，检查C点日开盘价是否低于当日收盘价
+                if c_data:
+                    # C点日开盘价必须低于当日收盘价，否则不发R
+                    if c_data.open >= current_data.close:
+                        logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} C点日开盘价{c_data.open:.2f}>=当日收盘价{current_data.close:.2f}，不发R")
+                        return RPointPluginResult("临近压力位滞涨", False, "")
+            
             # === 条件1: 放量 + 特定K线 ===
             is_volume_xyzh = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
             
@@ -399,10 +421,16 @@ class RPointPluginService:
                     amplitude = 0
                     if current_data.pre_close and current_data.pre_close > 0:
                         amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                    
+                    # 如果有C点数据，在原因中说明C点开盘价
+                    c_info = ""
+                    if c_point_date and c_data:
+                        c_info = f"+C点日开盘{c_data.open:.2f}<当日收盘{current_data.close:.2f}"
+                    
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%){c_info}"
                     )
             
             # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
@@ -426,10 +454,16 @@ class RPointPluginService:
                         # 检查当日是否有空头组合，并获取具体组合名称
                         if current_chance.bearish_pattern and len(current_chance.bearish_pattern.strip()) > 0:
                             bearish_patterns = current_chance.bearish_pattern.strip()
+                            
+                            # 如果有C点数据，在原因中说明C点开盘价
+                            c_info = ""
+                            if c_point_date and c_data:
+                                c_info = f"+C点日开盘{c_data.open:.2f}<当日收盘{current_data.close:.2f}"
+                            
                             return RPointPluginResult(
                                 "临近压力位滞涨",
                                 True,
-                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+前3日无AXYZ放量+空头组合({bearish_patterns})"
+                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+前3日无AXYZ放量+空头组合({bearish_patterns}){c_info}"
                             )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
@@ -849,4 +883,73 @@ class RPointPluginService:
         change_pct = ((close - prev_close) / prev_close) * 100
         
         return change_pct < -3
+    
+    def _check_break_support(self, stock_code: str, date: datetime) -> RPointPluginResult:
+        """
+        插件5: 跌破支撑位
+        
+        条件: 日收盘价 < 前一日支撑位 + 当日放量(XYZ)
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 获取当日数据
+            current_data = self._daily_cache.get(date_str)
+            if not current_data:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            # 获取当日daily_chance（成交量类型）
+            current_chance = self._daily_chance_cache.get(date_str)
+            if not current_chance:
+                current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            if not current_chance:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            # 获取前一交易日
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if not prev_dates or len(prev_dates) < 1:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            prev_date_str = prev_dates[0]
+            
+            # 获取前一日的daily_chance（支撑位）
+            prev_chance = self._daily_chance_cache.get(prev_date_str)
+            if not prev_chance:
+                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            if not prev_chance:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            # 检查前一日是否有支撑位
+            if not prev_chance.support_price or prev_chance.support_price <= 0:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            # 支撑位需要除以100（数据库存储的是整数形式，如1463代表14.63元）
+            support_price_actual = prev_chance.support_price / 100.0
+            
+            # 条件1: 当日收盘价 < 前一日支撑位
+            is_break_support = current_data.close < support_price_actual
+            
+            if not is_break_support:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            # 条件2: 当日成交量是XYZ（放量）
+            is_volume_xyz = self._check_volume_type(current_chance, ['X', 'Y', 'Z'])
+            
+            if not is_volume_xyz:
+                return RPointPluginResult("跌破支撑位", False, "")
+            
+            # 计算跌幅
+            break_ratio = ((current_data.close - support_price_actual) / support_price_actual) * 100
+            
+            return RPointPluginResult(
+                "跌破支撑位",
+                True,
+                f"收盘价{current_data.close:.2f}<前日支撑位{support_price_actual:.2f}(跌破{abs(break_ratio):.2f}%)+放量({current_chance.volume_type})"
+            )
+            
+        except Exception as e:
+            logger.error(f"R点插件-跌破支撑位检查失败: {e}")
+            return RPointPluginResult("跌破支撑位", False, "")
 
