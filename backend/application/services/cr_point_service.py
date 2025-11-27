@@ -24,7 +24,7 @@ class CRPointService:
         """
         检查是否为金色C点
         
-        条件：连续5个交易日内，策略一和策略二都至少有1次发C，且总次数>=2
+        条件：当日策略一分数>=70 且 策略二分数>=70
         
         Args:
             current_index: 当前K线索引
@@ -35,32 +35,31 @@ class CRPointService:
         Returns:
             是否为金色C点
         """
-        # 获取前5个交易日（包含当前日）
-        start_index = max(0, current_index - 4)
+        # 获取当日日期
+        date_str = kline_data[current_index].time.strftime('%Y-%m-%d')
         
-        strategy1_c_count = 0
-        strategy2_c_count = 0
+        # 阈值设定
+        SCORE_THRESHOLD = 70
         
-        for i in range(start_index, current_index + 1):
-            date_str = kline_data[i].time.strftime('%Y-%m-%d')
-            
-            # 检查策略一是否发C（分数>=70或被插件触发）
-            if date_str in strategy1_scores:
-                s1_data = strategy1_scores[date_str]
-                if s1_data.get('is_c_point', False):
-                    strategy1_c_count += 1
-            
-            # 检查策略二是否发C（分数>=70）
-            if date_str in strategy2_scores:
-                s2_data = strategy2_scores[date_str]
-                if s2_data.get('triggered', False):
-                    strategy2_c_count += 1
+        # 检查策略一分数
+        strategy1_score = 0
+        if date_str in strategy1_scores:
+            s1_data = strategy1_scores[date_str]
+            strategy1_score = s1_data.get('score', 0)
         
-        # 两个策略都至少有1次，且总次数>=2
-        total_count = strategy1_c_count + strategy2_c_count
-        has_both_strategies = strategy1_c_count >= 1 and strategy2_c_count >= 1
+        # 检查策略二分数
+        strategy2_score = 0
+        if date_str in strategy2_scores:
+            s2_data = strategy2_scores[date_str]
+            strategy2_score = s2_data.get('score', 0)
         
-        return has_both_strategies and total_count >= 2
+        # 两个策略的分数都>=70才是金色C点
+        is_golden = strategy1_score >= SCORE_THRESHOLD and strategy2_score >= SCORE_THRESHOLD
+        
+        if is_golden:
+            logger.info(f"[金色C点] {date_str} 策略1分数={strategy1_score}, 策略2分数={strategy2_score}")
+        
+        return is_golden
     
     def analyze_cr_points(self, stock_code: str, stock_name: str, kline_data: List[KLineData],
                          ma_data: Optional[Dict] = None, macd_data: Optional[Dict] = None,
@@ -101,9 +100,10 @@ class CRPointService:
         strategy1_scores = {}  # 记录所有K线的策略1评分和插件信息 {date_str: {score, base_score, plugins}}
         last_c_point_date: Optional[datetime] = None  # 记录最近的C点日期（用于R点判断）
         
-        # CR关系校验：记录最后一个有效点的类型和日期
+        # CR关系校验：记录最后一个有效点的类型、日期和索引
         last_valid_point_type: Optional[str] = None  # 'C' 或 'R'
         last_valid_point_date: Optional[datetime] = None
+        last_valid_point_index: Optional[int] = None  # 记录最后一个C点的K线索引
         
         for index, kline in enumerate(kline_data):
             # 检查C点策略1（新逻辑：基于赔率分+胜率分+插件）
@@ -179,12 +179,12 @@ class CRPointService:
                 can_add_c = True
                 rejection_reason = ""
                 
-                if last_valid_point_type == 'C' and last_valid_point_date:
-                    # 两个C之间必须间隔至少3天
-                    days_diff = (kline.time - last_valid_point_date).days
-                    if days_diff < 3:
+                if last_valid_point_type == 'C' and last_valid_point_index is not None:
+                    # 两个C之间必须间隔至少2个交易日（即K线索引差>=3）
+                    trading_days_diff = index - last_valid_point_index
+                    if trading_days_diff < 3:
                         can_add_c = False
-                        rejection_reason = f"距离上一个C点仅{days_diff}天，不足3天"
+                        rejection_reason = f"距离上一个C点仅间隔{trading_days_diff-1}个交易日，不足2个交易日"
                         logger.info(f"[CR关系校验] C点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
                 
                 if can_add_c:
@@ -219,6 +219,7 @@ class CRPointService:
                     # 更新CR关系状态
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
+                    last_valid_point_index = index
                 else:
                     # 检查是否为金色C点（即使被拒绝，也标记）
                     is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
@@ -252,12 +253,12 @@ class CRPointService:
                 can_add_c = True
                 rejection_reason = ""
                 
-                if last_valid_point_type == 'C' and last_valid_point_date:
-                    # 两个C之间必须间隔至少3天
-                    days_diff = (kline.time - last_valid_point_date).days
-                    if days_diff < 3:
+                if last_valid_point_type == 'C' and last_valid_point_index is not None:
+                    # 两个C之间必须间隔至少2个交易日（即K线索引差>=3）
+                    trading_days_diff = index - last_valid_point_index
+                    if trading_days_diff < 3:
                         can_add_c = False
-                        rejection_reason = f"距离上一个C点仅{days_diff}天，不足3天"
+                        rejection_reason = f"距离上一个C点仅间隔{trading_days_diff-1}个交易日，不足2个交易日"
                         logger.info(f"[CR关系校验] 策略2 C点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
                 
                 if can_add_c:
@@ -292,6 +293,7 @@ class CRPointService:
                     # 更新CR关系状态
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
+                    last_valid_point_index = index
                 else:
                     # 检查是否为金色C点（即使被拒绝，也标记）
                     is_golden = self._check_golden_c_point(index, kline_data, strategy1_scores, strategy2_scores)
@@ -392,6 +394,7 @@ class CRPointService:
                     # 更新CR关系状态
                     last_valid_point_type = 'R'
                     last_valid_point_date = kline.time
+                    last_valid_point_index = None  # R点不参与C点间隔计算
                 else:
                     # 因CR关系规则被拒绝的R点（记录在rejected_c_points中）
                     rejected_r_point = CRPoint(
