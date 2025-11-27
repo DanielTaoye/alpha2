@@ -476,7 +476,7 @@ class RPointPluginService:
         """
         插件3: 基本面突发利空
         
-        条件: 一字跌停/T字跌停 (TODO: 需要接入AI检测利空)
+        条件: 一字跌停/T字跌停
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -506,11 +506,10 @@ class RPointPluginService:
                     
                     if is_one_line or is_t_line:
                         limit_type = "一字跌停" if is_one_line else "T字跌停"
-                        # TODO: 这里应该接入AI检测基本面利空
                         return RPointPluginResult(
                             "基本面突发利空",
                             True,
-                            f"{limit_type}(需AI确认基本面利空)"
+                            f"{limit_type}(跌幅{change_pct:.2f}%)"
                         )
             
             return RPointPluginResult("基本面突发利空", False, "")
