@@ -110,7 +110,11 @@ class CRPointService:
             is_r_point, r_plugins = self.r_point_service.check_r_point(
                 stock_code, 
                 kline.time, 
-                last_c_point_date  # 传入最近的C点日期（用于"上冲乏力"判断）
+                last_c_point_date,  # 传入最近的C点日期（用于"上冲乏力"判断）
+                ma_data,  # 传入MA数据（用于高位发R插件）
+                macd_data,  # 传入MACD数据（用于高位发R插件）
+                index,  # 传入当前K线索引（用于高位发R插件）
+                kline_data  # 传入完整K线数据（用于箱体回踩插件）
             )
             
             # 【重要】先判断R点能否真正添加（考虑CR关系规则）

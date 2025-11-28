@@ -62,9 +62,9 @@ class KLineApplicationService:
         ma_data = {}
         if kline_data:
             try:
-                # 日K线计算5、10、20日均线
+                # 日K线计算5、10、20、30、60日均线
                 if period_type == 'day':
-                    ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[5, 10, 20])
+                    ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[5, 10, 20, 30, 60])
                 # 30分钟K线计算不同周期的均线
                 elif period_type == '30min':
                     ma_data = self.ma_service.calculate_ma_for_kline_data(kline_data, periods=[10, 20, 40])
