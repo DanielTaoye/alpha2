@@ -1,6 +1,6 @@
 """K线数据应用服务"""
-from typing import List, Dict
-from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+from datetime import datetime, timedelta, time
 from domain.repositories.kline_repository import IKLineRepository
 from domain.services.period_service import PeriodService
 from domain.services.macd_service import MACDService
@@ -167,6 +167,112 @@ class KLineApplicationService:
         return {
             'kline_data': aggregated_kline,
             'trade_date': trade_date.strftime('%Y-%m-%d'),
+            'message': 'success'
+        }
+    
+    def predict_today_volume(self, table_name: str) -> Dict[str, any]:
+        """
+        预测当天的最终成交量
+        
+        基于最近5个交易日的数据：
+        1. 计算每天开盘到当前时间的成交量平均值
+        2. 计算每天全天成交量的平均值
+        3. 得到比例 = 全天成交量平均 / 当前时间成交量平均
+        4. 当天预测成交量 = 当天当前成交量 × 比例
+        
+        Args:
+            table_name: 表名
+            
+        Returns:
+            包含预测成交量的字典
+        """
+        # 获取最近5天的1分钟数据（包括今天）
+        recent_data = self.kline_repository.get_recent_days_1min_data(table_name, days=6)
+        
+        if len(recent_data) < 2:
+            return {
+                'predicted_volume': None,
+                'current_volume': None,
+                'message': '数据不足，无法预测'
+            }
+        
+        # 按日期排序
+        sorted_dates = sorted(recent_data.keys())
+        today = sorted_dates[-1]  # 最新的日期
+        history_dates = sorted_dates[:-1]  # 历史日期（排除今天）
+        
+        # 获取今天的数据
+        today_data = recent_data[today]
+        if not today_data:
+            return {
+                'predicted_volume': None,
+                'current_volume': None,
+                'message': '今天没有数据'
+            }
+        
+        # 获取今天的最新时间（当前时刻）
+        today_latest_time = today_data[-1].time.time()
+        
+        # 计算今天开盘到当前的成交量
+        today_current_volume = sum(kline.volume for kline in today_data)
+        
+        # 计算历史5天（最多5天）的同时段成交量和全天成交量
+        history_current_volumes = []  # 历史同时段成交量
+        history_total_volumes = []    # 历史全天成交量
+        
+        for hist_date in history_dates[-5:]:  # 最多取5天
+            hist_data = recent_data[hist_date]
+            if not hist_data:
+                continue
+            
+            # 计算该历史日的同时段成交量（开盘到今天当前时刻）
+            hist_current_vol = sum(
+                kline.volume for kline in hist_data 
+                if kline.time.time() <= today_latest_time
+            )
+            
+            # 计算该历史日的全天成交量
+            hist_total_vol = sum(kline.volume for kline in hist_data)
+            
+            if hist_current_vol > 0 and hist_total_vol > 0:
+                history_current_volumes.append(hist_current_vol)
+                history_total_volumes.append(hist_total_vol)
+        
+        if not history_current_volumes:
+            return {
+                'predicted_volume': None,
+                'current_volume': today_current_volume,
+                'message': '历史数据不足，无法预测'
+            }
+        
+        # 计算平均值
+        avg_current_volume = sum(history_current_volumes) / len(history_current_volumes)
+        avg_total_volume = sum(history_total_volumes) / len(history_total_volumes)
+        
+        # 计算比例
+        if avg_current_volume > 0:
+            ratio = avg_total_volume / avg_current_volume
+        else:
+            return {
+                'predicted_volume': None,
+                'current_volume': today_current_volume,
+                'message': '历史同时段成交量为0，无法预测'
+            }
+        
+        # 预测今天的成交量
+        predicted_volume = today_current_volume * ratio
+        
+        logger.info(f"成交量预测: 股票{table_name}, 日期{today}, "
+                   f"当前成交量{today_current_volume:.2f}, 预测成交量{predicted_volume:.2f}, "
+                   f"比例{ratio:.2f}, 基于{len(history_current_volumes)}天历史数据")
+        
+        return {
+            'predicted_volume': predicted_volume,
+            'current_volume': today_current_volume,
+            'ratio': ratio,
+            'history_days': len(history_current_volumes),
+            'current_time': today_latest_time.strftime('%H:%M:%S'),
+            'trade_date': today.strftime('%Y-%m-%d'),
             'message': 'success'
         }
 

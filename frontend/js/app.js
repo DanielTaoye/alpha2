@@ -15,6 +15,7 @@ let bearishPatternMap = {}; // 存储空头组合数据，key为日期字符串�
 let supportPriceMap = {}; // 存储支撑线数据，key为日期字符串，value为支撑价格（整数，需除以100）
 let pressurePriceMap = {}; // 存储压力线数据，key为日期字符串，value为压力价格（整数，需除以100）
 let autoRefreshInterval = null; // 自动刷新定时器
+let predictedVolume = null; // 预测的成交量
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -163,11 +164,13 @@ async function selectStock() {
     if (!stockSelect.value) {
         showEmptyState();
         stopAutoRefresh(); // 停止自动刷新
+        predictedVolume = null; // 清空预测成交量
         return;
     }
 
     // 切换股票时停止之前的自动刷新
     stopAutoRefresh();
+    predictedVolume = null; // 清空预测成交量
 
     currentStockCode = stockSelect.value;
     const stockName = selectedOption.dataset.name;
@@ -465,6 +468,16 @@ async function loadStockData(stockCode, tableName, period) {
                 console.error(`[${period}] 获取最新K线数据失败（继续使用原有数据）:`, error);
                 console.error('错误堆栈:', error.stack);
             }
+            
+            // 获取预测成交量
+            try {
+                const predicted = await fetchPredictedVolume(tableName);
+                predictedVolume = predicted;
+                console.log(`[${period}] 预测成交量:`, predictedVolume);
+            } catch (error) {
+                console.error(`[${period}] 获取预测成交量失败:`, error);
+                predictedVolume = null;
+            }
         }
         
         try {
@@ -484,6 +497,7 @@ async function loadStockData(stockCode, tableName, period) {
             } else {
                 // 非日K线，停止自动刷新
                 stopAutoRefresh();
+                predictedVolume = null; // 清空预测成交量
                 // 更新CR点统计显示提示信息
                 updateCRPointsStats();
             }
@@ -504,6 +518,47 @@ async function loadStockData(stockCode, tableName, period) {
                 </button>
             </div>
         `;
+    }
+}
+
+// 获取预测的当天成交量
+async function fetchPredictedVolume(tableName) {
+    try {
+        console.log(`[预测成交量] 开始请求: ${tableName}`);
+        
+        const response = await fetch(`${API_BASE_URL}/predict_volume`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                table_name: tableName
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log(`[预测成交量] 响应结果:`, result);
+        
+        if (result.code !== 200) {
+            throw new Error(result.message || '获取预测成交量失败');
+        }
+        
+        const data = result.data;
+        if (data.predicted_volume) {
+            console.log(`[预测成交量] ✅ 成功: 当前=${data.current_volume?.toFixed(2)}, 预测=${data.predicted_volume?.toFixed(2)}, 比例=${data.ratio?.toFixed(2)}`);
+            return data.predicted_volume;
+        } else {
+            console.log(`[预测成交量] 无法预测: ${data.message}`);
+            return null;
+        }
+        
+    } catch (error) {
+        console.error(`[预测成交量] 获取失败:`, error);
+        return null;
     }
 }
 
@@ -1219,6 +1274,11 @@ function renderChart(klineData, analysisData, period) {
                             }
                         } else if (param.seriesName === '成交量') {
                             result += `成交量: ${(param.value / 10000).toFixed(2)}万<br/>`;
+                        } else if (param.seriesName === '预测成交量') {
+                            // 预测成交量也显示为万为单位
+                            if (param.value !== null && param.value !== undefined) {
+                                result += `<span style="color: #FFD700; font-weight: bold;">预测成交量: ${(param.value / 10000).toFixed(2)}万</span><br/>`;
+                            }
                         } else if (param.seriesName === 'C点' || param.seriesName === '被否决C点' || param.seriesName === '策略2C') {
                             // C点标记（不显示详细信息，因为K线部分已经显示了）
                             // 仅保留简单标识
@@ -1539,6 +1599,57 @@ function renderChart(klineData, analysisData, period) {
                             return values[dataIndex][1] > values[dataIndex][0] ? '#ef5350' : '#26a69a';
                         }
                     }
+                },
+                // 预测成交量（虚线标记）- 只在最后一天显示
+                {
+                    name: '预测成交量',
+                    type: 'line',
+                    xAxisIndex: 1,
+                    yAxisIndex: 1,
+                    data: (() => {
+                        // 只在最后一天显示预测成交量
+                        if (predictedVolume && period === 'day' && dates.length > 0) {
+                            const result = new Array(dates.length).fill(null);
+                            result[dates.length - 1] = predictedVolume;
+                            return result;
+                        }
+                        return [];
+                    })(),
+                    lineStyle: {
+                        color: '#FFD700',
+                        type: 'dashed',
+                        width: 2
+                    },
+                    symbol: 'diamond',  // 菱形符号
+                    symbolSize: 8,
+                    itemStyle: {
+                        color: '#FFD700',
+                        borderColor: '#FFD700',
+                        borderWidth: 2
+                    },
+                    label: {
+                        show: true,
+                        formatter: function(params) {
+                            if (params.value !== null) {
+                                // 格式化显示：如果大于1万，显示xx万，否则直接显示数字
+                                if (params.value >= 10000) {
+                                    return `预测: ${(params.value / 10000).toFixed(2)}万`;
+                                } else {
+                                    return `预测: ${params.value.toFixed(0)}`;
+                                }
+                            }
+                            return '';
+                        },
+                        position: 'top',
+                        color: '#FFD700',
+                        fontSize: 11,
+                        fontWeight: 'bold',
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        padding: [3, 6],
+                        borderRadius: 3
+                    },
+                    z: 10,
+                    showSymbol: true
                 },
                 // MACD DIF线（快线，白色）
                 {
@@ -2692,6 +2803,15 @@ async function refreshLatestKline() {
             // 更新全局数据
             window.currentMACDData = macdData;
             window.currentMAData = maData;
+            
+            // 更新预测成交量
+            try {
+                const predicted = await fetchPredictedVolume(currentTableName);
+                predictedVolume = predicted;
+                console.log('[刷新最新K线] 预测成交量已更新:', predictedVolume);
+            } catch (error) {
+                console.error('[刷新最新K线] 更新预测成交量失败:', error);
+            }
             
             // 重新渲染图表
             console.log('[刷新最新K线] 重新渲染图表...');

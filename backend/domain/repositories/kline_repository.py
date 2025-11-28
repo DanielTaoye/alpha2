@@ -1,6 +1,6 @@
 """K线数据仓储接口"""
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, date
 from domain.models.kline import KLineData, PeriodInfo
 
@@ -49,6 +49,20 @@ class IKLineRepository(ABC):
             
         Returns:
             1分钟K线数据列表
+        """
+        pass
+    
+    @abstractmethod
+    def get_recent_days_1min_data(self, table_name: str, days: int = 5) -> Dict[date, List[KLineData]]:
+        """
+        获取最近N个交易日的1分钟级别数据
+        
+        Args:
+            table_name: 表名
+            days: 获取最近多少个交易日，默认5天
+            
+        Returns:
+            字典，key为日期，value为该日期的1分钟K线数据列表
         """
         pass
 

@@ -89,6 +89,12 @@ def get_latest_day_kline():
     return kline_controller.get_latest_day_kline()
 
 
+@app.route('/api/predict_volume', methods=['POST'])
+def predict_volume():
+    """预测当天的成交量"""
+    return kline_controller.predict_volume()
+
+
 @app.route('/api/stock_analysis', methods=['POST'])
 def get_stock_analysis():
     """获取股票分析数据（益损比、压力线、支撑线）"""

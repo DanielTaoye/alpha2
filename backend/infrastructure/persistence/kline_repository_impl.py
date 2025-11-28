@@ -1,7 +1,8 @@
 """K线数据仓储实现"""
 import pymysql
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, date
+from collections import defaultdict
 from domain.repositories.kline_repository import IKLineRepository
 from domain.models.kline import KLineData, PeriodInfo
 from infrastructure.persistence.database import DatabaseConnection
@@ -146,6 +147,64 @@ class KLineRepositoryImpl(IKLineRepository):
                 kline_list.append(kline)
             
             return kline_list
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_recent_days_1min_data(self, table_name: str, days: int = 5) -> Dict[date, List[KLineData]]:
+        """获取最近N个交易日的1分钟级别数据"""
+        conn = DatabaseConnection.get_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        try:
+            # 先获取最近N个交易日的日期列表
+            date_query = f"""
+                SELECT DISTINCT DATE(shi_jian) as trade_date
+                FROM {table_name}
+                WHERE peroid_type = '1min'
+                ORDER BY trade_date DESC
+                LIMIT %s
+            """
+            cursor.execute(date_query, (days,))
+            date_results = cursor.fetchall()
+            
+            if not date_results:
+                return {}
+            
+            # 获取这些日期的所有1分钟数据
+            dates = [row['trade_date'] for row in date_results]
+            
+            query = f"""
+                SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
+                       cheng_jiao_liang, liang_bi, wei_bi
+                FROM {table_name}
+                WHERE peroid_type = '1min' 
+                  AND DATE(shi_jian) IN ({','.join(['%s'] * len(dates))})
+                  AND TIME(shi_jian) >= '09:31:00'
+                  AND TIME(shi_jian) <= '15:00:00'
+                ORDER BY shi_jian ASC
+            """
+            
+            cursor.execute(query, dates)
+            results = cursor.fetchall()
+            
+            # 按日期分组
+            data_by_date = defaultdict(list)
+            for row in results:
+                trade_date = row['shi_jian'].date()
+                kline = KLineData(
+                    time=row['shi_jian'],
+                    open=float(row['kai_pan_jia']) if row['kai_pan_jia'] else 0,
+                    high=float(row['zui_gao_jia']) if row['zui_gao_jia'] else 0,
+                    low=float(row['zui_di_jia']) if row['zui_di_jia'] else 0,
+                    close=float(row['shou_pan_jia']) if row['shou_pan_jia'] else 0,
+                    volume=int(row['cheng_jiao_liang']) / 100 if row['cheng_jiao_liang'] else 0,
+                    liangbi=float(row['liang_bi']) if row['liang_bi'] else 0,
+                    weibi=float(row['wei_bi']) if row['wei_bi'] else 0
+                )
+                data_by_date[trade_date].append(kline)
+            
+            return dict(data_by_date)
         finally:
             cursor.close()
             conn.close()

@@ -68,4 +68,24 @@ class KLineController:
         except Exception as e:
             logger.error(f"获取最新K线数据失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
             return jsonify(ResponseBuilder.error(str(e))), 500
+    
+    def predict_volume(self):
+        """预测当天的成交量"""
+        try:
+            data = request.json
+            table_name = data.get('table_name')
+            
+            logger.info(f"收到请求: 预测成交量, 表名={table_name}")
+            result = self.kline_service.predict_today_volume(table_name)
+            
+            if result.get('predicted_volume'):
+                logger.info(f"成功预测成交量: 当前={result.get('current_volume'):.2f}, 预测={result.get('predicted_volume'):.2f}")
+            else:
+                logger.warning(f"无法预测成交量: {result.get('message')}")
+            
+            return jsonify(ResponseBuilder.success(result))
+        
+        except Exception as e:
+            logger.error(f"预测成交量失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
+            return jsonify(ResponseBuilder.error(str(e))), 500
 
