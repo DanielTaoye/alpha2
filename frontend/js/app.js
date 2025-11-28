@@ -2729,6 +2729,22 @@ async function refreshLatestKline() {
         const currentDates = currentOption.xAxis[0].data;
         const currentValues = currentOption.series[0].data;
         
+        // 【修复】找到成交量series（通过name查找）
+        let volumeSeries = null;
+        for (let series of currentOption.series) {
+            if (series.name === '成交量') {
+                volumeSeries = series;
+                break;
+            }
+        }
+        
+        if (!volumeSeries) {
+            console.error('[刷新最新K线] 找不到成交量series');
+            return;
+        }
+        
+        console.log('[刷新最新K线] 找到成交量series，数据长度:', volumeSeries.data.length);
+        
         // 获取最新K线的日期
         const latestDate = latestKlineData.time.split(' ')[0];
         
@@ -2743,10 +2759,13 @@ async function refreshLatestKline() {
         if (existingIndex >= 0) {
             // 如果已存在，检查数据是否有变化
             const existingValue = currentValues[existingIndex];
+            const existingVolume = volumeSeries.data[existingIndex];
+            
             if (existingValue[0] !== latestKlineData.open || 
                 existingValue[1] !== latestKlineData.close ||
                 existingValue[2] !== latestKlineData.low ||
-                existingValue[3] !== latestKlineData.high) {
+                existingValue[3] !== latestKlineData.high ||
+                existingVolume !== latestKlineData.volume) {  // 【新增】也检查成交量变化
                 
                 console.log('[刷新最新K线] 数据有变化，更新图表');
                 needUpdate = true;
@@ -2757,17 +2776,23 @@ async function refreshLatestKline() {
                         return latestKlineData;
                     } else {
                         const value = currentValues[index];
-                        const volumeData = currentOption.series[1].data[index];
+                        const volumeData = volumeSeries.data[index];  // 【修复】使用找到的成交量series
                         return {
                             time: date,
                             open: value[0],
                             close: value[1],
                             low: value[2],
                             high: value[3],
-                            volume: volumeData
+                            volume: volumeData,
+                            liangbi: 0,  // 历史数据的liangbi和weibi不重要，设为0
+                            weibi: 0
                         };
                     }
                 });
+                
+                // 验证成交量数据
+                const volumeCount = klineData.filter(k => k.volume && k.volume > 0).length;
+                console.log('[刷新最新K线] 重建后K线数据量:', klineData.length, '有成交量的数据:', volumeCount);
             } else {
                 console.log('[刷新最新K线] 数据未变化，跳过更新');
             }
@@ -2779,17 +2804,23 @@ async function refreshLatestKline() {
             // 重建完整的K线数据并追加
             klineData = currentDates.map((date, index) => {
                 const value = currentValues[index];
-                const volumeData = currentOption.series[1].data[index];
+                const volumeData = volumeSeries.data[index];  // 【修复】使用找到的成交量series
                 return {
                     time: date,
                     open: value[0],
                     close: value[1],
                     low: value[2],
                     high: value[3],
-                    volume: volumeData
+                    volume: volumeData,
+                    liangbi: 0,  // 历史数据的liangbi和weibi不重要，设为0
+                    weibi: 0
                 };
             });
             klineData.push(latestKlineData);
+            
+            // 验证成交量数据
+            const volumeCount = klineData.filter(k => k.volume && k.volume > 0).length;
+            console.log('[刷新最新K线] 重建后K线数据量:', klineData.length, '有成交量的数据:', volumeCount);
         }
         
         if (needUpdate) {
