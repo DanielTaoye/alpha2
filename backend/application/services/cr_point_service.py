@@ -106,7 +106,28 @@ class CRPointService:
         last_valid_point_index: Optional[int] = None  # 记录最后一个C点的K线索引
         
         for index, kline in enumerate(kline_data):
-            # 检查C点策略1（新逻辑：基于赔率分+胜率分+插件）
+            # === 第一步：先检查R点（优先级最高）===
+            is_r_point, r_plugins = self.r_point_service.check_r_point(
+                stock_code, 
+                kline.time, 
+                last_c_point_date  # 传入最近的C点日期（用于"上冲乏力"判断）
+            )
+            
+            # 【重要】先判断R点能否真正添加（考虑CR关系规则）
+            r_point_can_add = False
+            if is_r_point:
+                # 检查是否允许添加R点（不允许连续R）
+                if last_valid_point_type == 'R':
+                    # 不允许两个R点连续出现，R点被拒绝
+                    r_point_can_add = False
+                else:
+                    # R点可以添加
+                    r_point_can_add = True
+            
+            # 只有R点真正能添加时，才影响C点
+            has_valid_r_today = r_point_can_add
+            
+            # === 第二步：检查C点策略1（新逻辑：基于赔率分+胜率分+插件）===
             is_c_point, c_score, c_strategy, c_plugins, base_score, is_rejected = self.strategy_service.check_c_point_strategy_1(
                 stock_code, 
                 kline.time,
@@ -179,7 +200,12 @@ class CRPointService:
                 can_add_c = True
                 rejection_reason = ""
                 
-                if last_valid_point_type == 'C' and last_valid_point_index is not None:
+                # 【新增逻辑】如果当天有有效的R点（R点能真正添加），策略1的C点以R点为准
+                if has_valid_r_today:
+                    can_add_c = False
+                    rejection_reason = "当天R点触发，C和R同时触发时以R点为准"
+                    logger.info(f"[CR关系校验] 策略1 C点被R点覆盖: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
+                elif last_valid_point_type == 'C' and last_valid_point_index is not None:
                     # 两个C之间必须间隔至少2个交易日（即K线索引差>=3）
                     trading_days_diff = index - last_valid_point_index
                     if trading_days_diff < 3:
@@ -253,7 +279,12 @@ class CRPointService:
                 can_add_c = True
                 rejection_reason = ""
                 
-                if last_valid_point_type == 'C' and last_valid_point_index is not None:
+                # 【新增逻辑】如果当天有有效的R点（R点能真正添加），策略2的C点以R点为准
+                if has_valid_r_today:
+                    can_add_c = False
+                    rejection_reason = "当天R点触发，策略2的C点以R点为准"
+                    logger.info(f"[CR关系校验] 策略2 C点被R点覆盖: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
+                elif last_valid_point_type == 'C' and last_valid_point_index is not None:
                     # 两个C之间必须间隔至少2个交易日（即K线索引差>=3）
                     trading_days_diff = index - last_valid_point_index
                     if trading_days_diff < 3:
@@ -349,25 +380,10 @@ class CRPointService:
                 )
                 rejected_c_points.append(rejected_point)
             
-            # 检查R点（使用新的插件系统）
-            is_r_point, r_plugins = self.r_point_service.check_r_point(
-                stock_code, 
-                kline.time, 
-                last_c_point_date  # 传入最近的C点日期（用于"上冲乏力"判断）
-            )
-            
+            # === 第三步：处理R点（已在第一步检查过，这里只处理结果）===
             if is_r_point:
-                # CR关系校验：检查R点是否符合规则（不允许RR连续出现）
-                can_add_r = True
-                rejection_reason = ""
-                
-                if last_valid_point_type == 'R':
-                    # 不允许两个R点连续出现
-                    can_add_r = False
-                    rejection_reason = "上一个点是R点，不允许RR连续出现"
-                    logger.info(f"[CR关系校验] R点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
-                
-                if can_add_r:
+                # 使用前面判断好的 r_point_can_add
+                if r_point_can_add:
                     # 触发R点
                     r_strategy_name = ", ".join([p.plugin_name for p in r_plugins])
                     r_reason = " | ".join([p.reason for p in r_plugins])
@@ -391,12 +407,17 @@ class CRPointService:
                         plugins=[p.to_dict() for p in r_plugins]  # 添加插件信息
                     )
                     r_points.append(cr_point)
-                    # 更新CR关系状态
+                    # 【关键】更新CR关系状态：当天有R点时，以R点为准
+                    # 这样在后续判断"之前是否发过C"时，会把这天当作R点来计算
+                    # 即使当天C点也触发了，也只显示R点（C点已被拒绝，不计入有效C点）
                     last_valid_point_type = 'R'
                     last_valid_point_date = kline.time
                     last_valid_point_index = None  # R点不参与C点间隔计算
                 else:
                     # 因CR关系规则被拒绝的R点（记录在rejected_c_points中）
+                    rejection_reason = "上一个点是R点，不允许RR连续出现"
+                    logger.info(f"[CR关系校验] R点被拒绝: {kline.time.strftime('%Y-%m-%d')} - {rejection_reason}")
+                    
                     rejected_r_point = CRPoint(
                         stock_code=stock_code,
                         stock_name=stock_name,
