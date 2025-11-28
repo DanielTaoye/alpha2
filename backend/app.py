@@ -83,6 +83,12 @@ def get_kline_data():
     return kline_controller.get_kline_data()
 
 
+@app.route('/api/latest_day_kline', methods=['POST'])
+def get_latest_day_kline():
+    """获取最新一天的K线数据（从1分钟数据聚合）"""
+    return kline_controller.get_latest_day_kline()
+
+
 @app.route('/api/stock_analysis', methods=['POST'])
 def get_stock_analysis():
     """获取股票分析数据（益损比、压力线、支撑线）"""

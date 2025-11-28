@@ -103,4 +103,70 @@ class KLineApplicationService:
             period.period_type: period.count
             for period in period_list
         }
+    
+    def get_latest_day_kline(self, table_name: str) -> Dict[str, any]:
+        """
+        获取最新一天的K线数据（从1分钟数据聚合）
+        
+        Args:
+            table_name: 表名
+            
+        Returns:
+            包含聚合后的K线数据的字典
+        """
+        # 获取最新一天的1分钟数据
+        min_data_list = self.kline_repository.get_latest_day_1min_data(table_name)
+        
+        if not min_data_list:
+            return {
+                'kline_data': None,
+                'trade_date': None,
+                'message': '没有找到最新交易日的数据'
+            }
+        
+        # 聚合计算
+        # 开盘价：第一根1分钟K线（9:31）的开盘价
+        open_price = min_data_list[0].open
+        
+        # 最高价：所有1分钟K线的最高价
+        high_price = max(kline.high for kline in min_data_list)
+        
+        # 最低价：所有1分钟K线的最低价
+        low_price = min(kline.low for kline in min_data_list)
+        
+        # 收盘价：最后一根1分钟K线的收盘价
+        close_price = min_data_list[-1].close
+        
+        # 成交量：所有1分钟K线的成交量之和（已在repository层除以100）
+        total_volume = sum(kline.volume for kline in min_data_list)
+        
+        # 量比和委比取最后一根K线的值
+        liangbi = min_data_list[-1].liangbi
+        weibi = min_data_list[-1].weibi
+        
+        # 交易日期
+        trade_date = min_data_list[0].time.date()
+        
+        # 构建聚合后的K线数据
+        aggregated_kline = {
+            'time': trade_date.strftime('%Y-%m-%d'),
+            'open': open_price,
+            'high': high_price,
+            'low': low_price,
+            'close': close_price,
+            'volume': total_volume,
+            'liangbi': liangbi,
+            'weibi': weibi,
+            'data_points': len(min_data_list)  # 用于调试，显示有多少个1分钟数据点
+        }
+        
+        logger.info(f"聚合最新K线数据成功: 股票{table_name}, 日期{trade_date}, "
+                   f"开{open_price:.2f} 高{high_price:.2f} 低{low_price:.2f} 收{close_price:.2f}, "
+                   f"成交量{total_volume:.2f}, 数据点{len(min_data_list)}")
+        
+        return {
+            'kline_data': aggregated_kline,
+            'trade_date': trade_date.strftime('%Y-%m-%d'),
+            'message': 'success'
+        }
 

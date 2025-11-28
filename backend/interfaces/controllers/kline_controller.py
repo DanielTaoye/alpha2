@@ -48,4 +48,24 @@ class KLineController:
         except Exception as e:
             logger.error(f"获取K线数据失败: 表名={table_name}, 周期={period_type}, 错误={str(e)}", exc_info=True)
             return jsonify(ResponseBuilder.error(str(e))), 500
+    
+    def get_latest_day_kline(self):
+        """获取最新一天的K线数据（从1分钟数据聚合）"""
+        try:
+            data = request.json
+            table_name = data.get('table_name')
+            
+            logger.info(f"收到请求: 获取最新一天K线数据, 表名={table_name}")
+            result = self.kline_service.get_latest_day_kline(table_name)
+            
+            if result.get('kline_data'):
+                logger.info(f"成功返回最新K线数据: 日期={result.get('trade_date')}")
+            else:
+                logger.warning(f"未找到最新K线数据: {result.get('message')}")
+            
+            return jsonify(ResponseBuilder.success(result))
+        
+        except Exception as e:
+            logger.error(f"获取最新K线数据失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
+            return jsonify(ResponseBuilder.error(str(e))), 500
 

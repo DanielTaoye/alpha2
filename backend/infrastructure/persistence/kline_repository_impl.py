@@ -1,7 +1,7 @@
 """K线数据仓储实现"""
 import pymysql
-from typing import List
-from datetime import datetime
+from typing import List, Optional
+from datetime import datetime, date
 from domain.repositories.kline_repository import IKLineRepository
 from domain.models.kline import KLineData, PeriodInfo
 from infrastructure.persistence.database import DatabaseConnection
@@ -44,7 +44,7 @@ class KLineRepositoryImpl(IKLineRepository):
                     high=float(row['zui_gao_jia']) if row['zui_gao_jia'] else 0,
                     low=float(row['zui_di_jia']) if row['zui_di_jia'] else 0,
                     close=float(row['shou_pan_jia']) if row['shou_pan_jia'] else 0,
-                    volume=int(row['cheng_jiao_liang']) if row['cheng_jiao_liang'] else 0,
+                    volume=int(row['cheng_jiao_liang']) / 100 if row['cheng_jiao_liang'] else 0,  # 成交量除以100
                     liangbi=float(row['liang_bi']) if row['liang_bi'] else 0,
                     weibi=float(row['wei_bi']) if row['wei_bi'] else 0
                 )
@@ -85,6 +85,67 @@ class KLineRepositoryImpl(IKLineRepository):
                     ))
             
             return period_list
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def get_latest_day_1min_data(self, table_name: str, target_date: Optional[date] = None) -> List[KLineData]:
+        """
+        获取最新一天的1分钟级别数据
+        从9:31到15:00的所有1分钟数据
+        """
+        conn = DatabaseConnection.get_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        try:
+            # 如果没有指定日期，获取最新交易日
+            if target_date is None:
+                date_query = f"""
+                    SELECT DATE(shi_jian) as trade_date
+                    FROM {table_name}
+                    WHERE peroid_type = '1min'
+                    ORDER BY shi_jian DESC
+                    LIMIT 1
+                """
+                cursor.execute(date_query)
+                date_result = cursor.fetchone()
+                
+                if not date_result:
+                    return []
+                
+                target_date = date_result['trade_date']
+            
+            # 获取该日期的所有1分钟数据（从9:31到15:00）
+            query = f"""
+                SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
+                       cheng_jiao_liang, liang_bi, wei_bi
+                FROM {table_name}
+                WHERE peroid_type = '1min' 
+                  AND DATE(shi_jian) = %s
+                  AND TIME(shi_jian) >= '09:31:00'
+                  AND TIME(shi_jian) <= '15:00:00'
+                ORDER BY shi_jian ASC
+            """
+            
+            cursor.execute(query, (target_date,))
+            results = cursor.fetchall()
+            
+            # 转换为领域模型
+            kline_list = []
+            for row in results:
+                kline = KLineData(
+                    time=row['shi_jian'],
+                    open=float(row['kai_pan_jia']) if row['kai_pan_jia'] else 0,
+                    high=float(row['zui_gao_jia']) if row['zui_gao_jia'] else 0,
+                    low=float(row['zui_di_jia']) if row['zui_di_jia'] else 0,
+                    close=float(row['shou_pan_jia']) if row['shou_pan_jia'] else 0,
+                    volume=int(row['cheng_jiao_liang']) / 100 if row['cheng_jiao_liang'] else 0,  # 成交量除以100
+                    liangbi=float(row['liang_bi']) if row['liang_bi'] else 0,
+                    weibi=float(row['wei_bi']) if row['wei_bi'] else 0
+                )
+                kline_list.append(kline)
+            
+            return kline_list
         finally:
             cursor.close()
             conn.close()

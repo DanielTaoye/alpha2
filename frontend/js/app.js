@@ -14,6 +14,7 @@ let bullishPatternMap = {}; // 存储多头组合数据，key为日期字符串�
 let bearishPatternMap = {}; // 存储空头组合数据，key为日期字符串，value为空头组合
 let supportPriceMap = {}; // 存储支撑线数据，key为日期字符串，value为支撑价格（整数，需除以100）
 let pressurePriceMap = {}; // 存储压力线数据，key为日期字符串，value为压力价格（整数，需除以100）
+let autoRefreshInterval = null; // 自动刷新定时器
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -74,6 +75,9 @@ function getTotalStockCount() {
 // 选择策略
 function selectStrategy(strategy) {
     currentStrategy = strategy;
+    
+    // 切换策略时停止自动刷新
+    stopAutoRefresh();
     
     document.querySelectorAll('.strategy-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -158,8 +162,12 @@ async function selectStock() {
     
     if (!stockSelect.value) {
         showEmptyState();
+        stopAutoRefresh(); // 停止自动刷新
         return;
     }
+
+    // 切换股票时停止之前的自动刷新
+    stopAutoRefresh();
 
     currentStockCode = stockSelect.value;
     const stockName = selectedOption.dataset.name;
@@ -354,7 +362,7 @@ async function loadStockData(stockCode, tableName, period) {
         }
 
         // 适配新的返回格式：data现在包含kline_data、macd和ma
-        const klineData = klineResult.data.kline_data || klineResult.data;
+        let klineData = klineResult.data.kline_data || klineResult.data;  // 改为 let，允许后续重新赋值
         const macdData = klineResult.data.macd || null;
         const maData = klineResult.data.ma || null;
         
@@ -416,6 +424,49 @@ async function loadStockData(stockCode, tableName, period) {
         }
 
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineData.length}`);
+        
+        // 如果是日K线，尝试获取最新一天的实时K线数据
+        if (period === 'day') {
+            console.log('[日K线] 尝试获取最新一天的实时K线数据...');
+            try {
+                const latestKlineData = await fetchLatestDayKline(tableName);
+                if (latestKlineData) {
+                    // 将最新一天的K线添加到现有数据中
+                    const beforeMergeLength = klineData.length;
+                    klineData = mergeLatestKline(klineData, latestKlineData);
+                    console.log(`[${period}] ✅ 最新K线数据已合并: ${beforeMergeLength} -> ${klineData.length}`);
+                    
+                    // 验证klineData是一个有效的数组
+                    console.log('[日K线] 验证klineData:', Array.isArray(klineData), '长度:', klineData.length);
+                    console.log('[日K线] 最后一条K线:', klineData[klineData.length - 1]);
+                    
+                    // 重新计算MA和MACD指标
+                    console.log('[日K线] 重新计算MA和MACD指标...');
+                    console.log('[日K线] 准备计算，K线数据长度:', klineData.length);
+                    const newMacdData = calculateMACD(klineData);
+                    const newMaData = calculateMA(klineData, [5, 10, 20]);
+                    
+                    console.log('[日K线] 计算完成后检查:');
+                    console.log('[日K线] klineData长度:', klineData.length);
+                    console.log('[日K线] MA5长度:', newMaData.ma5?.length, 'MA10长度:', newMaData.ma10?.length, 'MA20长度:', newMaData.ma20?.length);
+                    
+                    // 验证长度是否一致
+                    if (newMaData.ma5 && newMaData.ma5.length === klineData.length) {
+                        console.log(`✅ 成功: MA数据长度(${newMaData.ma5.length})与K线数据长度(${klineData.length})匹配！`);
+                        // 只有长度匹配时才更新全局数据
+                        window.currentMACDData = newMacdData;
+                        window.currentMAData = newMaData;
+                        console.log(`[${period}] ✅ MA和MACD指标已更新为新计算的数据`);
+                    } else {
+                        console.error(`❌ 错误: MA数据长度(${newMaData.ma5?.length})与K线数据长度(${klineData.length})不匹配！保留原MA数据`);
+                    }
+                }
+            } catch (error) {
+                console.error(`[${period}] 获取最新K线数据失败（继续使用原有数据）:`, error);
+                console.error('错误堆栈:', error.stack);
+            }
+        }
+        
         try {
             renderChart(klineData, {}, period);
             updateActivePeriodButton(period);
@@ -427,8 +478,13 @@ async function loadStockData(stockCode, tableName, period) {
                 analyzeCRPointsAuto().catch(err => {
                     console.error('实时计算C点失败:', err);
                 });
+                
+                // 启动自动刷新（每分钟更新一次最新K线）
+                startAutoRefresh();
             } else {
-                // 非日K线，更新CR点统计显示提示信息
+                // 非日K线，停止自动刷新
+                stopAutoRefresh();
+                // 更新CR点统计显示提示信息
                 updateCRPointsStats();
             }
         } catch (error) {
@@ -449,6 +505,167 @@ async function loadStockData(stockCode, tableName, period) {
             </div>
         `;
     }
+}
+
+// 获取最新一天的K线数据（从1分钟数据聚合）
+async function fetchLatestDayKline(tableName) {
+    try {
+        console.log(`[最新K线] 开始请求最新一天K线数据: ${tableName}`);
+        
+        const response = await fetch(`${API_BASE_URL}/latest_day_kline`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                table_name: tableName
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log(`[最新K线] 响应结果:`, result);
+        
+        if (result.code !== 200) {
+            throw new Error(result.message || '获取最新K线失败');
+        }
+        
+        const klineData = result.data.kline_data;
+        if (!klineData) {
+            console.log(`[最新K线] 没有可用的最新K线数据`);
+            return null;
+        }
+        
+        console.log(`[最新K线] ✅ 成功获取最新K线数据:`, klineData);
+        return klineData;
+        
+    } catch (error) {
+        console.error(`[最新K线] 获取失败:`, error);
+        return null;
+    }
+}
+
+// 合并最新K线数据到现有数据中
+function mergeLatestKline(existingKlineData, latestKlineData) {
+    if (!latestKlineData) {
+        console.log('[mergeLatestKline] 没有最新K线数据，返回原数据');
+        return existingKlineData;
+    }
+    
+    console.log('[mergeLatestKline] 开始合并，现有数据长度:', existingKlineData.length);
+    console.log('[mergeLatestKline] 最新K线数据:', latestKlineData);
+    
+    // 获取最新K线的日期（只取日期部分，不包括时间）
+    const latestDate = latestKlineData.time.split(' ')[0];
+    console.log('[mergeLatestKline] 最新K线日期:', latestDate);
+    
+    // 检查现有数据中是否已经有这个日期的数据
+    const existingIndex = existingKlineData.findIndex(item => {
+        const itemDate = item.time.split(' ')[0];
+        return itemDate === latestDate;
+    });
+    
+    if (existingIndex >= 0) {
+        // 如果已经存在，替换旧数据
+        console.log(`[mergeLatestKline] 替换现有数据: 日期=${latestDate}, 索引=${existingIndex}`);
+        existingKlineData[existingIndex] = latestKlineData;
+    } else {
+        // 如果不存在，追加到末尾
+        console.log(`[mergeLatestKline] 追加新数据: 日期=${latestDate}`);
+        existingKlineData.push(latestKlineData);
+    }
+    
+    console.log('[mergeLatestKline] 合并后数据长度:', existingKlineData.length);
+    return existingKlineData;
+}
+
+// 计算MACD指标
+function calculateMACD(klineData) {
+    const closes = klineData.map(item => item.close);
+    const shortPeriod = 12;
+    const longPeriod = 26;
+    const signalPeriod = 9;
+    
+    // 计算EMA
+    function calculateEMA(data, period) {
+        const ema = [];
+        const multiplier = 2 / (period + 1);
+        
+        // 第一个EMA使用SMA
+        let sum = 0;
+        for (let i = 0; i < period && i < data.length; i++) {
+            sum += data[i];
+        }
+        ema.push(sum / period);
+        
+        // 后续使用EMA公式
+        for (let i = period; i < data.length; i++) {
+            const value = (data[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
+            ema.push(value);
+        }
+        
+        return ema;
+    }
+    
+    // 计算短期和长期EMA
+    const ema12 = calculateEMA(closes, shortPeriod);
+    const ema26 = calculateEMA(closes, longPeriod);
+    
+    // 计算DIF
+    const dif = [];
+    const startIndex = longPeriod - 1;
+    for (let i = 0; i < ema12.length && i < ema26.length; i++) {
+        dif.push(ema12[i] - ema26[i]);
+    }
+    
+    // 计算DEA (DIF的9日EMA)
+    const dea = calculateEMA(dif, signalPeriod);
+    
+    // 计算MACD柱
+    const macd = [];
+    const deaStartIndex = signalPeriod - 1;
+    for (let i = 0; i < dea.length; i++) {
+        macd.push((dif[i] - dea[i]) * 2);
+    }
+    
+    // 填充前面的空值
+    const result = {
+        dif: Array(startIndex).fill(null).concat(dif),
+        dea: Array(startIndex + deaStartIndex).fill(null).concat(dea),
+        macd: Array(startIndex + deaStartIndex).fill(null).concat(macd)
+    };
+    
+    return result;
+}
+
+// 计算MA指标
+function calculateMA(klineData, periods) {
+    const closes = klineData.map(item => item.close);
+    const result = {};
+    
+    console.log(`[calculateMA] 输入K线数据长度: ${klineData.length}, 收盘价数组长度: ${closes.length}`);
+    
+    periods.forEach(period => {
+        const ma = [];
+        for (let i = 0; i < closes.length; i++) {
+            if (i < period - 1) {
+                ma.push(null);
+            } else {
+                let sum = 0;
+                for (let j = 0; j < period; j++) {
+                    sum += closes[i - j];
+                }
+                ma.push(sum / period);
+            }
+        }
+        result[`ma${period}`] = ma;
+        console.log(`[calculateMA] MA${period}计算完成，长度: ${ma.length}`);
+    });
+    
+    return result;
 }
 
 // 加载成交量类型数据
@@ -836,6 +1053,13 @@ function renderChart(klineData, analysisData, period) {
         const maData = window.currentMAData || {};
         if (window.currentMAData) {
             console.log(`[${period}] 使用后端计算的MA - ${Object.keys(maData).join(', ')}`);
+            console.log(`[${period}] MA数据长度 - MA5:${maData.ma5?.length}, MA10:${maData.ma10?.length}, MA20:${maData.ma20?.length}`);
+            console.log(`[${period}] K线数据长度:${dates.length}, MA数据长度:${maData.ma5?.length}`);
+            
+            // 验证数据长度是否一致
+            if (maData.ma5 && maData.ma5.length !== dates.length) {
+                console.warn(`[${period}] ⚠️ 警告: MA数据长度(${maData.ma5.length})与K线数据长度(${dates.length})不一致！`);
+            }
         }
         
         console.log(`[${period}] 数据准备完成 - 日期数:${dates.length}, K线数:${values.length}, 成交量数:${volumes.length}`);
@@ -2346,6 +2570,146 @@ function displayBacktestResult(data) {
     backtestResult.innerHTML = html;
 }
 
+// 启动自动刷新（每分钟更新一次最新K线）
+function startAutoRefresh() {
+    // 清除已有的定时器
+    stopAutoRefresh();
+    
+    console.log('[自动刷新] 启动定时器，每60秒更新一次最新K线');
+    
+    // 设置定时器，每60秒更新一次
+    autoRefreshInterval = setInterval(async () => {
+        if (currentPeriod === 'day' && currentTableName && chart) {
+            console.log('[自动刷新] 开始更新最新K线数据...');
+            try {
+                await refreshLatestKline();
+            } catch (error) {
+                console.error('[自动刷新] 更新失败:', error);
+            }
+        } else {
+            console.log('[自动刷新] 条件不满足，跳过更新');
+            stopAutoRefresh();
+        }
+    }, 60000); // 60秒
+}
+
+// 停止自动刷新
+function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+        console.log('[自动刷新] 停止定时器');
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+    }
+}
+
+// 刷新最新K线数据
+async function refreshLatestKline() {
+    try {
+        console.log('[刷新最新K线] 获取最新数据...');
+        const latestKlineData = await fetchLatestDayKline(currentTableName);
+        
+        if (!latestKlineData || !chart) {
+            console.log('[刷新最新K线] 没有新数据或图表不存在');
+            return;
+        }
+        
+        // 获取当前图表配置
+        const currentOption = chart.getOption();
+        const currentDates = currentOption.xAxis[0].data;
+        const currentValues = currentOption.series[0].data;
+        
+        // 获取最新K线的日期
+        const latestDate = latestKlineData.time.split(' ')[0];
+        
+        // 查找该日期在当前数据中的位置
+        const existingIndex = currentDates.findIndex(date => {
+            return date.split(' ')[0] === latestDate;
+        });
+        
+        let needUpdate = false;
+        let klineData = [];
+        
+        if (existingIndex >= 0) {
+            // 如果已存在，检查数据是否有变化
+            const existingValue = currentValues[existingIndex];
+            if (existingValue[0] !== latestKlineData.open || 
+                existingValue[1] !== latestKlineData.close ||
+                existingValue[2] !== latestKlineData.low ||
+                existingValue[3] !== latestKlineData.high) {
+                
+                console.log('[刷新最新K线] 数据有变化，更新图表');
+                needUpdate = true;
+                
+                // 重建完整的K线数据
+                klineData = currentDates.map((date, index) => {
+                    if (index === existingIndex) {
+                        return latestKlineData;
+                    } else {
+                        const value = currentValues[index];
+                        const volumeData = currentOption.series[1].data[index];
+                        return {
+                            time: date,
+                            open: value[0],
+                            close: value[1],
+                            low: value[2],
+                            high: value[3],
+                            volume: volumeData
+                        };
+                    }
+                });
+            } else {
+                console.log('[刷新最新K线] 数据未变化，跳过更新');
+            }
+        } else {
+            // 如果不存在，说明是新的交易日
+            console.log('[刷新最新K线] 发现新交易日，追加数据');
+            needUpdate = true;
+            
+            // 重建完整的K线数据并追加
+            klineData = currentDates.map((date, index) => {
+                const value = currentValues[index];
+                const volumeData = currentOption.series[1].data[index];
+                return {
+                    time: date,
+                    open: value[0],
+                    close: value[1],
+                    low: value[2],
+                    high: value[3],
+                    volume: volumeData
+                };
+            });
+            klineData.push(latestKlineData);
+        }
+        
+        if (needUpdate) {
+            // 重新计算MA和MACD
+            console.log('[刷新最新K线] 重新计算技术指标...');
+            console.log('[刷新最新K线] K线数据长度:', klineData.length);
+            const macdData = calculateMACD(klineData);
+            const maData = calculateMA(klineData, [5, 10, 20]);
+            console.log('[刷新最新K线] MA5长度:', maData.ma5?.length, 'MA10长度:', maData.ma10?.length, 'MA20长度:', maData.ma20?.length);
+            
+            // 更新全局数据
+            window.currentMACDData = macdData;
+            window.currentMAData = maData;
+            
+            // 重新渲染图表
+            console.log('[刷新最新K线] 重新渲染图表...');
+            renderChart(klineData, {}, 'day');
+            
+            console.log('[刷新最新K线] ✅ 更新完成');
+        }
+        
+    } catch (error) {
+        console.error('[刷新最新K线] 刷新失败:', error);
+    }
+}
+
 // 页面加载时初始化
 window.onload = initApp;
+
+// 页面卸载时清理定时器
+window.onbeforeunload = () => {
+    stopAutoRefresh();
+};
 
