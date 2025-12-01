@@ -557,9 +557,8 @@ async function fetchPredictedVolume(tableName) {
             console.log(`[预测成交量] ✅ 成功: 当前=${data.current_volume?.toFixed(2)}, 预测=${data.predicted_volume?.toFixed(2)}, 比例=${data.ratio?.toFixed(2)}`);
             
             // 获取预测成交量后，立即计算成交量类型
-            fetchPredictedVolumeType(tableName, data.predicted_volume).catch(err => {
-                console.error('[预测成交量类型] 计算失败:', err);
-            });
+            console.log(`[预测成交量] 📌 准备调用成交量类型接口...`);
+            await fetchPredictedVolumeType(tableName, data.predicted_volume);
             
             return data.predicted_volume;
         } else {
@@ -575,6 +574,7 @@ async function fetchPredictedVolume(tableName) {
 
 // 基于预测成交量计算成交量类型
 async function fetchPredictedVolumeType(tableName, predictedVol) {
+    console.log(`🔵🔵🔵 [预测成交量类型-函数入口] tableName=${tableName}, predictedVol=${predictedVol}`);
     try {
         console.log(`[预测成交量类型] 开始请求: ${tableName}, 预测成交量=${predictedVol}`);
         

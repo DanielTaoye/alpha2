@@ -90,36 +90,97 @@ class KLineController:
             return jsonify(ResponseBuilder.error(str(e))), 500
     
     def predict_volume_type(self):
-        """基于预测成交量计算成交量类型"""
+        """从数据库获取最新的成交量类型（直接读取b_daily_chance表）"""
         try:
-            from domain.services.volume_type_service import VolumeTypeService
+            import pymysql.cursors
+            from infrastructure.persistence.database import DatabaseConnection
             
             data = request.json
             table_name = data.get('table_name')
             predicted_volume = data.get('predicted_volume')
             
-            if not table_name or not predicted_volume:
-                return jsonify(ResponseBuilder.error("缺少参数: table_name 或 predicted_volume")), 400
+            if not table_name:
+                return jsonify(ResponseBuilder.error("缺少参数: table_name")), 400
             
-            logger.info(f"收到请求: 预测成交量类型, 表名={table_name}, 预测成交量={predicted_volume}")
+            # 从table_name提取股票代码 (例如: sz_300188_kline -> SZ300188)
+            stock_code = self._extract_stock_code_from_table(table_name)
             
-            volume_type = VolumeTypeService.calculate_volume_type_with_predicted(
-                table_name, float(predicted_volume)
-            )
+            logger.info(f"收到请求: 获取成交量类型, 表名={table_name}, 转换后股票代码={stock_code}")
+            
+            # 直接从b_daily_chance表读取最新的成交量类型
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                
+                # 查询最近5天的数据，取最新的成交量类型
+                query = """
+                    SELECT volume_type, date, stock_code
+                    FROM b_daily_chance
+                    WHERE stock_code = %s
+                    ORDER BY date DESC
+                    LIMIT 5
+                """
+                logger.info(f"🔍 执行SQL查询: stock_code={stock_code}")
+                cursor.execute(query, (stock_code,))
+                results = cursor.fetchall()
+                
+                logger.info(f"🔍 查询结果数量: {len(results)}条")
+                if results:
+                    for i, r in enumerate(results):
+                        logger.info(f"  [{i}] 日期={r['date']}, stock_code={r['stock_code']}, volume_type={r['volume_type']}")
+                
+                volume_type = None
+                if results and results[0]['volume_type']:
+                    volume_type = results[0]['volume_type']
+                    latest_date = results[0]['date']
+                    logger.info(f"✅ 从数据库读取成交量类型: {volume_type}, 日期: {latest_date}")
+                else:
+                    if not results:
+                        logger.warning(f"⚠️ 未找到任何数据: stock_code={stock_code}")
+                    else:
+                        logger.warning(f"⚠️ 找到数据但volume_type为空: stock_code={stock_code}, 日期={results[0]['date']}")
             
             result = {
                 'volume_type': volume_type,
                 'predicted_volume': predicted_volume
             }
             
-            if volume_type:
-                logger.info(f"成功计算成交量类型: {volume_type}")
-            else:
-                logger.info(f"未匹配任何成交量类型")
-            
             return jsonify(ResponseBuilder.success(result))
         
         except Exception as e:
-            logger.error(f"预测成交量类型失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
+            logger.error(f"获取成交量类型失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
             return jsonify(ResponseBuilder.error(str(e))), 500
+    
+    def _extract_stock_code_from_table(self, table_name: str) -> str:
+        """
+        从表名提取股票代码
+        支持两种格式:
+        1. basic_data_sz300188 -> SZ300188
+        2. sz_300188_kline -> SZ300188
+        """
+        # 移除前缀 basic_data_
+        if table_name.startswith('basic_data_'):
+            table_name = table_name[11:]  # 移除 "basic_data_"
+        
+        # 移除后缀 _kline
+        if table_name.endswith('_kline'):
+            table_name = table_name[:-6]
+        
+        # 现在 table_name 应该是 sz300188 或 sz_300188 格式
+        # 尝试按 _ 分割
+        if '_' in table_name:
+            # sz_300188 -> SZ300188
+            parts = table_name.split('_')
+            if len(parts) >= 2:
+                market = parts[0].upper()  # sz -> SZ 或 sh -> SH
+                code = parts[1]  # 300188
+                return f"{market}{code}"
+        else:
+            # sz300188 -> SZ300188
+            # 前2个字符是市场代码，后面是股票代码
+            if len(table_name) >= 3:
+                market = table_name[:2].upper()  # sz -> SZ 或 sh -> SH
+                code = table_name[2:]  # 300188
+                return f"{market}{code}"
+        
+        return table_name.upper()
 

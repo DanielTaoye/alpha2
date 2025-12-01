@@ -74,6 +74,11 @@ class VolumeTypeService:
             target_idx = len(daily_data) - 1
             target_volume = predicted_volume
             
+            # 🚀 优化：预先计算前5天的ABCD类型，避免重复计算
+            prev_5_types_cache = {}
+            for i in range(max(0, target_idx - 5), target_idx):
+                prev_5_types_cache[i] = VolumeTypeService._check_all_volume_types(daily_data, i)
+            
             # 收集所有匹配的类型
             matched_types = []
             
@@ -119,9 +124,10 @@ class VolumeTypeService:
             
             # 计算类型E: 当日为前1日以及前五日均值的4倍以上（前五日未出现ABCD任何一种放量）
             if target_idx >= 5:
+                # 🚀 优化：使用缓存的类型检查结果
                 has_abcd_in_prev_5 = False
                 for i in range(max(0, target_idx - 5), target_idx):
-                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    check_types = prev_5_types_cache.get(i)
                     if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
                         has_abcd_in_prev_5 = True
                         break
@@ -139,9 +145,10 @@ class VolumeTypeService:
             
             # 计算类型F
             if target_idx >= 5:
+                # 🚀 优化：使用缓存的类型检查结果
                 x_day_volume = None
                 for i in range(max(0, target_idx - 5), target_idx):
-                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    check_types = prev_5_types_cache.get(i)
                     if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
                         x_day_volume = daily_data[i]['volume']
                         break
@@ -166,8 +173,9 @@ class VolumeTypeService:
             
             # 计算类型G
             if target_idx >= 5:
+                # 🚀 优化：使用缓存的类型检查结果
                 for i in range(max(0, target_idx - 5), target_idx):
-                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    check_types = prev_5_types_cache.get(i)
                     if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
                         x_day_volume = daily_data[i]['volume']
                         if x_day_volume > 0:
@@ -178,8 +186,9 @@ class VolumeTypeService:
             
             # 计算类型H
             if target_idx >= 5:
+                # 🚀 优化：使用缓存的类型检查结果
                 for i in range(max(0, target_idx - 5), target_idx):
-                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    check_types = prev_5_types_cache.get(i)
                     if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
                         x_day_volume = daily_data[i]['volume']
                         if target_volume > x_day_volume:

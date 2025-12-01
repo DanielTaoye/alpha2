@@ -245,10 +245,11 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.error(f"❌ CR全局缓存初始化失败: {e}", exc_info=True)
         
-        # 启动后台线程初始化缓存
-        cache_thread = threading.Thread(target=init_cache_async, daemon=True)
-        cache_thread.start()
-        logger.info("📌 CR缓存初始化线程已启动（后台运行）")
+        # 启动后台线程初始化缓存（已禁用，按需使用）
+        # cache_thread = threading.Thread(target=init_cache_async, daemon=True)
+        # cache_thread.start()
+        # logger.info("📌 CR缓存初始化线程已启动（后台运行）")
+        logger.info("⏸️  CR缓存自动初始化已禁用（按需加载）")
         
     except Exception as e:
         logger.error(f"❌ 启动CR缓存初始化失败: {e}", exc_info=True)
