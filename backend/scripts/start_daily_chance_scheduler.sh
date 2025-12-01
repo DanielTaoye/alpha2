@@ -24,17 +24,31 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-# 激活虚拟环境（如果有）
-if [ -d "$PROJECT_ROOT/venv" ]; then
-    source "$PROJECT_ROOT/venv/bin/activate"
-    echo "✅ 虚拟环境已激活"
+# 激活虚拟环境（必须）
+VENV_DIR="$PROJECT_ROOT/venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "❌ 错误: 虚拟环境不存在"
+    echo "请先运行: bash $SCRIPT_DIR/setup_venv.sh"
+    exit 1
 fi
+
+echo "🔧 激活虚拟环境..."
+source "$VENV_DIR/bin/activate"
+
+# 检查依赖是否安装
+if ! python -c "import apscheduler" 2>/dev/null; then
+    echo "❌ 错误: apscheduler 未安装"
+    echo "请先运行: bash $SCRIPT_DIR/setup_venv.sh"
+    exit 1
+fi
+
+echo "✅ 虚拟环境已激活"
 
 # 启动服务
 echo "🚀 启动每日机会数据定时同步服务..."
 cd "$PROJECT_ROOT"
 
-nohup python3 backend/scripts/daily_chance_scheduler.py > "$LOG_DIR/scheduler_output.log" 2>&1 &
+nohup python backend/scripts/daily_chance_scheduler.py > "$LOG_DIR/scheduler_output.log" 2>&1 &
 
 # 保存PID
 echo $! > "$PID_FILE"

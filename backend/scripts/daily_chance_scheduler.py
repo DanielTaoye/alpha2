@@ -22,6 +22,15 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 import logging
 
+# 导入组合计算服务
+try:
+    from domain.services.bullish_pattern_service import BullishPatternService
+    from domain.services.bearish_pattern_service import BearishPatternService
+    PATTERN_SERVICES_AVAILABLE = True
+except ImportError:
+    logger.warning("组合计算服务导入失败，将跳过组合数据刷新")
+    PATTERN_SERVICES_AVAILABLE = False
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +69,7 @@ def load_stock_config() -> List[Dict]:
             stocks.append({
                 'code': stock['code'],
                 'name': stock['name'],
+                'nature': nature,  # 股票性质（波段、长线等）
                 'table_name': f"basic_data_{stock['code'].lower()}"
             })
     
@@ -104,18 +114,22 @@ def fetch_daily_chance_from_api(stock_code: str) -> List[Dict]:
     """从外部API获取每日机会数据"""
     try:
         url = f"{API_BASE_URL}/stock/getDailyChanceWithBeauty"
-        params = {'code': stock_code}
         
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        # API需要POST请求，请求体直接是股票代码字符串
+        response = requests.post(
+            url,
+            data=stock_code,
+            headers={'Content-Type': 'application/json'},
+            timeout=30
+        )
         
-        data = response.json()
-        
-        if data.get('code') != 200:
-            logger.error(f"API返回错误: {stock_code}, {data.get('msg')}")
+        if response.status_code == 200:
+            data = response.json()
+            # 直接返回数据列表（API返回的就是数组）
+            return data if isinstance(data, list) else []
+        else:
+            logger.error(f"API返回错误: {stock_code}, status={response.status_code}")
             return []
-        
-        return data.get('data', [])
         
     except Exception as e:
         logger.error(f"获取API数据失败: {stock_code}, {e}")
@@ -133,7 +147,7 @@ def calculate_volume_type(table_name: str, predicted_volume: float) -> str:
         return ''
 
 
-def save_to_database(stock_code: str, table_name: str, api_data: List[Dict]) -> int:
+def save_to_database(stock_code: str, stock_name: str, stock_nature: str, table_name: str, api_data: List[Dict]) -> int:
     """
     保存数据到生产数据库
     只保存最新1天的数据
@@ -152,19 +166,23 @@ def save_to_database(stock_code: str, table_name: str, api_data: List[Dict]) -> 
         # 获取最新的一条数据
         latest_record = api_data[0]
         
-        # 提取数据
-        date_str = latest_record.get('date', '')
+        # 提取数据（注意API字段名）
+        # API返回的字段名是 'day' 不是 'date'
+        date_str = latest_record.get('day', '')
         if not date_str:
             logger.warning(f"日期为空，跳过: {stock_code}")
             return 0
         
-        # 检查是否是今天的数据
-        today = datetime.now().strftime('%Y-%m-%d')
-        if date_str != today:
-            logger.info(f"不是今天的数据，跳过: {stock_code}, 数据日期={date_str}, 今天={today}")
-            return 0
+        # 只取日期部分（去掉时间）
+        date_only = date_str.split(' ')[0] if ' ' in date_str else date_str
         
-        volume = latest_record.get('volume', 0)
+        logger.info(f"准备保存数据: {stock_code}, 日期={date_only}")
+        
+        # 成交量在 daySeg 对象中
+        day_seg = latest_record.get('daySeg', {})
+        volume = day_seg.get('chengJiaoLiang', 0) if day_seg else 0
+        
+        # 支撑线、压力线、赔率描述
         support_price = latest_record.get('supportPrice')
         pressure_price = latest_record.get('pressurePrice')
         win_ratio_description = latest_record.get('winRatioDescription', '')
@@ -172,20 +190,24 @@ def save_to_database(stock_code: str, table_name: str, api_data: List[Dict]) -> 
         # 解析赔率分数
         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score = parse_win_ratio_description(win_ratio_description)
         
-        # 计算成交量类型
-        volume_type = calculate_volume_type(table_name, volume) if volume else ''
+        # 计算成交量类型（基于实际成交量，单位需要除以100）
+        # API返回的chengJiaoLiang是整数（如69022300），需要除以100得到正确的成交量
+        volume_for_calc = volume / 100 if volume else 0
+        volume_type = calculate_volume_type(table_name, volume_for_calc) if volume_for_calc else ''
         
-        # 转换价格（API返回的是整数，如1600表示16.00）
+        # 转换价格（API返回的已经是整数，直接使用）
         support_price_int = int(float(support_price)) if support_price else None
         pressure_price_int = int(float(pressure_price)) if pressure_price else None
         
         # 执行UPSERT（如果存在则更新，不存在则插入）
         upsert_sql = """
         INSERT INTO b_daily_chance 
-        (stock_code, date, day_win_ratio_score, week_win_ratio_score, total_win_ratio_score, 
+        (stock_code, stock_name, stock_nature, date, day_win_ratio_score, week_win_ratio_score, total_win_ratio_score, 
          support_price, pressure_price, volume_type, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         ON DUPLICATE KEY UPDATE
+            stock_name = VALUES(stock_name),
+            stock_nature = VALUES(stock_nature),
             day_win_ratio_score = VALUES(day_win_ratio_score),
             week_win_ratio_score = VALUES(week_win_ratio_score),
             total_win_ratio_score = VALUES(total_win_ratio_score),
@@ -197,7 +219,9 @@ def save_to_database(stock_code: str, table_name: str, api_data: List[Dict]) -> 
         
         cursor.execute(upsert_sql, (
             stock_code,
-            date_str,
+            stock_name,
+            stock_nature,
+            date_only,  # 使用处理后的日期（只有年月日）
             day_win_ratio_score,
             week_win_ratio_score,
             total_win_ratio_score,
@@ -209,7 +233,7 @@ def save_to_database(stock_code: str, table_name: str, api_data: List[Dict]) -> 
         connection.commit()
         saved_count = 1
         
-        logger.info(f"✅ {stock_code} {date_str} - 赔率总分:{total_win_ratio_score:.2f}, 成交量类型:{volume_type or '无'}")
+        logger.info(f"✅ {stock_code} {date_only} - 赔率总分:{total_win_ratio_score:.2f}, 成交量:{volume_for_calc:.2f}, 成交量类型:{volume_type or '无'}")
         
     except Exception as e:
         logger.error(f"保存数据库失败: {stock_code}, {e}", exc_info=True)
@@ -220,6 +244,58 @@ def save_to_database(stock_code: str, table_name: str, api_data: List[Dict]) -> 
             connection.close()
     
     return saved_count
+
+
+def refresh_pattern_for_date(connection, stock_code: str, stock_name: str, table_name: str, date_str: str) -> bool:
+    """
+    刷新指定日期的多头空头组合
+    
+    Args:
+        connection: 数据库连接
+        stock_code: 股票代码
+        stock_name: 股票名称
+        table_name: K线表名
+        date_str: 日期字符串（YYYY-MM-DD）
+        
+    Returns:
+        是否成功
+    """
+    if not PATTERN_SERVICES_AVAILABLE:
+        return False
+    
+    try:
+        # 计算多头组合
+        bullish_patterns = BullishPatternService.identify_bullish_patterns(
+            stock_code=stock_code,
+            table_name=table_name,
+            target_date=date_str
+        )
+        bullish_pattern_str = ','.join(bullish_patterns) if bullish_patterns else ''
+        
+        # 计算空头组合
+        bearish_patterns = BearishPatternService.identify_bearish_patterns(
+            stock_code=stock_code,
+            table_name=table_name,
+            target_date=date_str
+        )
+        bearish_pattern_str = ','.join(bearish_patterns) if bearish_patterns else ''
+        
+        # 更新到数据库
+        cursor = connection.cursor()
+        update_sql = """
+            UPDATE b_daily_chance 
+            SET bullish_pattern = %s, bearish_pattern = %s 
+            WHERE stock_code = %s AND date = %s
+        """
+        cursor.execute(update_sql, (bullish_pattern_str, bearish_pattern_str, stock_code, date_str))
+        connection.commit()
+        
+        logger.info(f"  ✅ 组合: 多头={bullish_pattern_str or '无'}, 空头={bearish_pattern_str or '无'}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"  ❌ 刷新组合失败: {stock_code} {date_str}, {e}")
+        return False
 
 
 def sync_daily_chance_job():
@@ -234,7 +310,15 @@ def sync_daily_chance_job():
     logger.info(f"共需处理 {len(stocks)} 支股票")
     
     success_count = 0
+    pattern_success_count = 0
     failed_stocks = []
+    
+    # 建立数据库连接（用于刷新组合）
+    connection = None
+    try:
+        connection = pymysql.connect(**MASTER_DB_CONFIG)
+    except Exception as e:
+        logger.error(f"连接数据库失败: {e}")
     
     # 逐个处理股票
     for i, stock in enumerate(stocks, 1):
@@ -253,10 +337,26 @@ def sync_daily_chance_job():
                 continue
             
             # 保存到数据库（只保存最新1天）
-            saved = save_to_database(stock_code, table_name, api_data)
+            saved = save_to_database(stock_code, stock['name'], stock['nature'], table_name, api_data)
             
             if saved > 0:
                 success_count += 1
+                
+                # 刷新组合数据（仅刷新最新一天）
+                if connection and api_data:
+                    latest_record = api_data[0]
+                    date_str = latest_record.get('day', '')
+                    if date_str:
+                        date_only = date_str.split(' ')[0] if ' ' in date_str else date_str
+                        pattern_updated = refresh_pattern_for_date(
+                            connection, 
+                            stock_code, 
+                            stock['name'], 
+                            table_name, 
+                            date_only
+                        )
+                        if pattern_updated:
+                            pattern_success_count += 1
             else:
                 failed_stocks.append(stock_code)
                 
@@ -264,10 +364,15 @@ def sync_daily_chance_job():
             logger.error(f"  ❌ 处理失败: {e}")
             failed_stocks.append(stock_code)
     
+    # 关闭数据库连接
+    if connection:
+        connection.close()
+    
     # 输出汇总
     logger.info("=" * 80)
     logger.info(f"✅ 定时任务完成")
-    logger.info(f"成功: {success_count}/{len(stocks)}")
+    logger.info(f"每日机会数据: {success_count}/{len(stocks)} 成功")
+    logger.info(f"组合数据: {pattern_success_count}/{success_count} 成功")
     if failed_stocks:
         logger.warning(f"失败的股票 ({len(failed_stocks)}): {', '.join(failed_stocks)}")
     logger.info("=" * 80)
