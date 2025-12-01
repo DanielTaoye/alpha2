@@ -1120,6 +1120,17 @@ function renderChart(klineData, analysisData, period) {
         console.log(`[${period}] 数据准备完成 - 日期数:${dates.length}, K线数:${values.length}, 成交量数:${volumes.length}`);
 
         const latestData = klineData[klineData.length - 1] || {};
+        
+        // 记录最新一天的日期（用于tooltip中判断）
+        const latestDate = dates.length > 0 ? dates[dates.length - 1].split(' ')[0] : null;
+        
+        // 找到前一交易日的日期（用于最新一天的tooltip显示）
+        let previousTradingDate = null;
+        if (dates.length >= 2) {
+            previousTradingDate = dates[dates.length - 2].split(' ')[0];
+        }
+        
+        console.log(`[${period}] 最新日期: ${latestDate}, 前一交易日: ${previousTradingDate}`);
 
         const supportLine = (analysisData && analysisData.supportPrice) ? 
             Array(dates.length).fill(analysisData.supportPrice) : null;
@@ -1232,12 +1243,19 @@ function renderChart(klineData, analysisData, period) {
                             
                             // 显示赔率总分、成交量总分、成交量类型（仅日K线）
                             if (period === 'day') {
-                                const winRatioScore = winRatioScoreMap[dateOnly];
-                                const volumeType = volumeTypeMap[dateOnly];
+                                // 判断当前日期是否是最新一天
+                                const isLatestDate = (dateOnly === latestDate);
                                 
-                                // 显示赔率总分
+                                // 如果是最新一天，使用前一交易日的数据；否则使用当天的数据
+                                const dateForData = isLatestDate && previousTradingDate ? previousTradingDate : dateOnly;
+                                
+                                const winRatioScore = winRatioScoreMap[dateForData];
+                                const volumeType = volumeTypeMap[dateOnly]; // 成交量类型仍使用当天的
+                                
+                                // 显示赔率总分（最新一天显示前一交易日的）
                                 if (winRatioScore !== undefined && winRatioScore !== null) {
-                                    result += `<span style="color: #2196F3;">赔率总分: ${winRatioScore.toFixed(2)}</span><br/>`;
+                                    const label = isLatestDate ? '赔率总分(前一日)' : '赔率总分';
+                                    result += `<span style="color: #2196F3;">${label}: ${winRatioScore.toFixed(2)}</span><br/>`;
                                 }
                                 
                                 // 计算并显示成交量总分
@@ -1359,20 +1377,29 @@ function renderChart(klineData, analysisData, period) {
                         if (params[0] && params[0].name) {
                             const dateStr = params[0].name;
                             const dateOnly = dateStr.split(' ')[0];
-                            const supportPrice = supportPriceMap[dateOnly];
-                            const pressurePrice = pressurePriceMap[dateOnly];
+                            
+                            // 判断当前日期是否是最新一天
+                            const isLatestDate = (dateOnly === latestDate);
+                            
+                            // 如果是最新一天，使用前一交易日的数据；否则使用当天的数据
+                            const dateForData = isLatestDate && previousTradingDate ? previousTradingDate : dateOnly;
+                            
+                            const supportPrice = supportPriceMap[dateForData];
+                            const pressurePrice = pressurePriceMap[dateForData];
                             
                             if (supportPrice !== undefined || pressurePrice !== undefined) {
+                                const labelSuffix = isLatestDate ? '(前一日)' : '';
+                                
                                 if (supportPrice !== undefined && supportPrice !== null) {
                                     // 数据库存储的是整数，需要除以100转换为实际价格
                                     const actualSupportPrice = supportPrice / 100;
-                                    result += `<span style="color: #26a69a; font-weight: bold;">支撑线: ${actualSupportPrice.toFixed(2)}</span><br/>`;
+                                    result += `<span style="color: #26a69a; font-weight: bold;">支撑线${labelSuffix}: ${actualSupportPrice.toFixed(2)}</span><br/>`;
                                 }
                                 
                                 if (pressurePrice !== undefined && pressurePrice !== null) {
                                     // 数据库存储的是整数，需要除以100转换为实际价格
                                     const actualPressurePrice = pressurePrice / 100;
-                                    result += `<span style="color: #ef5350; font-weight: bold;">压力线: ${actualPressurePrice.toFixed(2)}</span><br/>`;
+                                    result += `<span style="color: #ef5350; font-weight: bold;">压力线${labelSuffix}: ${actualPressurePrice.toFixed(2)}</span><br/>`;
                                 }
                             }
                         }
