@@ -19,6 +19,8 @@ from interfaces.controllers.cr_point_controller import CRPointController
 from interfaces.controllers.daily_chance_controller import DailyChanceController
 from interfaces.controllers.config_controller import ConfigController
 from interfaces.controllers.backtest_controller import BacktestController
+from interfaces.controllers.latest_cr_point_controller import LatestCRPointController
+from interfaces.controllers.cache_controller import CacheController
 from infrastructure.config.app_config import SERVER_CONFIG
 
 # 初始化日志
@@ -36,6 +38,8 @@ cr_point_controller = CRPointController()
 daily_chance_controller = DailyChanceController()
 config_controller = ConfigController()
 backtest_controller = BacktestController()
+latest_cr_point_controller = LatestCRPointController()
+cache_controller = CacheController()
 
 
 # ============ 路由定义 ============
@@ -151,6 +155,37 @@ def get_config():
     return config_controller.get_config()
 
 
+@app.route('/api/latest_cr_points', methods=['POST'])
+def get_latest_cr_points():
+    """获取最新一天的CR点"""
+    return latest_cr_point_controller.get_latest_cr_points()
+
+
+# ============= 缓存管理接口 =============
+@app.route('/api/cache/info', methods=['GET', 'POST'])
+def get_cache_info():
+    """获取缓存信息"""
+    return cache_controller.get_cache_info()
+
+
+@app.route('/api/cache/update', methods=['POST'])
+def update_cache():
+    """手动更新缓存"""
+    return cache_controller.update_cache()
+
+
+@app.route('/api/cache/init', methods=['POST'])
+def init_cache():
+    """初始化缓存"""
+    return cache_controller.init_cache()
+
+
+@app.route('/api/cache/clear', methods=['POST'])
+def clear_cache():
+    """清空所有缓存"""
+    return cache_controller.clear_cache()
+
+
 @app.route('/api/config', methods=['POST'])
 def update_config():
     """更新策略配置"""
@@ -177,6 +212,46 @@ if __name__ == '__main__':
     logger.info(f"服务器地址: {SERVER_CONFIG['host']}:{SERVER_CONFIG['port']}")
     logger.info(f"调试模式: {SERVER_CONFIG['debug']}")
     logger.info("=" * 50)
+    
+    # 初始化全局CR缓存（后台线程异步初始化，不阻塞启动）
+    try:
+        import threading
+        import json
+        import os
+        from application.services.cr_cache_manager import get_cr_cache_manager
+        
+        def init_cache_async():
+            """异步初始化缓存"""
+            try:
+                logger.info("🚀 开始异步初始化CR全局缓存...")
+                
+                # 加载股票配置
+                config_path = os.path.join(os.path.dirname(__file__), 'infrastructure/config/stock_config.json')
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                # 收集所有股票代码
+                stock_codes = []
+                for nature, stock_list in config.items():
+                    for stock in stock_list:
+                        stock_codes.append(stock['code'])
+                
+                # 初始化缓存
+                cache_manager = get_cr_cache_manager()
+                cache_manager.init_all_stocks(stock_codes, days=30)
+                
+                logger.info("✅ CR全局缓存初始化完成")
+                
+            except Exception as e:
+                logger.error(f"❌ CR全局缓存初始化失败: {e}", exc_info=True)
+        
+        # 启动后台线程初始化缓存
+        cache_thread = threading.Thread(target=init_cache_async, daemon=True)
+        cache_thread.start()
+        logger.info("📌 CR缓存初始化线程已启动（后台运行）")
+        
+    except Exception as e:
+        logger.error(f"❌ 启动CR缓存初始化失败: {e}", exc_info=True)
     
     try:
         app.run(

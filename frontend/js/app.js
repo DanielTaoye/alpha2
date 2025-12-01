@@ -814,14 +814,29 @@ async function loadVolumeTypes(stockCode) {
         let totalDataCount = 0;
         
         if (result.data && Array.isArray(result.data)) {
+            // 找出最新日期（用于排除最新一天的成交量类型）
+            let latestDateInData = null;
+            result.data.forEach(item => {
+                if (item.date) {
+                    const dateStr = item.date.split(' ')[0];
+                    if (!latestDateInData || dateStr > latestDateInData) {
+                        latestDateInData = dateStr;
+                    }
+                }
+            });
+            
             result.data.forEach(item => {
                 if (item.date) {
                     totalDataCount++;
                     // 处理日期格式，确保是 YYYY-MM-DD 格式
                     const dateStr = item.date.split(' ')[0];
-                    if (item.volumeType) {
+                    
+                    // ⚠️ 最新一天的成交量类型不从数据库读取，而是基于预测成交量实时计算
+                    // 所以这里排除最新一天，避免显示基于历史成交量计算的错误类型
+                    if (item.volumeType && dateStr !== latestDateInData) {
                         volumeTypeMap[dateStr] = item.volumeType;
                     }
+                    
                     if (item.totalWinRatioScore !== undefined && item.totalWinRatioScore !== null) {
                         winRatioScoreMap[dateStr] = item.totalWinRatioScore;
                     }
@@ -1305,7 +1320,18 @@ function renderChart(klineData, analysisData, period) {
                                 const winRatioScore = winRatioScoreMap[dateForData];
                                 
                                 // 成交量类型：最新一天使用实时计算的，历史数据使用数据库的
-                                const volumeType = isLatestDate && predictedVolumeType ? predictedVolumeType : volumeTypeMap[dateOnly];
+                                let volumeType = null;
+                                let volumeTypeLabel = '成交量类型';
+                                
+                                if (isLatestDate) {
+                                    // 最新一天：使用实时计算的成交量类型
+                                    volumeType = predictedVolumeType;
+                                    volumeTypeLabel = '成交量类型(实时)';
+                                } else {
+                                    // 历史数据：使用数据库中的成交量类型
+                                    volumeType = volumeTypeMap[dateOnly];
+                                    volumeTypeLabel = '成交量类型';
+                                }
                                 
                                 // 显示赔率总分（最新一天显示前一交易日的）
                                 if (winRatioScore !== undefined && winRatioScore !== null) {
@@ -1313,7 +1339,7 @@ function renderChart(klineData, analysisData, period) {
                                     result += `<span style="color: #2196F3;">${label}: ${winRatioScore.toFixed(2)}</span><br/>`;
                                 }
                                 
-                                // 计算并显示成交量总分
+                                // 计算并显示成交量总分和类型
                                 if (volumeType) {
                                     function calculateVolumeScore(volumeType) {
                                         if (!volumeType) return 0;
@@ -1328,8 +1354,11 @@ function renderChart(klineData, analysisData, period) {
                                     
                                     // 显示成交量类型（只显示字母）
                                     const types = volumeType.split(',').map(t => t.trim());
-                                    const typeLabel = isLatestDate && predictedVolumeType ? '成交量类型(实时)' : '成交量类型';
-                                    result += `<span style="color: #2196F3; font-weight: bold;">${typeLabel}: ${types.join(', ')}</span><br/>`;
+                                    const displayColor = isLatestDate ? '#FFD700' : '#2196F3'; // 最新一天用金色突出显示
+                                    result += `<span style="color: ${displayColor}; font-weight: bold;">${volumeTypeLabel}: ${types.join(', ')}</span><br/>`;
+                                } else if (isLatestDate) {
+                                    // 最新一天如果没有成交量类型（还在计算中或计算失败）
+                                    result += `<span style="color: #999; font-weight: bold;">成交量类型(实时): 计算中...</span><br/>`;
                                 }
                             }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {

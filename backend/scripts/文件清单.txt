@@ -1,0 +1,91 @@
+===============================================
+定时任务完整文件清单
+===============================================
+
+✅ 核心文件
+-----------
+1. daily_chance_scheduler.py              - 定时任务主程序（每天17:00执行）
+2. daily_chance_scheduler_test.py         - 测试脚本（立即执行一次）
+
+✅ Linux脚本
+-----------
+3. start_daily_chance_scheduler.sh        - 启动服务
+4. stop_daily_chance_scheduler.sh         - 停止服务
+5. check_scheduler_status.sh              - 查看状态
+6. test_sync_once.sh                      - 测试执行
+
+✅ Windows脚本（本地测试用）
+-----------
+7. test_sync_windows.bat                  - Windows测试脚本
+
+✅ 文档
+-----------
+8. README_定时任务部署说明.md            - 完整部署说明
+9. 部署到服务器.md                        - 快速部署指南
+10. 文件清单.txt                          - 本文件
+
+✅ 依赖配置
+-----------
+已在 requirements.txt 中包含：
+- APScheduler==3.10.4
+
+===============================================
+目录结构
+===============================================
+
+backend/scripts/
+├── daily_chance_scheduler.py          # 主程序
+├── daily_chance_scheduler_test.py     # 测试
+├── start_daily_chance_scheduler.sh    # 启动
+├── stop_daily_chance_scheduler.sh     # 停止
+├── check_scheduler_status.sh          # 状态
+├── test_sync_once.sh                  # 测试
+├── test_sync_windows.bat              # Windows测试
+├── README_定时任务部署说明.md
+├── 部署到服务器.md
+├── 文件清单.txt
+└── logs/                              # 日志目录（自动创建）
+    ├── daily_chance_scheduler.log     # 任务日志
+    ├── scheduler_output.log           # 输出日志
+    └── scheduler.pid                  # 进程PID
+
+===============================================
+功能说明
+===============================================
+
+✅ 自动执行时间：每天 17:00
+✅ 更新范围：59支股票最新1天数据
+✅ 更新内容：
+   - 日线赔率得分
+   - 周线赔率得分
+   - 赔率总分
+   - 支撑线
+   - 压力线
+   - 成交量类型（实时计算）
+
+✅ 数据来源：http://121.5.174.81:8005/stock/getDailyChanceWithBeauty
+✅ 目标数据库：sh-cdb-2hxu41ka.sql.tencentcdb.com:21648（生产主库）
+✅ 目标表：b_daily_chance
+
+===============================================
+快速使用
+===============================================
+
+【Linux服务器】
+1. 上传文件
+2. chmod +x *.sh
+3. bash test_sync_once.sh          # 测试
+4. bash start_daily_chance_scheduler.sh  # 启动
+5. bash check_scheduler_status.sh  # 查看状态
+
+【Windows本地测试】
+1. 双击 test_sync_windows.bat
+
+【查看日志】
+tail -f logs/daily_chance_scheduler.log
+
+【停止服务】
+bash stop_daily_chance_scheduler.sh
+
+===============================================
+

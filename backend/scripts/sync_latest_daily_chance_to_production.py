@@ -99,7 +99,7 @@ def calculate_volume_type(table_name: str, predicted_volume: float) -> str:
 def save_to_database(stock_code: str, stock_name: str, stock_nature: str, 
                      api_data: List[Dict], volume_type_map: Dict[str, str]) -> int:
     """
-    保存到数据库（只保存最近7天的数据）
+    保存到数据库（只保存最近5天的数据）
     
     Args:
         stock_code: 股票代码
@@ -115,10 +115,10 @@ def save_to_database(stock_code: str, stock_name: str, stock_nature: str,
         return 0
     
     try:
-        # 计算7天前的日期
+        # 计算5天前的日期
         from datetime import datetime, timedelta
-        seven_days_ago = datetime.now() - timedelta(days=7)
-        seven_days_ago_str = seven_days_ago.strftime('%Y-%m-%d')
+        five_days_ago = datetime.now() - timedelta(days=5)
+        five_days_ago_str = five_days_ago.strftime('%Y-%m-%d')
         
         # 使用生产主库连接
         conn = pymysql.connect(**MASTER_DB_CONFIG)
@@ -156,8 +156,8 @@ def save_to_database(stock_code: str, stock_name: str, stock_nature: str,
                     
                     date_only = date_str.split()[0]  # "2024-06-07 00:00:00" -> "2024-06-07"
                     
-                    # 只保存最近7天的数据
-                    if date_only < seven_days_ago_str:
+                    # 只保存最近5天的数据
+                    if date_only < five_days_ago_str:
                         skipped_count += 1
                         continue
                     
@@ -198,7 +198,7 @@ def save_to_database(stock_code: str, stock_name: str, stock_nature: str,
             
             conn.commit()
             if skipped_count > 0:
-                logger.info(f"    跳过 {skipped_count} 条历史数据（超过7天）")
+                logger.info(f"    跳过 {skipped_count} 条历史数据（超过5天）")
             return saved_count
         finally:
             conn.close()
@@ -213,7 +213,7 @@ def parse_win_ratio_description(description: str) -> tuple:
     解析赔率描述
     
     Args:
-        description: 例如 "日：18.7 周：18.96 总：37.66"
+        description: 例如 "【此为波段赔率算法】日线赔率得分：29.23，周线赔率得分：6.26，赔率总分：35.49"
         
     Returns:
         (day_score, week_score, total_score)
@@ -225,18 +225,18 @@ def parse_win_ratio_description(description: str) -> tuple:
     total_score = 0.0
     
     try:
-        # 匹配 "日：18.7"
-        day_match = re.search(r'日[：:]\s*([\d.]+)', description)
+        # 匹配 "日线赔率得分：29.23"
+        day_match = re.search(r'日线赔率得分[：:]\s*([\d.]+)', description)
         if day_match:
             day_score = float(day_match.group(1))
         
-        # 匹配 "周：18.96"
-        week_match = re.search(r'周[：:]\s*([\d.]+)', description)
+        # 匹配 "周线赔率得分：6.26"
+        week_match = re.search(r'周线赔率得分[：:]\s*([\d.]+)', description)
         if week_match:
             week_score = float(week_match.group(1))
         
-        # 匹配 "总：37.66"
-        total_match = re.search(r'总[：:]\s*([\d.]+)', description)
+        # 匹配 "赔率总分：35.49"
+        total_match = re.search(r'赔率总分[：:]\s*([\d.]+)', description)
         if total_match:
             total_score = float(total_match.group(1))
     
