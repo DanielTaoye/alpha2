@@ -88,7 +88,7 @@ class KLineController:
         except Exception as e:
             logger.error(f"预测成交量失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
             return jsonify(ResponseBuilder.error(str(e))), 500
-    
+
     def predict_volume_type(self):
         """从数据库获取最新的成交量类型（直接读取b_daily_chance表）"""
         try:
