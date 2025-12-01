@@ -557,8 +557,9 @@ async function fetchPredictedVolume(tableName) {
             console.log(`[预测成交量] ✅ 成功: 当前=${data.current_volume?.toFixed(2)}, 预测=${data.predicted_volume?.toFixed(2)}, 比例=${data.ratio?.toFixed(2)}`);
             
             // 获取预测成交量后，立即计算成交量类型
-            console.log(`[预测成交量] 📌 准备调用成交量类型接口...`);
-            await fetchPredictedVolumeType(tableName, data.predicted_volume);
+            fetchPredictedVolumeType(tableName, data.predicted_volume).catch(err => {
+                console.error('[预测成交量类型] 计算失败:', err);
+            });
             
             return data.predicted_volume;
         } else {
@@ -574,7 +575,6 @@ async function fetchPredictedVolume(tableName) {
 
 // 基于预测成交量计算成交量类型
 async function fetchPredictedVolumeType(tableName, predictedVol) {
-    console.log(`🔵🔵🔵 [预测成交量类型-函数入口] tableName=${tableName}, predictedVol=${predictedVol}`);
     try {
         console.log(`[预测成交量类型] 开始请求: ${tableName}, 预测成交量=${predictedVol}`);
         
@@ -601,12 +601,13 @@ async function fetchPredictedVolumeType(tableName, predictedVol) {
         }
         
         const data = result.data;
-        if (data.volume_type) {
+        // 后端返回空字符串""表示无类型，统一转换为'NONE'
+        if (data.volume_type && data.volume_type !== '') {
             predictedVolumeType = data.volume_type;
             console.log(`[预测成交量类型] ✅ 成功: ${predictedVolumeType}`);
         } else {
-            predictedVolumeType = null;
-            console.log(`[预测成交量类型] 未匹配任何类型`);
+            predictedVolumeType = 'NONE'; // null或空字符串都转换为'NONE'
+            console.log(`[预测成交量类型] ⚠️ 未匹配任何类型（后端返回: ${data.volume_type}）`);
         }
         
     } catch (error) {
@@ -1340,7 +1341,7 @@ function renderChart(klineData, analysisData, period) {
                                 }
                                 
                                 // 计算并显示成交量总分和类型
-                                if (volumeType) {
+                                if (volumeType && volumeType !== 'NONE') {
                                     function calculateVolumeScore(volumeType) {
                                         if (!volumeType) return 0;
                                         const types = volumeType.split(',').map(t => t.trim());
@@ -1356,9 +1357,12 @@ function renderChart(klineData, analysisData, period) {
                                     const types = volumeType.split(',').map(t => t.trim());
                                     const displayColor = isLatestDate ? '#FFD700' : '#2196F3'; // 最新一天用金色突出显示
                                     result += `<span style="color: ${displayColor}; font-weight: bold;">${volumeTypeLabel}: ${types.join(', ')}</span><br/>`;
+                                } else if (volumeType === 'NONE') {
+                                    // 未匹配任何成交量类型
+                                    result += `<span style="color: #999;">成交量类型: 无</span><br/>`;
                                 } else if (isLatestDate) {
-                                    // 最新一天如果没有成交量类型（还在计算中或计算失败）
-                                    result += `<span style="color: #999; font-weight: bold;">成交量类型(实时): 计算中...</span><br/>`;
+                                    // 最新一天如果还在计算中（null或undefined）
+                                    result += `<span style="color: #999;">成交量类型(实时): 计算中...</span><br/>`;
                                 }
                             }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {

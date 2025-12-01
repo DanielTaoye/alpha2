@@ -128,19 +128,19 @@ class KLineController:
                     for i, r in enumerate(results):
                         logger.info(f"  [{i}] 日期={r['date']}, stock_code={r['stock_code']}, volume_type={r['volume_type']}")
                 
-                volume_type = None
-                if results and results[0]['volume_type']:
-                    volume_type = results[0]['volume_type']
-                    latest_date = results[0]['date']
-                    logger.info(f"✅ 从数据库读取成交量类型: {volume_type}, 日期: {latest_date}")
+            volume_type = ''  # 默认为空字符串而不是None
+            if results and results[0]['volume_type']:
+                volume_type = results[0]['volume_type']
+                latest_date = results[0]['date']
+                logger.info(f"✅ 从数据库读取成交量类型: {volume_type}, 日期: {latest_date}")
+            else:
+                if not results:
+                    logger.warning(f"⚠️ 未找到任何数据: stock_code={stock_code}")
                 else:
-                    if not results:
-                        logger.warning(f"⚠️ 未找到任何数据: stock_code={stock_code}")
-                    else:
-                        logger.warning(f"⚠️ 找到数据但volume_type为空: stock_code={stock_code}, 日期={results[0]['date']}")
+                    logger.warning(f"⚠️ 找到数据但volume_type为空: stock_code={stock_code}, 日期={results[0]['date']}")
             
             result = {
-                'volume_type': volume_type,
+                'volume_type': volume_type,  # 返回空字符串而不是null
                 'predicted_volume': predicted_volume
             }
             
