@@ -88,4 +88,38 @@ class KLineController:
         except Exception as e:
             logger.error(f"预测成交量失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
             return jsonify(ResponseBuilder.error(str(e))), 500
+    
+    def predict_volume_type(self):
+        """基于预测成交量计算成交量类型"""
+        try:
+            from domain.services.volume_type_service import VolumeTypeService
+            
+            data = request.json
+            table_name = data.get('table_name')
+            predicted_volume = data.get('predicted_volume')
+            
+            if not table_name or not predicted_volume:
+                return jsonify(ResponseBuilder.error("缺少参数: table_name 或 predicted_volume")), 400
+            
+            logger.info(f"收到请求: 预测成交量类型, 表名={table_name}, 预测成交量={predicted_volume}")
+            
+            volume_type = VolumeTypeService.calculate_volume_type_with_predicted(
+                table_name, float(predicted_volume)
+            )
+            
+            result = {
+                'volume_type': volume_type,
+                'predicted_volume': predicted_volume
+            }
+            
+            if volume_type:
+                logger.info(f"成功计算成交量类型: {volume_type}")
+            else:
+                logger.info(f"未匹配任何成交量类型")
+            
+            return jsonify(ResponseBuilder.success(result))
+        
+        except Exception as e:
+            logger.error(f"预测成交量类型失败: 表名={table_name}, 错误={str(e)}", exc_info=True)
+            return jsonify(ResponseBuilder.error(str(e))), 500
 

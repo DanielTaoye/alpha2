@@ -13,6 +13,243 @@ class VolumeTypeService:
     """成交量类型计算服务"""
     
     @staticmethod
+    def calculate_volume_type_with_predicted(table_name: str, predicted_volume: float) -> Optional[str]:
+        """
+        基于预测成交量计算最新一天的成交量类型（实时计算）
+        
+        Args:
+            table_name: 股票表名
+            predicted_volume: 预测的成交量
+            
+        Returns:
+            成交量类型: 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z' 或多个类型用逗号连接
+        """
+        try:
+            from datetime import datetime, timedelta
+            
+            # 获取最新交易日期
+            period_code = PeriodService.get_period_code('day')
+            
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                
+                # 获取最新的日K线日期
+                query = f"""
+                    SELECT MAX(shi_jian) as latest_date
+                    FROM {table_name}
+                    WHERE peroid_type = %s
+                """
+                cursor.execute(query, (period_code,))
+                result = cursor.fetchone()
+                
+                if not result or not result['latest_date']:
+                    logger.warning(f"未找到日K线数据: {table_name}")
+                    return None
+                
+                latest_date = result['latest_date']
+                if isinstance(latest_date, str):
+                    latest_date = datetime.strptime(latest_date, '%Y-%m-%d')
+            
+            # 获取历史15天的数据（用于计算类型Z需要前10天）
+            start_date = latest_date - timedelta(days=15)
+            daily_data = VolumeTypeService._get_daily_volumes(
+                table_name, start_date, latest_date
+            )
+            
+            if not daily_data or len(daily_data) < 2:
+                logger.warning(f"历史数据不足: {table_name}")
+                return None
+            
+            # 按日期排序（从旧到新）
+            daily_data.sort(key=lambda x: x['date'])
+            
+            # 在末尾添加预测数据（作为"今天"）
+            today_date = latest_date + timedelta(days=1)
+            daily_data.append({
+                'date': today_date,
+                'volume': int(predicted_volume)
+            })
+            
+            # 目标索引是最后一个（预测的今天）
+            target_idx = len(daily_data) - 1
+            target_volume = predicted_volume
+            
+            # 收集所有匹配的类型
+            matched_types = []
+            
+            # 计算类型A: 当日为前1日成交均量的2倍-3倍
+            if target_idx >= 1:
+                prev_volume = daily_data[target_idx - 1]['volume']
+                if prev_volume > 0:
+                    ratio = target_volume / prev_volume
+                    if 2.0 <= ratio <= 3.0:
+                        matched_types.append('A')
+            
+            # 计算类型B: 当日为前3日成交均量的2倍及以上
+            if target_idx >= 3:
+                prev_3_volumes = [daily_data[i]['volume'] for i in range(target_idx - 3, target_idx)]
+                avg_volume = sum(prev_3_volumes) / len(prev_3_volumes)
+                if avg_volume > 0:
+                    ratio = target_volume / avg_volume
+                    if ratio >= 2.0:
+                        matched_types.append('B')
+            
+            # 计算类型C: 当日为前5日成交均量的2倍及以上
+            if target_idx >= 5:
+                prev_5_volumes = [daily_data[i]['volume'] for i in range(target_idx - 5, target_idx)]
+                avg_volume = sum(prev_5_volumes) / len(prev_5_volumes)
+                if avg_volume > 0:
+                    ratio = target_volume / avg_volume
+                    if ratio >= 2.0:
+                        matched_types.append('C')
+            
+            # 计算类型D: 前五日出现过ABC任意一种放量，标记为X日，今日的成交量为X日的1.2倍以上
+            if target_idx >= 5:
+                x_day_volume = None
+                for i in range(max(0, target_idx - 5), target_idx):
+                    check_volume_type = VolumeTypeService._check_abc_volume_type(daily_data, i)
+                    if check_volume_type in ['A', 'B', 'C']:
+                        x_day_volume = daily_data[i]['volume']
+                        break
+                
+                if x_day_volume and x_day_volume > 0:
+                    ratio = target_volume / x_day_volume
+                    if ratio >= 1.2:
+                        matched_types.append('D')
+            
+            # 计算类型E: 当日为前1日以及前五日均值的4倍以上（前五日未出现ABCD任何一种放量）
+            if target_idx >= 5:
+                has_abcd_in_prev_5 = False
+                for i in range(max(0, target_idx - 5), target_idx):
+                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
+                        has_abcd_in_prev_5 = True
+                        break
+                
+                if not has_abcd_in_prev_5:
+                    prev_volume = daily_data[target_idx - 1]['volume'] if target_idx >= 1 else 0
+                    prev_5_volumes = [daily_data[i]['volume'] for i in range(target_idx - 5, target_idx)]
+                    avg_5_volume = sum(prev_5_volumes) / len(prev_5_volumes)
+                    
+                    if prev_volume > 0 and avg_5_volume > 0:
+                        ratio_to_prev = target_volume / prev_volume
+                        ratio_to_avg5 = target_volume / avg_5_volume
+                        if ratio_to_prev >= 4.0 and ratio_to_avg5 >= 4.0:
+                            matched_types.append('E')
+            
+            # 计算类型F
+            if target_idx >= 5:
+                x_day_volume = None
+                for i in range(max(0, target_idx - 5), target_idx):
+                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
+                        x_day_volume = daily_data[i]['volume']
+                        break
+                
+                prev_5_volumes = [daily_data[i]['volume'] for i in range(target_idx - 5, target_idx)]
+                avg_5_volume = sum(prev_5_volumes) / len(prev_5_volumes)
+                
+                condition1 = False
+                if x_day_volume and x_day_volume > 0:
+                    ratio = target_volume / x_day_volume
+                    if ratio >= 3.0:
+                        condition1 = True
+                
+                condition2 = False
+                if avg_5_volume > 0:
+                    ratio = target_volume / avg_5_volume
+                    if ratio >= 3.0:
+                        condition2 = True
+                
+                if condition1 or condition2:
+                    matched_types.append('F')
+            
+            # 计算类型G
+            if target_idx >= 5:
+                for i in range(max(0, target_idx - 5), target_idx):
+                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
+                        x_day_volume = daily_data[i]['volume']
+                        if x_day_volume > 0:
+                            ratio = target_volume / x_day_volume
+                            if ratio >= 0.7:
+                                matched_types.append('G')
+                                break
+            
+            # 计算类型H
+            if target_idx >= 5:
+                for i in range(max(0, target_idx - 5), target_idx):
+                    check_types = VolumeTypeService._check_all_volume_types(daily_data, i)
+                    if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
+                        x_day_volume = daily_data[i]['volume']
+                        if target_volume > x_day_volume:
+                            matched_types.append('H')
+                            break
+            
+            # 计算类型X: 当日为前3日成交均量的1.5倍及以上
+            if target_idx >= 3:
+                prev_3_volumes = [daily_data[i]['volume'] for i in range(target_idx - 3, target_idx)]
+                avg_volume = sum(prev_3_volumes) / len(prev_3_volumes)
+                if avg_volume > 0:
+                    ratio = target_volume / avg_volume
+                    if ratio >= 1.5:
+                        matched_types.append('X')
+            
+            # 计算类型Y: 当日为前5日成交均量的1.5倍及以上
+            if target_idx >= 5:
+                prev_5_volumes = [daily_data[i]['volume'] for i in range(target_idx - 5, target_idx)]
+                avg_volume = sum(prev_5_volumes) / len(prev_5_volumes)
+                if avg_volume > 0:
+                    ratio = target_volume / avg_volume
+                    if ratio >= 1.5:
+                        matched_types.append('Y')
+            
+            # 计算类型Z
+            if target_idx >= 10:
+                has_abc_in_prev_10 = False
+                for i in range(max(0, target_idx - 10), target_idx):
+                    check_types = VolumeTypeService._check_abc_volume_type(daily_data, i)
+                    if check_types in ['A', 'B', 'C']:
+                        has_abc_in_prev_10 = True
+                        break
+                
+                if has_abc_in_prev_10 and target_idx >= 4:
+                    yesterday_volume = daily_data[target_idx - 1]['volume']
+                    prev_3_volumes = [daily_data[i]['volume'] for i in range(target_idx - 4, target_idx - 1)]
+                    avg_3_volume = sum(prev_3_volumes) / len(prev_3_volumes)
+                    
+                    condition1 = False
+                    if avg_3_volume > 0:
+                        ratio = yesterday_volume / avg_3_volume
+                        if ratio >= 1.3:
+                            condition1 = True
+                    
+                    condition2 = False
+                    if yesterday_volume > 0:
+                        ratio = target_volume / yesterday_volume
+                        if ratio >= 1.08:
+                            condition2 = True
+                    
+                    if condition1 and condition2:
+                        matched_types.append('Z')
+            
+            # 返回所有匹配的类型
+            if matched_types:
+                seen = set()
+                unique_types = []
+                for t in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
+                    if t in matched_types and t not in seen:
+                        unique_types.append(t)
+                        seen.add(t)
+                return ','.join(unique_types)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"基于预测成交量计算类型失败: {table_name}: {e}", exc_info=True)
+            return None
+    
+    @staticmethod
     def calculate_volume_type(table_name: str, target_date: datetime) -> Optional[str]:
         """
         计算指定日期的成交量类型
@@ -391,7 +628,7 @@ class VolumeTypeService:
                 return [
                     {
                         'date': row['date'],
-                        'volume': int(row['volume']) if row['volume'] else 0
+                        'volume': int(row['volume']) / 100 if row['volume'] else 0  # 数据库存储需要除以100
                     }
                     for row in results
                 ]

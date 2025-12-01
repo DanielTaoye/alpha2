@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试成交量类型接口</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            padding: 20px;
+            background: #1a2332;
+            color: #fff;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4a90e2;
+            text-align: center;
+        }
+        .test-section {
+            background: #2a3647;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #3a7bc2;
+        }
+        .result {
+            background: #1a2332;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { color: #26a69a; }
+        .error { color: #ef5350; }
+        .info { color: #2196F3; }
+        input {
+            background: #1a2332;
+            border: 1px solid #4a90e2;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            width: 300px;
+            margin-right: 10px;
+        }
+        label {
+            display: inline-block;
+            width: 100px;
+            color: #8899aa;
+        }
+        .row {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 成交量类型接口测试</h1>
+        
+        <div class="test-section">
+            <h3>配置</h3>
+            <div class="row">
+                <label>股票代码:</label>
+                <input type="text" id="stockCode" value="SZ300188" placeholder="如: SZ300188">
+            </div>
+            <div class="row">
+                <label>表名:</label>
+                <input type="text" id="tableName" value="basic_data_sz300188" placeholder="如: basic_data_sz300188">
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>步骤1: 获取预测成交量</h3>
+            <button onclick="testPredictVolume()">测试预测成交量接口</button>
+            <div class="result" id="result1"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>步骤2: 计算成交量类型</h3>
+            <div class="row">
+                <label>预测成交量:</label>
+                <input type="number" id="predictedVolume" placeholder="从步骤1获取">
+                <button onclick="testPredictVolumeType()">计算成交量类型</button>
+            </div>
+            <div class="result" id="result2"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>一键测试</h3>
+            <button onclick="testAll()">执行完整测试流程</button>
+            <div class="result" id="resultAll"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api';
+
+        async function testPredictVolume() {
+            const tableName = document.getElementById('tableName').value;
+            const resultDiv = document.getElementById('result1');
+            
+            resultDiv.innerHTML = '<span class="info">请求中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/predict_volume`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_name: tableName
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    const data = result.data;
+                    document.getElementById('predictedVolume').value = data.predicted_volume;
+                    
+                    resultDiv.innerHTML = `<span class="success">✅ 成功</span>
+
+<strong>响应数据:</strong>
+${JSON.stringify(result, null, 2)}
+
+<strong>预测成交量:</strong> ${data.predicted_volume?.toFixed(2)}
+<strong>当前成交量:</strong> ${data.current_volume?.toFixed(2)}
+<strong>比例:</strong> ${data.ratio?.toFixed(2)}
+<strong>时间:</strong> ${data.current_time}`;
+                } else {
+                    resultDiv.innerHTML = `<span class="error">❌ 失败: ${result.message}</span>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ 错误: ${error.message}</span>`;
+            }
+        }
+
+        async function testPredictVolumeType() {
+            const tableName = document.getElementById('tableName').value;
+            const predictedVolume = document.getElementById('predictedVolume').value;
+            const resultDiv = document.getElementById('result2');
+            
+            if (!predictedVolume) {
+                resultDiv.innerHTML = '<span class="error">❌ 请先运行步骤1获取预测成交量</span>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<span class="info">请求中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/predict_volume_type`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_name: tableName,
+                        predicted_volume: parseFloat(predictedVolume)
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    const data = result.data;
+                    const volumeType = data.volume_type;
+                    
+                    let typeDesc = '';
+                    if (volumeType) {
+                        const types = volumeType.split(',');
+                        const typeDescMap = {
+                            'A': '温和放量 - 前1日的2-3倍',
+                            'B': '温和放量 - 前3日均量的2倍以上',
+                            'C': '温和放量 - 前5日均量的2倍以上',
+                            'D': '温和放量 - 前5日某放量日的1.2倍以上',
+                            'E': '异常量 - 前1日和前5日均值的4倍以上',
+                            'F': '异常量 - 前5日某放量日的3倍以上',
+                            'G': '其他特殊型 - 前5日某放量日的0.7倍以上',
+                            'H': '其他特殊型 - 大于前5日某放量日',
+                            'X': 'R点放量 - 前3日均量的1.5倍以上',
+                            'Y': 'R点放量 - 前5日均量的1.5倍以上',
+                            'Z': 'R点放量 - 连续放量型'
+                        };
+                        
+                        typeDesc = types.map(t => `  ${t}: ${typeDescMap[t] || '未知'}`).join('\n');
+                    }
+                    
+                    resultDiv.innerHTML = `<span class="success">✅ 成功</span>
+
+<strong>响应数据:</strong>
+${JSON.stringify(result, null, 2)}
+
+<strong>成交量类型:</strong> ${volumeType || '无匹配'}
+
+${typeDesc ? '<strong>类型说明:</strong>\n' + typeDesc : ''}`;
+                } else {
+                    resultDiv.innerHTML = `<span class="error">❌ 失败: ${result.message}</span>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ 错误: ${error.message}</span>`;
+            }
+        }
+
+        async function testAll() {
+            const resultDiv = document.getElementById('resultAll');
+            resultDiv.innerHTML = '<span class="info">开始测试...</span>';
+            
+            try {
+                // 步骤1: 获取预测成交量
+                const tableName = document.getElementById('tableName').value;
+                const stockCode = document.getElementById('stockCode').value;
+                
+                resultDiv.innerHTML += '\n\n<span class="info">步骤1: 获取预测成交量...</span>';
+                
+                const response1 = await fetch(`${API_BASE_URL}/predict_volume`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_name: tableName
+                    })
+                });
+                
+                const result1 = await response1.json();
+                
+                if (result1.code !== 200) {
+                    throw new Error('获取预测成交量失败: ' + result1.message);
+                }
+                
+                const predictedVolume = result1.data.predicted_volume;
+                resultDiv.innerHTML += `\n<span class="success">✅ 预测成交量: ${predictedVolume.toFixed(2)}</span>`;
+                
+                // 步骤2: 计算成交量类型
+                resultDiv.innerHTML += '\n\n<span class="info">步骤2: 计算成交量类型...</span>';
+                
+                const response2 = await fetch(`${API_BASE_URL}/predict_volume_type`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_name: tableName,
+                        predicted_volume: predictedVolume
+                    })
+                });
+                
+                const result2 = await response2.json();
+                
+                if (result2.code !== 200) {
+                    throw new Error('计算成交量类型失败: ' + result2.message);
+                }
+                
+                const volumeType = result2.data.volume_type;
+                resultDiv.innerHTML += volumeType 
+                    ? `\n<span class="success">✅ 成交量类型: ${volumeType}</span>`
+                    : `\n<span class="info">ℹ️ 未匹配任何成交量类型</span>`;
+                
+                resultDiv.innerHTML += '\n\n<strong>完整结果:</strong>\n' + JSON.stringify({
+                    stock: stockCode,
+                    predicted_volume: predictedVolume,
+                    volume_type: volumeType
+                }, null, 2);
+                
+            } catch (error) {
+                resultDiv.innerHTML += `\n\n<span class="error">❌ 测试失败: ${error.message}</span>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

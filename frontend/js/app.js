@@ -16,6 +16,7 @@ let supportPriceMap = {}; // 存储支撑线数据，key为日期字符串，val
 let pressurePriceMap = {}; // 存储压力线数据，key为日期字符串，value为压力价格（整数，需除以100）
 let autoRefreshInterval = null; // 自动刷新定时器
 let predictedVolume = null; // 预测的成交量
+let predictedVolumeType = null; // 预测的成交量类型（基于预测成交量实时计算）
 
 // 更新状态指示器
 function updateStatus(online, text) {
@@ -165,12 +166,14 @@ async function selectStock() {
         showEmptyState();
         stopAutoRefresh(); // 停止自动刷新
         predictedVolume = null; // 清空预测成交量
+        predictedVolumeType = null; // 清空预测成交量类型
         return;
     }
 
     // 切换股票时停止之前的自动刷新
     stopAutoRefresh();
     predictedVolume = null; // 清空预测成交量
+    predictedVolumeType = null; // 清空预测成交量类型
 
     currentStockCode = stockSelect.value;
     const stockName = selectedOption.dataset.name;
@@ -477,6 +480,7 @@ async function loadStockData(stockCode, tableName, period) {
             } catch (error) {
                 console.error(`[${period}] 获取预测成交量失败:`, error);
                 predictedVolume = null;
+                predictedVolumeType = null;
             }
         }
         
@@ -498,6 +502,7 @@ async function loadStockData(stockCode, tableName, period) {
                 // 非日K线，停止自动刷新
                 stopAutoRefresh();
                 predictedVolume = null; // 清空预测成交量
+                predictedVolumeType = null; // 清空预测成交量类型
                 // 更新CR点统计显示提示信息
                 updateCRPointsStats();
             }
@@ -550,6 +555,12 @@ async function fetchPredictedVolume(tableName) {
         const data = result.data;
         if (data.predicted_volume) {
             console.log(`[预测成交量] ✅ 成功: 当前=${data.current_volume?.toFixed(2)}, 预测=${data.predicted_volume?.toFixed(2)}, 比例=${data.ratio?.toFixed(2)}`);
+            
+            // 获取预测成交量后，立即计算成交量类型
+            fetchPredictedVolumeType(tableName, data.predicted_volume).catch(err => {
+                console.error('[预测成交量类型] 计算失败:', err);
+            });
+            
             return data.predicted_volume;
         } else {
             console.log(`[预测成交量] 无法预测: ${data.message}`);
@@ -559,6 +570,48 @@ async function fetchPredictedVolume(tableName) {
     } catch (error) {
         console.error(`[预测成交量] 获取失败:`, error);
         return null;
+    }
+}
+
+// 基于预测成交量计算成交量类型
+async function fetchPredictedVolumeType(tableName, predictedVol) {
+    try {
+        console.log(`[预测成交量类型] 开始请求: ${tableName}, 预测成交量=${predictedVol}`);
+        
+        const response = await fetch(`${API_BASE_URL}/predict_volume_type`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                table_name: tableName,
+                predicted_volume: predictedVol
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log(`[预测成交量类型] 响应结果:`, result);
+        
+        if (result.code !== 200) {
+            throw new Error(result.message || '计算预测成交量类型失败');
+        }
+        
+        const data = result.data;
+        if (data.volume_type) {
+            predictedVolumeType = data.volume_type;
+            console.log(`[预测成交量类型] ✅ 成功: ${predictedVolumeType}`);
+        } else {
+            predictedVolumeType = null;
+            console.log(`[预测成交量类型] 未匹配任何类型`);
+        }
+        
+    } catch (error) {
+        console.error(`[预测成交量类型] 获取失败:`, error);
+        predictedVolumeType = null;
     }
 }
 
@@ -1250,7 +1303,9 @@ function renderChart(klineData, analysisData, period) {
                                 const dateForData = isLatestDate && previousTradingDate ? previousTradingDate : dateOnly;
                                 
                                 const winRatioScore = winRatioScoreMap[dateForData];
-                                const volumeType = volumeTypeMap[dateOnly]; // 成交量类型仍使用当天的
+                                
+                                // 成交量类型：最新一天使用实时计算的，历史数据使用数据库的
+                                const volumeType = isLatestDate && predictedVolumeType ? predictedVolumeType : volumeTypeMap[dateOnly];
                                 
                                 // 显示赔率总分（最新一天显示前一交易日的）
                                 if (winRatioScore !== undefined && winRatioScore !== null) {
@@ -1273,7 +1328,8 @@ function renderChart(klineData, analysisData, period) {
                                     
                                     // 显示成交量类型（只显示字母）
                                     const types = volumeType.split(',').map(t => t.trim());
-                                    result += `<span style="color: #2196F3; font-weight: bold;">成交量类型: ${types.join(', ')}</span><br/>`;
+                                    const typeLabel = isLatestDate && predictedVolumeType ? '成交量类型(实时)' : '成交量类型';
+                                    result += `<span style="color: #2196F3; font-weight: bold;">${typeLabel}: ${types.join(', ')}</span><br/>`;
                                 }
                             }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {

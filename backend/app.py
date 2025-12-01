@@ -95,6 +95,12 @@ def predict_volume():
     return kline_controller.predict_volume()
 
 
+@app.route('/api/predict_volume_type', methods=['POST'])
+def predict_volume_type():
+    """基于预测成交量计算成交量类型"""
+    return kline_controller.predict_volume_type()
+
+
 @app.route('/api/stock_analysis', methods=['POST'])
 def get_stock_analysis():
     """获取股票分析数据（益损比、压力线、支撑线）"""
