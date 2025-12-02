@@ -80,10 +80,13 @@ class VolumeTypeService:
             })
             
             logger.info(f"🔥 添加预测数据: 日期={today_date}, 预测成交量={predicted_volume}")
+            logger.info(f"🔥 前11天成交量范围: 最小={min([d['volume'] for d in daily_data[:-1]])}, 最大={max([d['volume'] for d in daily_data[:-1]])}")
             
             # 目标索引是最后一个（预测的今天）
             target_idx = len(daily_data) - 1
             target_volume = predicted_volume
+            
+            logger.info(f"🔥 目标索引={target_idx}, 目标成交量={target_volume}")
             
             # 🚀 优化：预先计算前5天的ABCD类型，避免重复计算
             prev_5_types_cache = {}
@@ -122,16 +125,21 @@ class VolumeTypeService:
             # 计算类型D: 前五日出现过ABC任意一种放量，标记为X日，今日的成交量为X日的1.2倍以上
             if target_idx >= 5:
                 x_day_volume = None
+                x_day_index = None
                 for i in range(max(0, target_idx - 5), target_idx):
                     check_volume_type = VolumeTypeService._check_abc_volume_type(daily_data, i)
                     if check_volume_type in ['A', 'B', 'C']:
                         x_day_volume = daily_data[i]['volume']
+                        x_day_index = i
                         break
                 
                 if x_day_volume and x_day_volume > 0:
                     ratio = target_volume / x_day_volume
+                    logger.info(f"🔥 类型D: 前5天找到ABC放量日(索引{x_day_index})，成交量={x_day_volume}, 比例={ratio:.2f}")
                     if ratio >= 1.2:
                         matched_types.append('D')
+                else:
+                    logger.info(f"🔥 类型D: 前5天未找到ABC放量日")
             
             # 计算类型E: 当日为前1日以及前五日均值的4倍以上（前五日未出现ABCD任何一种放量）
             if target_idx >= 5:
@@ -185,15 +193,20 @@ class VolumeTypeService:
             # 计算类型G
             if target_idx >= 5:
                 # 🚀 优化：使用缓存的类型检查结果
+                found_abcd = False
                 for i in range(max(0, target_idx - 5), target_idx):
                     check_types = prev_5_types_cache.get(i)
                     if check_types and any(t in check_types for t in ['A', 'B', 'C', 'D']):
                         x_day_volume = daily_data[i]['volume']
                         if x_day_volume > 0:
                             ratio = target_volume / x_day_volume
+                            logger.info(f"🔥 类型G: 前5天找到ABCD放量日(索引{i})，成交量={x_day_volume}, 比例={ratio:.2f}")
+                            found_abcd = True
                             if ratio >= 0.7:
                                 matched_types.append('G')
                                 break
+                if not found_abcd:
+                    logger.info(f"🔥 类型G: 前5天未找到ABCD放量日")
             
             # 计算类型H
             if target_idx >= 5:

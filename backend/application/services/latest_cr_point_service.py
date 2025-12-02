@@ -63,10 +63,13 @@ class LatestCRPointService:
             # 🔥 重要：从table_name提取完整的stock_code（带市场前缀）
             # 例如: basic_data_sz300188 → SZ300188
             full_stock_code = stock_code
-            if '_sz' in table_name.lower():
-                full_stock_code = f'SZ{stock_code}'
-            elif '_sh' in table_name.lower():
-                full_stock_code = f'SH{stock_code}'
+            # 检查stock_code是否已经有市场前缀（SZ/SH）
+            if not stock_code.upper().startswith(('SZ', 'SH')):
+                # 如果没有前缀，根据table_name添加
+                if '_sz' in table_name.lower():
+                    full_stock_code = f'SZ{stock_code}'
+                elif '_sh' in table_name.lower():
+                    full_stock_code = f'SH{stock_code}'
             
             logger.info(f"  完整股票代码: {full_stock_code} (用于查询b_daily_chance表)")
             
@@ -215,6 +218,7 @@ class LatestCRPointService:
             macd_data = kline_data_result.get('macd', {})
             
             # 8. 计算策略1的C点（使用缓存的CR服务）
+            logger.info(f"  🔥 准备计算策略1: 成交量类型={volume_type}, 赔率总分={total_win_ratio_score:.2f}")
             strategy1_result = self._check_strategy1_c_point(
                 stock_code,
                 current_kline['date'],
@@ -222,6 +226,7 @@ class LatestCRPointService:
                 total_win_ratio_score,
                 cached_cr_service  # 传入缓存的服务
             )
+            logger.info(f"  🔥 策略1计算结果: 基础分={strategy1_result.get('base_score', 0):.2f}, 最终分={strategy1_result.get('score', 0):.2f}")
             
             # 9. 获取多头K线组合（用于策略2的K线组合评分）
             bullish_pattern = None
