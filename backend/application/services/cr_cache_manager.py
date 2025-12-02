@@ -152,29 +152,18 @@ class CRCacheManager:
     
     def get_cr_service(self, stock_code: str) -> Optional['CRStrategyService']:
         """
-        获取股票的CR策略服务（带缓存）
+        获取股票的CR策略服务（禁用缓存，每次返回新实例）
         
         Args:
             stock_code: 股票代码
             
         Returns:
-            CR策略服务实例，如果不存在则返回None
+            CR策略服务实例
         """
-        # 如果缓存存在且有效，直接返回
-        if stock_code in self._cr_services:
-            # 检查缓存是否过期（超过60分钟）
-            if self.is_cache_valid(stock_code, max_age_minutes=60):
-                logger.debug(f"✅ 使用现有缓存: {stock_code}")
-                return self._cr_services[stock_code]
-            else:
-                logger.info(f"⚠️  缓存已过期，更新中: {stock_code}")
-                self.update_stock_cache(stock_code)
-                return self._cr_services[stock_code]
-        else:
-            # 缓存不存在，初始化
-            logger.info(f"📥 缓存不存在，初始化中: {stock_code}")
-            self.init_stock_cache(stock_code)
-            return self._cr_services.get(stock_code)
+        # 🔥 用户要求：不要缓存任何东西
+        logger.info(f"🚫 禁用缓存，创建新的CR策略服务实例: {stock_code}")
+        from domain.services.cr_strategy_service import CRStrategyService
+        return CRStrategyService()
     
     def is_cache_valid(self, stock_code: str, max_age_minutes: int = 60) -> bool:
         """

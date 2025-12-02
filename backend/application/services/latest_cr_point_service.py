@@ -220,7 +220,7 @@ class LatestCRPointService:
             # 8. 计算策略1的C点（使用缓存的CR服务）
             logger.info(f"  🔥 准备计算策略1: 成交量类型={volume_type}, 赔率总分={total_win_ratio_score:.2f}")
             strategy1_result = self._check_strategy1_c_point(
-                stock_code,
+                full_stock_code,  # 🔥 使用带前缀的完整代码
                 current_kline['date'],
                 volume_type,
                 total_win_ratio_score,
@@ -234,14 +234,14 @@ class LatestCRPointService:
                 from domain.services.bullish_pattern_service import BullishPatternService
                 bullish_service = BullishPatternService()
                 bullish_pattern = bullish_service.check_bullish_pattern(
-                    stock_code, table_name, kline_data, len(kline_data) - 1
+                    full_stock_code, table_name, kline_data, len(kline_data) - 1
                 )
                 if bullish_pattern:
                     logger.info(f"  检测到多头K线组合: {bullish_pattern}")
             
             # 10. 计算策略2的C点
             strategy2_result = self._check_strategy2_c_point(
-                stock_code,
+                full_stock_code,  # 🔥 使用带前缀的完整代码
                 current_kline['date'],
                 current_kline['close'],
                 ma_data,
@@ -253,7 +253,7 @@ class LatestCRPointService:
             
             # 11. 检查R点
             r_point_result = self._check_r_point(
-                stock_code,
+                full_stock_code,  # 🔥 使用带前缀的完整代码
                 current_kline['date'],
                 ma_data,
                 macd_data,
