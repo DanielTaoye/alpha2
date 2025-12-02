@@ -343,12 +343,22 @@ class LatestCRPointService:
     ) -> Dict:
         """检查策略1的C点"""
         try:
+            logger.info(f"🔍 [Strategy1] 开始检查C点:")
+            logger.info(f"  📊 输入参数:")
+            logger.info(f"    - stock_code: {stock_code}")
+            logger.info(f"    - date_str: {date_str}")
+            logger.info(f"    - volume_type: {volume_type}")
+            logger.info(f"    - total_win_ratio_score: {total_win_ratio_score}")
+            logger.info(f"    - cr_service: {'传入的服务' if cr_service else '默认服务'}")
+            
             # 将日期字符串转换为datetime对象
             from datetime import datetime
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
             
             # 使用传入的CR服务（带缓存）或默认服务
             service = cr_service if cr_service else self.cr_strategy_service
+            
+            logger.info(f"  🎯 准备调用 check_c_point_strategy_1...")
             
             # 调用CR策略服务检查C点
             # 返回: (是否触发, 最终分, 策略描述, 插件列表, 基础分, 是否被插件否决)
@@ -362,6 +372,13 @@ class LatestCRPointService:
                     None   # historical_c_points
                 )
             
+            logger.info(f"  ✅ [Strategy1] 计算完成:")
+            logger.info(f"    - base_score: {base_score}")
+            logger.info(f"    - final_score: {final_score}")
+            logger.info(f"    - is_triggered: {is_triggered}")
+            logger.info(f"    - is_rejected: {is_rejected}")
+            logger.info(f"    - plugins: {plugins}")
+            
             return {
                 'is_c_point': is_triggered,
                 'is_rejected': is_rejected,
@@ -372,7 +389,12 @@ class LatestCRPointService:
             }
             
         except Exception as e:
-            logger.error(f"策略1检查失败: {e}", exc_info=True)
+            logger.error(f"❌ [Strategy1] 策略1检查失败: {e}", exc_info=True)
+            logger.error(f"  📊 失败时的参数:")
+            logger.error(f"    - stock_code: {stock_code}")
+            logger.error(f"    - date_str: {date_str}")
+            logger.error(f"    - volume_type: {volume_type}")
+            logger.error(f"    - total_win_ratio_score: {total_win_ratio_score}")
             return {
                 'is_c_point': False,
                 'score': 0,
