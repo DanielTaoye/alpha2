@@ -27,33 +27,38 @@ class VolumeTypeService:
         try:
             from datetime import datetime, timedelta
             
-            # 获取最新交易日期
-            period_code = PeriodService.get_period_code('day')
-            
             with DatabaseConnection.get_connection_context() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 
-                # 获取最新的日K线日期
-                query = f"""
-                    SELECT MAX(shi_jian) as latest_date
+                # 🔥 修复：获取1分钟数据的最新日期（真正的"今天"）
+                query_1min = f"""
+                    SELECT DATE(MAX(shi_jian)) as latest_date
                     FROM {table_name}
-                    WHERE peroid_type = %s
+                    WHERE peroid_type = '1min'
                 """
-                cursor.execute(query, (period_code,))
-                result = cursor.fetchone()
+                cursor.execute(query_1min)
+                result_1min = cursor.fetchone()
                 
-                if not result or not result['latest_date']:
-                    logger.warning(f"未找到日K线数据: {table_name}")
+                if not result_1min or not result_1min['latest_date']:
+                    logger.warning(f"未找到1分钟数据: {table_name}")
                     return None
                 
-                latest_date = result['latest_date']
-                if isinstance(latest_date, str):
-                    latest_date = datetime.strptime(latest_date, '%Y-%m-%d')
+                today_date = result_1min['latest_date']
+                if isinstance(today_date, str):
+                    today_date = datetime.strptime(today_date, '%Y-%m-%d')
+                
+                logger.info(f"🔥 使用1分钟数据的最新日期作为今天: {today_date}")
             
-            # 获取历史15天的数据（用于计算类型Z需要前10天）
-            start_date = latest_date - timedelta(days=15)
+            # 获取历史数据（包括前15天，用于计算类型Z需要前10天）
+            # 结束日期设为today_date的前一天，因为today_date是要预测的日期
+            period_code = PeriodService.get_period_code('day')
+            start_date = today_date - timedelta(days=15)
+            end_date = today_date - timedelta(days=1)
+            
+            logger.info(f"🔥 查询历史数据范围: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
+            
             daily_data = VolumeTypeService._get_daily_volumes(
-                table_name, start_date, latest_date
+                table_name, start_date, end_date
             )
             
             if not daily_data or len(daily_data) < 2:
@@ -63,12 +68,18 @@ class VolumeTypeService:
             # 按日期排序（从旧到新）
             daily_data.sort(key=lambda x: x['date'])
             
+            logger.info(f"🔥 获取到 {len(daily_data)} 条历史数据")
+            if daily_data:
+                logger.info(f"🔥 最早日期: {daily_data[0]['date']}, 成交量: {daily_data[0]['volume']:.2f}")
+                logger.info(f"🔥 最晚日期: {daily_data[-1]['date']}, 成交量: {daily_data[-1]['volume']:.2f}")
+            
             # 在末尾添加预测数据（作为"今天"）
-            today_date = latest_date + timedelta(days=1)
             daily_data.append({
                 'date': today_date,
                 'volume': int(predicted_volume)
             })
+            
+            logger.info(f"🔥 添加预测数据: 日期={today_date}, 预测成交量={predicted_volume}")
             
             # 目标索引是最后一个（预测的今天）
             target_idx = len(daily_data) - 1

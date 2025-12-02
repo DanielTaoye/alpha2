@@ -815,16 +815,8 @@ async function loadVolumeTypes(stockCode) {
         let totalDataCount = 0;
         
         if (result.data && Array.isArray(result.data)) {
-            // 找出最新日期（用于排除最新一天的成交量类型）
-            let latestDateInData = null;
-            result.data.forEach(item => {
-                if (item.date) {
-                    const dateStr = item.date.split(' ')[0];
-                    if (!latestDateInData || dateStr > latestDateInData) {
-                        latestDateInData = dateStr;
-                    }
-                }
-            });
+            // 获取今天的日期
+            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
             
             result.data.forEach(item => {
                 if (item.date) {
@@ -832,9 +824,8 @@ async function loadVolumeTypes(stockCode) {
                     // 处理日期格式，确保是 YYYY-MM-DD 格式
                     const dateStr = item.date.split(' ')[0];
                     
-                    // ⚠️ 最新一天的成交量类型不从数据库读取，而是基于预测成交量实时计算
-                    // 所以这里排除最新一天，避免显示基于历史成交量计算的错误类型
-                    if (item.volumeType && dateStr !== latestDateInData) {
+                    // ⚠️ 今天的成交量类型用预测成交量实时计算，其他所有历史日期都从数据库读取
+                    if (item.volumeType && dateStr !== today) {
                         volumeTypeMap[dateStr] = item.volumeType;
                     }
                     
