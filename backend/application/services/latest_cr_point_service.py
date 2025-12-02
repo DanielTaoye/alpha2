@@ -99,7 +99,7 @@ class LatestCRPointService:
                     'message': '获取历史K线数据失败'
                 }
             
-            kline_data = kline_data_result.get('klines', [])
+            kline_data = kline_data_result.get('kline_data', [])  # 🔥 修复：字段名是 kline_data 不是 klines
             
             # 🔥 重要：将最新一天的数据追加到kline_data中
             # 因为最新一天的数据还没写入数据库，需要手动追加
@@ -232,14 +232,25 @@ class LatestCRPointService:
             bullish_pattern = None
             if len(kline_data) >= 3:
                 from domain.services.bullish_pattern_service import BullishPatternService
-                bullish_service = BullishPatternService()
-                bullish_pattern = bullish_service.check_bullish_pattern(
-                    full_stock_code, table_name, kline_data, len(kline_data) - 1
+                from datetime import datetime
+                
+                # 将日期字符串转换为datetime对象
+                target_date = datetime.strptime(current_kline['date'], '%Y-%m-%d') if isinstance(current_kline['date'], str) else current_kline['date']
+                
+                # 调用正确的方法名：identify_bullish_patterns
+                patterns = BullishPatternService.identify_bullish_patterns(
+                    full_stock_code, table_name, target_date
                 )
-                if bullish_pattern:
+                if patterns:
+                    bullish_pattern = ','.join(patterns)  # 多个组合用逗号连接
                     logger.info(f"  检测到多头K线组合: {bullish_pattern}")
             
             # 10. 计算策略2的C点
+            logger.info(f"  🔥 准备计算策略2: kline_data长度={len(kline_data)}")
+            if kline_data:
+                logger.info(f"     第一条: {kline_data[0].get('time', 'N/A')}")
+                logger.info(f"     最后一条: {kline_data[-1].get('time', 'N/A')}")
+            
             strategy2_result = self._check_strategy2_c_point(
                 full_stock_code,  # 🔥 使用带前缀的完整代码
                 current_kline['date'],
