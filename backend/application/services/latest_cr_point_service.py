@@ -60,6 +60,16 @@ class LatestCRPointService:
         try:
             logger.info(f"开始计算最新一天CR点: {stock_code}")
             
+            # 🔥 重要：从table_name提取完整的stock_code（带市场前缀）
+            # 例如: basic_data_sz300188 → SZ300188
+            full_stock_code = stock_code
+            if '_sz' in table_name.lower():
+                full_stock_code = f'SZ{stock_code}'
+            elif '_sh' in table_name.lower():
+                full_stock_code = f'SH{stock_code}'
+            
+            logger.info(f"  完整股票代码: {full_stock_code} (用于查询b_daily_chance表)")
+            
             # 1. 获取最新一天的K线数据
             latest_kline_result = self.kline_service.get_latest_day_kline(table_name)
             
@@ -88,17 +98,75 @@ class LatestCRPointService:
             
             kline_data = kline_data_result.get('klines', [])
             
+            # 🔥 重要：将最新一天的数据追加到kline_data中
+            # 因为最新一天的数据还没写入数据库，需要手动追加
+            latest_date = latest_kline['time']
+            
+            # 检查kline_data最后一条数据的日期，避免重复追加
+            if kline_data:
+                last_kline_date = kline_data[-1].get('time', '').split(' ')[0] if isinstance(kline_data[-1].get('time'), str) else kline_data[-1].get('time', '')
+                
+                # 如果最后一条数据不是最新日期，则追加
+                if last_kline_date != latest_date:
+                    logger.info(f"  追加最新一天数据到kline_data: {latest_date}")
+                    kline_data.append({
+                        'time': latest_date,
+                        'open': latest_kline['open'],
+                        'close': latest_kline['close'],
+                        'high': latest_kline['high'],
+                        'low': latest_kline['low'],
+                        'volume': predicted_volume if predicted_volume else latest_kline['volume']
+                    })
+                    
+                    # 重新计算MA和MACD（包含最新一天）
+                    from domain.services.ma_service import MAService
+                    from domain.services.macd_service import MACDService
+                    
+                    ma_service = MAService()
+                    macd_service = MACDService()
+                    
+                    # 提取价格和成交量数据
+                    closes = [k.get('close') for k in kline_data]
+                    
+                    # 重新计算MA
+                    ma5 = ma_service.calculate_ma(closes, 5)
+                    ma10 = ma_service.calculate_ma(closes, 10)
+                    ma20 = ma_service.calculate_ma(closes, 20)
+                    
+                    # 重新计算MACD
+                    dif, dea, macd = macd_service.calculate_macd(closes)
+                    
+                    # 更新kline_data_result中的MA和MACD数据
+                    kline_data_result['ma'] = {
+                        'ma5': ma5,
+                        'ma10': ma10,
+                        'ma20': ma20
+                    }
+                    kline_data_result['macd'] = {
+                        'dif': dif,
+                        'dea': dea,
+                        'macd': macd
+                    }
+                    
+                    logger.info(f"  ✅ 重新计算MA和MACD，包含最新一天 {latest_date}")
+                    logger.info(f"     MA5={ma5[-1]:.2f}, MA10={ma10[-1]:.2f}, MA20={ma20[-1]:.2f}")
+                    logger.info(f"     DIF={dif[-1]:.4f}, DEA={dea[-1]:.4f}, MACD={macd[-1]:.4f}")
+            
             # 3. 获取前一交易日的赔率分（用于策略1）
-            previous_daily_chance = self._get_previous_daily_chance(stock_code, latest_kline)
+            previous_daily_chance = self._get_previous_daily_chance(full_stock_code, latest_kline)
             
             day_win_ratio_score = 0
             week_win_ratio_score = 0
             total_win_ratio_score = 0
             
+            has_historical_data = False
             if previous_daily_chance:
                 day_win_ratio_score = previous_daily_chance.day_win_ratio_score or 0
                 week_win_ratio_score = previous_daily_chance.week_win_ratio_score or 0
                 total_win_ratio_score = previous_daily_chance.total_win_ratio_score or 0
+                has_historical_data = True
+            else:
+                logger.warning(f"  ⚠️ 未找到前一天的历史评分数据，建议先执行历史CR点分析")
             
             logger.info(f"  前一日赔率分 - 日:{day_win_ratio_score:.2f}, 周:{week_win_ratio_score:.2f}, 总:{total_win_ratio_score:.2f}")
             
@@ -155,7 +223,18 @@ class LatestCRPointService:
                 cached_cr_service  # 传入缓存的服务
             )
             
-            # 9. 计算策略2的C点
+            # 9. 获取多头K线组合（用于策略2的K线组合评分）
+            bullish_pattern = None
+            if len(kline_data) >= 3:
+                from domain.services.bullish_pattern_service import BullishPatternService
+                bullish_service = BullishPatternService()
+                bullish_pattern = bullish_service.check_bullish_pattern(
+                    stock_code, table_name, kline_data, len(kline_data) - 1
+                )
+                if bullish_pattern:
+                    logger.info(f"  检测到多头K线组合: {bullish_pattern}")
+            
+            # 10. 计算策略2的C点
             strategy2_result = self._check_strategy2_c_point(
                 stock_code,
                 current_kline['date'],
@@ -163,10 +242,11 @@ class LatestCRPointService:
                 ma_data,
                 macd_data,
                 volume_type,
+                bullish_pattern,
                 kline_data
             )
             
-            # 10. 检查R点
+            # 11. 检查R点
             r_point_result = self._check_r_point(
                 stock_code,
                 current_kline['date'],
@@ -175,9 +255,9 @@ class LatestCRPointService:
                 kline_data
             )
             
-            # 11. 不再需要清空缓存（全局缓存会自动管理）
+            # 12. 不再需要清空缓存（全局缓存会自动管理）
             
-            # 12. 组装返回结果
+            # 13. 组装返回结果
             result = {
                 'success': True,
                 'date': current_kline['date'],
@@ -194,7 +274,8 @@ class LatestCRPointService:
                 'previous_day_scores': {
                     'day': day_win_ratio_score,
                     'week': week_win_ratio_score,
-                    'total': total_win_ratio_score
+                    'total': total_win_ratio_score,
+                    'has_historical_data': has_historical_data  # 🔥 新增：是否有历史评分数据
                 },
                 'strategy1': strategy1_result,
                 'strategy2': strategy2_result,
@@ -303,6 +384,7 @@ class LatestCRPointService:
         ma_data: Dict,
         macd_data: Dict,
         volume_type: Optional[str],
+        bullish_pattern: Optional[str],
         kline_data: List[Dict]
     ) -> Dict:
         """检查策略2的C点"""
@@ -310,8 +392,12 @@ class LatestCRPointService:
             from datetime import datetime
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
             
-            # 找到当前日期在kline_data中的索引
-            current_index = len(kline_data) - 1  # 假设最新的在最后
+            # 找到当前日期在kline_data中的索引（最新的在最后）
+            current_index = len(kline_data) - 1
+            
+            logger.info(f"  策略2计算: 当前索引={current_index}, K线数据总数={len(kline_data)}, 当前日期={date_str}")
+            logger.info(f"  MA数据长度: ma5={len(ma_data.get('ma5', []))}, ma10={len(ma_data.get('ma10', []))}, ma20={len(ma_data.get('ma20', []))}")
+            logger.info(f"  MACD数据长度: dif={len(macd_data.get('dif', []))}, dea={len(macd_data.get('dea', []))}, macd={len(macd_data.get('macd', []))}")
             
             # 准备前30天数据
             daily_data_30 = kline_data[-30:] if len(kline_data) >= 30 else kline_data
@@ -325,7 +411,7 @@ class LatestCRPointService:
                 ma_data,
                 macd_data,
                 volume_type,
-                None,  # bullish_pattern 暂时不传
+                bullish_pattern,  # 🔥 传入多头K线组合
                 daily_data_30,
                 current_index
             )

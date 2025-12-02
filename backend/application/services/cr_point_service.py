@@ -458,6 +458,19 @@ class CRPointService:
             first_date = list(strategy1_scores.keys())[0]
             logger.info(f"示例数据 {first_date}: {strategy1_scores[first_date]}")
         
+        # 🔥 调试：打印策略评分的日期范围
+        if strategy1_scores:
+            score_dates = sorted(strategy1_scores.keys())
+            logger.info(f"🔥 策略1评分共 {len(strategy1_scores)} 条")
+            if score_dates:
+                logger.info(f"🔥 策略1评分日期范围: {score_dates[0]} 到 {score_dates[-1]}")
+        
+        if strategy2_scores:
+            score_dates = sorted(strategy2_scores.keys())
+            logger.info(f"🔥 策略2评分共 {len(strategy2_scores)} 条")
+            if score_dates:
+                logger.info(f"🔥 策略2评分日期范围: {score_dates[0]} 到 {score_dates[-1]}")
+        
         return {
             'c_points_count': total_c_count,  # 总C点数（策略1+策略2）
             'r_points_count': len(r_points),

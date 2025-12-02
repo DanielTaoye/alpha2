@@ -48,8 +48,8 @@ class CRPointController:
             
             logger.info(f"开始分析CR点: {stock_code} {stock_name} 表:{table_name} 周期:{period}")
             
-            # 获取K线数据及技术指标
-            result = self.kline_service.get_kline_data(table_name, period)
+            # 🔥 获取K线数据及技术指标（排除今天的数据，只计算历史）
+            result = self.kline_service.get_kline_data(table_name, period, exclude_today=True)
             kline_data_list = result.get('kline_data', [])
             macd_data = result.get('macd', {})
             ma_data = result.get('ma', {})

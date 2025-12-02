@@ -105,6 +105,27 @@ def predict_volume_type():
     return kline_controller.predict_volume_type()
 
 
+@app.route('/api/trading_status', methods=['GET'])
+def get_trading_status():
+    """获取当前交易状态（是否应该使用预测成交量）"""
+    from domain.services.trading_calendar_service import TradingCalendarService
+    from datetime import datetime
+    
+    calendar_service = TradingCalendarService()
+    now = datetime.now()
+    
+    return jsonify({
+        'code': 0,
+        'data': {
+            'is_trading_day': calendar_service.is_trading_day(now.date()),
+            'is_trading_time': calendar_service.is_in_trading_time(now),
+            'should_use_predicted': calendar_service.should_use_predicted_volume(now),
+            'current_time': now.strftime('%Y-%m-%d %H:%M:%S'),
+            'today_date': now.strftime('%Y-%m-%d')
+        }
+    })
+
+
 @app.route('/api/stock_analysis', methods=['POST'])
 def get_stock_analysis():
     """获取股票分析数据（益损比、压力线、支撑线）"""

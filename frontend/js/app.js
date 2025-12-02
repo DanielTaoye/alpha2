@@ -489,11 +489,11 @@ async function loadStockData(stockCode, tableName, period) {
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
             
-            // 实时计算并加载CR点数据（仅日K线支持）
+            // 🔥 自动加载完整的历史CR点数据（从第一天到昨天）+ 最新一天
             if (period === 'day') {
-                console.log('[日K线] 开始实时计算C点...');
-                analyzeCRPointsAuto().catch(err => {
-                    console.error('实时计算C点失败:', err);
+                console.log('[日K线] 开始加载完整的CR点数据（历史+最新）...');
+                analyzeCRPoints().catch(err => {
+                    console.error('加载CR点失败:', err);
                 });
                 
                 // 启动自动刷新（每分钟更新一次最新K线）
@@ -1271,6 +1271,14 @@ function renderChart(klineData, analysisData, period) {
                             }
                             
                             // 显示策略1的评分和插件信息（如果存在）
+                            // 🔥 调试：查看策略评分数据
+                            console.log(`[Tooltip] 当前日期: ${dateOnly}, latestDate: ${latestDate}`);
+                            console.log(`[Tooltip] strategy1_scores存在吗?`, !!crPointsData.strategy1_scores);
+                            if (crPointsData.strategy1_scores) {
+                                console.log(`[Tooltip] strategy1_scores的日期列表:`, Object.keys(crPointsData.strategy1_scores));
+                                console.log(`[Tooltip] ${dateOnly}的数据:`, crPointsData.strategy1_scores[dateOnly]);
+                            }
+                            
                             if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
                                 const s1Data = crPointsData.strategy1_scores[dateOnly];
                                 result += `<span style="color: #2196F3; font-weight: bold;">📊 策略1评分</span><br/>`;
@@ -2011,73 +2019,68 @@ let crPointsData = {
 };
 let showCRPoints = true; // 默认显示CR点
 
-// 自动实时计算CR点（不显示提示）
+// 自动获取最新一天的策略评分（快速版，不分析历史CR点）
 async function analyzeCRPointsAuto() {
     if (!currentStockCode || !currentTableName) {
         return;
     }
     
-    const stockSelect = document.getElementById('stockSelect');
-    const selectedOption = stockSelect.options[stockSelect.selectedIndex];
-    const stockName = selectedOption.dataset.name || '';
-    
     try {
-        console.log('[实时计算] 开始计算C点...', { stockCode: currentStockCode, stockName });
+        console.log('[快速加载] 开始获取最新一天的策略评分...', { stockCode: currentStockCode });
         
-        const response = await fetch(`${API_BASE_URL}/cr_points/analyze`, {
+        // 🔥 只调用最新一天的CR点接口，不分析483天的历史数据
+        const response = await fetch(`${API_BASE_URL}/latest_cr_points`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 stockCode: currentStockCode,
-                stockName: stockName,
-                tableName: currentTableName,
-                period: 'day'
+                tableName: currentTableName
             })
         });
         
         const result = await response.json();
-        console.log('[实时计算] C点计算结果:', result);
+        console.log('[快速加载] 最新一天策略评分结果:', result);
         
-        // 调试：检查strategy1_scores
-        if (result.data && result.data.strategy1_scores) {
-            console.log('✅ [自动分析] strategy1_scores存在，数量:', Object.keys(result.data.strategy1_scores).length);
-            const firstDate = Object.keys(result.data.strategy1_scores)[0];
-            console.log('[自动分析] 示例数据:', firstDate, result.data.strategy1_scores[firstDate]);
-        } else {
-            console.log('❌ [自动分析] strategy1_scores不存在或为空');
-        }
-        
-        if (result.code === 200) {
-            console.log(`[实时计算] 找到C点: ${result.data.c_points_count}个, R点: ${result.data.r_points_count}个`);
+        // 🔥 后端返回的code是200，不是0！
+        if (result.code === 200 && result.data && result.data.success) {
+            const latestData = result.data;
             
-            // 保存MACD数据（如果有）
-            if (result.data.macd) {
-                window.currentMACDData = result.data.macd;
-                console.log('[实时计算] MACD数据已更新');
+            // 保存最新一天的策略评分到crPointsData
+            if (latestData.date) {
+                console.log(`✅ [快速加载] 获取到最新一天(${latestData.date})的策略评分`);
+                
+                // 初始化策略评分对象
+                crPointsData.strategy1_scores = crPointsData.strategy1_scores || {};
+                crPointsData.strategy2_scores = crPointsData.strategy2_scores || {};
+                
+                // 保存策略1评分
+                if (latestData.strategy1) {
+                    crPointsData.strategy1_scores[latestData.date] = latestData.strategy1;
+                    console.log(`  ✅ 策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
+                }
+                
+                // 保存策略2评分
+                if (latestData.strategy2) {
+                    crPointsData.strategy2_scores[latestData.date] = latestData.strategy2;
+                    console.log(`  ✅ 策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
+                }
+                
+                console.log('[快速加载] 策略评分已保存到crPointsData，可以显示tooltip');
             }
-            
-            // 保存MA数据（如果有）
-            if (result.data.ma) {
-                window.currentMAData = result.data.ma;
-                console.log('[实时计算] MA数据已更新', Object.keys(result.data.ma));
-            }
-            
-            // 使用实时计算的结果直接显示
-            await loadCRPoints(result.data);
         } else {
-            console.error('[实时计算] C点计算失败:', result.message);
+            console.warn('[快速加载] 获取最新一天策略评分失败（可能今天没有数据）:', result.message || '未知错误');
         }
     } catch (error) {
-        console.error('[实时计算] C点计算失败:', error);
+        console.error('[快速加载] 获取最新一天策略评分失败:', error);
     }
 }
 
 // 手动分析CR点（带提示）
 async function analyzeCRPoints() {
     if (!currentStockCode || !currentTableName) {
-        alert('请先选择股票');
+        console.warn('⚠️ 请先选择股票');
         return;
     }
     
@@ -2122,7 +2125,6 @@ async function analyzeCRPoints() {
         if (result.code === 200) {
             const cCount = result.data.c_points_count || 0;
             const rCount = result.data.r_points_count || 0;
-            alert(`CR点分析完成！\nC点(买入信号): ${cCount}个\nR点(卖出信号): ${rCount}个`);
             
             // 保存MACD数据（如果有）
             if (result.data.macd) {
@@ -2136,14 +2138,62 @@ async function analyzeCRPoints() {
                 console.log('MA数据已更新', Object.keys(result.data.ma));
             }
             
+            // 🔥 获取最新一天的CR点（如果有预测数据的话）
+            try {
+                console.log('正在获取最新一天的CR点...');
+                const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stockCode: currentStockCode,
+                        tableName: currentTableName
+                    })
+                });
+                
+                const latestResult = await latestResponse.json();
+                console.log('最新一天CR点结果:', latestResult);
+                
+                // 🔥 后端返回的code是200，不是0！
+                if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
+                    const latestData = latestResult.data;
+                    
+                    // 合并最新一天的策略评分到历史数据中
+                    if (latestData.date) {
+                        console.log(`✅ 合并最新一天(${latestData.date})的CR点数据`);
+                        
+                        // 合并策略1评分
+                        if (latestData.strategy1) {
+                            result.data.strategy1_scores = result.data.strategy1_scores || {};
+                            result.data.strategy1_scores[latestData.date] = latestData.strategy1;
+                            console.log(`  ✅ 策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
+                            console.log(`  🔥 合并后strategy1_scores的日期:`, Object.keys(result.data.strategy1_scores));
+                        }
+                        
+                        // 合并策略2评分
+                        if (latestData.strategy2) {
+                            result.data.strategy2_scores = result.data.strategy2_scores || {};
+                            result.data.strategy2_scores[latestData.date] = latestData.strategy2;
+                            console.log(`  ✅ 策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
+                            console.log(`  🔥 合并后strategy2_scores的日期:`, Object.keys(result.data.strategy2_scores));
+                        }
+                    }
+                }
+            } catch (latestError) {
+                console.warn('获取最新一天CR点失败（可能今天没有数据）:', latestError);
+            }
+            
+            // 🔥 自动加载时不弹提示框，控制台输出即可
+            console.log(`✅ CR点加载完成！C点(买入信号): ${cCount}个, R点(卖出信号): ${rCount}个`);
+            
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
         } else {
-            alert(`CR点分析失败: ${result.message}`);
+            console.error(`❌ CR点分析失败: ${result.message}`);
         }
     } catch (error) {
-        console.error('分析CR点失败:', error);
-        alert(`分析CR点失败: ${error.message}`);
+        console.error('❌ 分析CR点失败:', error);
     } finally {
         if (analyzeBtn) {
             analyzeBtn.disabled = false;
@@ -2223,6 +2273,51 @@ async function loadCRPoints(existingData = null) {
                 }
                 if (result.data.strategy2_scores) {
                     crPointsData.strategy2_scores = result.data.strategy2_scores;
+                }
+                
+                // 🔥 获取最新一天的CR点（如果有预测数据的话）
+                try {
+                    console.log('正在获取最新一天的CR点...');
+                    const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            stockCode: currentStockCode,
+                            tableName: currentTableName
+                        })
+                    });
+                    
+                    const latestResult = await latestResponse.json();
+                    console.log('最新一天CR点结果:', latestResult);
+                    
+                    if (latestResult.code === 0 && latestResult.data && latestResult.data.success) {
+                        const latestData = latestResult.data;
+                        
+                        // 合并最新一天的策略评分
+                        if (latestData.date) {
+                            console.log(`✅ 合并最新一天(${latestData.date})的CR点数据`);
+                            
+                            // 合并策略1评分
+                            if (latestData.strategy1) {
+                                result.data.strategy1_scores = result.data.strategy1_scores || {};
+                                result.data.strategy1_scores[latestData.date] = latestData.strategy1;
+                                crPointsData.strategy1_scores = result.data.strategy1_scores;
+                                console.log(`  ✅ 策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
+                            }
+                            
+                            // 合并策略2评分
+                            if (latestData.strategy2) {
+                                result.data.strategy2_scores = result.data.strategy2_scores || {};
+                                result.data.strategy2_scores[latestData.date] = latestData.strategy2;
+                                crPointsData.strategy2_scores = result.data.strategy2_scores;
+                                console.log(`  ✅ 策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
+                            }
+                        }
+                    }
+                } catch (latestError) {
+                    console.warn('获取最新一天CR点失败（可能今天没有数据）:', latestError);
                 }
             } else {
                 console.error('实时计算CR点失败:', result.message);

@@ -18,13 +18,14 @@ class KLineApplicationService:
         self.macd_service = MACDService()
         self.ma_service = MAService()
     
-    def get_kline_data(self, table_name: str, period_type: str) -> Dict[str, any]:
+    def get_kline_data(self, table_name: str, period_type: str, exclude_today: bool = False) -> Dict[str, any]:
         """
         获取K线数据及技术指标
         
         Args:
             table_name: 表名
             period_type: 周期类型
+            exclude_today: 是否排除今天的数据（默认False）
             
         Returns:
             包含K线数据和技术指标的字典
@@ -40,6 +41,13 @@ class KLineApplicationService:
             start_date=start_date,
             limit=2000
         )
+        
+        # 🔥 如果需要排除今天，过滤掉今天的数据
+        if exclude_today and kline_list:
+            from datetime import date
+            today = date.today()
+            kline_list = [k for k in kline_list if k.time.date() < today]
+            logger.info(f"排除今天的数据后，剩余 {len(kline_list)} 条K线数据")
         
         # 转换为字典列表
         kline_data = [kline.to_dict() for kline in kline_list]
