@@ -132,12 +132,12 @@ class LatestCRPointService:
                     closes = [k.get('close') for k in kline_data]
                     
                     # 重新计算MA
-                    ma5 = ma_service.calculate_ma(closes, 5)
-                    ma10 = ma_service.calculate_ma(closes, 10)
-                    ma20 = ma_service.calculate_ma(closes, 20)
+                    ma5 = ma_service.calculate_sma(closes, 5)
+                    ma10 = ma_service.calculate_sma(closes, 10)
+                    ma20 = ma_service.calculate_sma(closes, 20)
                     
-                    # 重新计算MACD
-                    dif, dea, macd = macd_service.calculate_macd(closes)
+                    # 重新计算MACD（返回字典）
+                    macd_result = macd_service.calculate_macd(closes)
                     
                     # 更新kline_data_result中的MA和MACD数据
                     kline_data_result['ma'] = {
@@ -145,15 +145,23 @@ class LatestCRPointService:
                         'ma10': ma10,
                         'ma20': ma20
                     }
-                    kline_data_result['macd'] = {
-                        'dif': dif,
-                        'dea': dea,
-                        'macd': macd
-                    }
+                    kline_data_result['macd'] = macd_result
                     
                     logger.info(f"  ✅ 重新计算MA和MACD，包含最新一天 {latest_date}")
-                    logger.info(f"     MA5={ma5[-1]:.2f}, MA10={ma10[-1]:.2f}, MA20={ma20[-1]:.2f}")
-                    logger.info(f"     DIF={dif[-1]:.4f}, DEA={dea[-1]:.4f}, MACD={macd[-1]:.4f}")
+                    # 安全地格式化MA数据
+                    ma5_val = f"{ma5[-1]:.2f}" if ma5[-1] is not None else 'None'
+                    ma10_val = f"{ma10[-1]:.2f}" if ma10[-1] is not None else 'None'
+                    ma20_val = f"{ma20[-1]:.2f}" if ma20[-1] is not None else 'None'
+                    logger.info(f"     MA5={ma5_val}, MA10={ma10_val}, MA20={ma20_val}")
+                    # 安全地格式化MACD数据
+                    dif_list = macd_result.get('dif', [])
+                    dea_list = macd_result.get('dea', [])
+                    macd_list = macd_result.get('macd', [])
+                    if dif_list and dea_list and macd_list:
+                        dif_val = f"{dif_list[-1]:.4f}" if isinstance(dif_list[-1], (int, float)) and dif_list[-1] is not None else 'None'
+                        dea_val = f"{dea_list[-1]:.4f}" if isinstance(dea_list[-1], (int, float)) and dea_list[-1] is not None else 'None'
+                        macd_val = f"{macd_list[-1]:.4f}" if isinstance(macd_list[-1], (int, float)) and macd_list[-1] is not None else 'None'
+                        logger.info(f"     DIF={dif_val}, DEA={dea_val}, MACD={macd_val}")
             
             # 3. 获取前一交易日的赔率分（用于策略1）
             previous_daily_chance = self._get_previous_daily_chance(full_stock_code, latest_kline)

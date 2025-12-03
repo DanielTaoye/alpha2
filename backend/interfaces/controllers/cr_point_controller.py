@@ -34,7 +34,19 @@ class CRPointController:
             CR点分析结果
         """
         try:
-            data = request.get_json()
+            # 添加详细日志
+            logger.info(f"收到CR点分析请求")
+            logger.info(f"请求内容类型: {request.content_type}")
+            logger.info(f"请求体长度: {request.content_length}")
+            
+            # 使用force=True来避免JSON解析错误
+            try:
+                data = request.get_json(force=True)
+                logger.info(f"成功解析JSON: {data}")
+            except Exception as json_error:
+                logger.error(f"JSON解析失败: {json_error}")
+                logger.error(f"原始请求体: {request.get_data(as_text=True)}")
+                raise
             stock_code = data.get('stockCode')
             stock_name = data.get('stockName', '')
             table_name = data.get('tableName')
