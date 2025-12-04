@@ -366,8 +366,13 @@ class RPointPluginService:
         """
         插件2: 临近压力位滞涨
         
-        条件1: 距离压力位近(按股性判断，使用前一交易日赔率) + 放量(XYZH) + 特定K线 + C点日开盘价<当日收盘价
-        条件2: 距离压力位近(按股性判断，使用前一交易日赔率) + 前3日无AXYZ放量 + 空头组合 + C点日开盘价<当日收盘价
+        前提条件（共同条件）：
+        - 前一交易日日线赔率得分：短线<12分、波段<10分、中长线<8分，且不等于0
+        - 当前股价距离压力线：0% < (压力线-股价)/股价 < 10%
+        - 压力线价格从数据库读取后需除以100（数据库存储格式：1660代表16.60元）
+        
+        条件1: 前提条件 + 放量(XYZH) + 特定K线 + C点日开盘价<当日收盘价
+        条件2(熊市): 前提条件 + 前3日无AXYZ放量 + 空头组合 + C点日开盘价<当日收盘价
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -409,11 +414,32 @@ class RPointPluginService:
             day_win_ratio_score = prev_chance.day_win_ratio_score or 0
             
             # 根据股性判断是否临近压力位
-            # 要求：赔率得分不等于0，且小于阈值
+            # 要求：0 < 赔率得分 < 阈值（短线<12分、波段<10分、中长线<8分）
             pressure_threshold = self._get_pressure_threshold(stock_nature)
-            is_near_pressure = 0 < day_win_ratio_score < pressure_threshold
+            is_near_pressure_by_score = 0 < day_win_ratio_score < pressure_threshold
             
-            if not is_near_pressure:
+            logger.info(f"[临近压力位滞涨-赔率检查] {stock_code} {date_str} 股性:{stock_nature}, 前日赔率:{day_win_ratio_score:.1f}, 阈值:{pressure_threshold}, 是否满足0<赔率<{pressure_threshold}: {is_near_pressure_by_score}")
+            
+            if not is_near_pressure_by_score:
+                return RPointPluginResult("临近压力位滞涨", False, "")
+            
+            # 检查当前股价距离压力线的距离
+            # 要求：0% < (压力线-股价)/股价 < 10%
+            if prev_chance.pressure_price and prev_chance.pressure_price > 0:
+                close_price = current_data.close
+                # 压力线价格需要除以100（数据库存储格式：1660代表16.60元）
+                pressure_price_actual = prev_chance.pressure_price / 100.0
+                distance_pct = (pressure_price_actual - close_price) / close_price * 100
+                
+                logger.info(f"[临近压力位滞涨-距离检查] {stock_code} {date_str} 股价{close_price:.2f}, 压力线{pressure_price_actual:.2f}, 距离{distance_pct:.2f}%, 赔率{day_win_ratio_score:.1f}")
+                
+                # 如果不在0%-10%的范围内，不触发插件
+                if not (0 < distance_pct < 10):
+                    logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-10%范围内")
+                    return RPointPluginResult("临近压力位滞涨", False, "")
+            else:
+                # 没有压力线数据，不触发插件
+                logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} 前一交易日无压力线数据")
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
             # 检查上一个C点日的开盘价是否低于当日收盘价
@@ -433,9 +459,13 @@ class RPointPluginService:
             # === 条件1: 放量 + 特定K线 ===
             is_volume_xyzh = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
             
+            logger.info(f"[临近压力位滞涨-条件1] {stock_code} {date_str} 成交量类型:{current_chance.volume_type}, 是否放量XYZH:{is_volume_xyzh}")
+            
             if is_volume_xyzh:
                 # 检查K线形态，返回所有命中的形态
                 matched_patterns = self._check_bearish_kline_patterns(current_data, stock_code)
+                
+                logger.info(f"[临近压力位滞涨-条件1] {stock_code} {date_str} 命中K线形态:{matched_patterns}")
                 
                 if matched_patterns:
                     pattern_desc = "、".join(matched_patterns)
@@ -443,6 +473,11 @@ class RPointPluginService:
                     amplitude = 0
                     if current_data.pre_close and current_data.pre_close > 0:
                         amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                    
+                    # 计算压力线距离
+                    close_price = current_data.close
+                    pressure_price_actual = prev_chance.pressure_price / 100.0
+                    distance_pct = (pressure_price_actual - close_price) / close_price * 100
                     
                     # 如果有C点数据，在原因中说明C点开盘价
                     c_info = ""
@@ -452,7 +487,7 @@ class RPointPluginService:
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%){c_info}"
+                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold},股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%){c_info}"
                     )
             
             # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
@@ -477,6 +512,11 @@ class RPointPluginService:
                         if current_chance.bearish_pattern and len(current_chance.bearish_pattern.strip()) > 0:
                             bearish_patterns = current_chance.bearish_pattern.strip()
                             
+                            # 计算压力线距离
+                            close_price = current_data.close
+                            pressure_price_actual = prev_chance.pressure_price / 100.0
+                            distance_pct = (pressure_price_actual - close_price) / close_price * 100
+                            
                             # 如果有C点数据，在原因中说明C点开盘价
                             c_info = ""
                             if c_point_date and c_data:
@@ -485,7 +525,7 @@ class RPointPluginService:
                             return RPointPluginResult(
                                 "临近压力位滞涨",
                                 True,
-                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold})+前3日无AXYZ放量+空头组合({bearish_patterns}){c_info}"
+                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold},股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+前3日无AXYZ放量+空头组合({bearish_patterns}){c_info}"
                             )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
@@ -544,7 +584,14 @@ class RPointPluginService:
         """
         插件4: 上冲乏力
         
-        条件: 从发C日起累计涨幅>15% + 前日赔率<阈值(按股性) + 前日涨幅>6%/8% + 今日放量 + 特定K线
+        条件: 
+        - 从发C日起累计涨幅>15% 
+        - 前一交易日日线赔率得分：短线<15分、波段<12分、中长线<10分（且不等于0）
+        - 当前股价距离压力线：0% < (压力线-股价)/股价 < 8%
+        - 压力线价格从数据库读取后需除以100（数据库存储格式：1660代表16.60元）
+        - 前日涨幅>6%/8% 
+        - 今日放量(AXYZH) 
+        - 特定K线
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -603,6 +650,23 @@ class RPointPluginService:
             if not (0 < day_win_ratio_score < win_ratio_threshold):
                 return RPointPluginResult("上冲乏力", False, "")
             
+            # 检查当前股价距离压力线的距离
+            # 要求：0% < (压力线-股价)/股价 < 8%
+            if prev_chance.pressure_price and prev_chance.pressure_price > 0:
+                close_price = current_data.close
+                # 压力线价格需要除以100（数据库存储格式：1660代表16.60元）
+                pressure_price_actual = prev_chance.pressure_price / 100.0
+                distance_pct = (pressure_price_actual - close_price) / close_price * 100
+                
+                # 如果不在0%-8%的范围内，不触发插件
+                if not (0 < distance_pct < 8):
+                    logger.debug(f"[上冲乏力] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-8%范围内")
+                    return RPointPluginResult("上冲乏力", False, "")
+            else:
+                # 没有压力线数据，不触发插件
+                logger.debug(f"[上冲乏力] {stock_code} {date_str} 前一交易日无压力线数据")
+                return RPointPluginResult("上冲乏力", False, "")
+            
             # 获取前一日的K线数据（用于检查涨幅）
             yesterday_data = self._daily_cache.get(prev_date_str)
             if not yesterday_data:
@@ -631,10 +695,16 @@ class RPointPluginService:
                 amplitude = 0
                 if current_data.pre_close and current_data.pre_close > 0:
                     amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                
+                # 计算压力线距离
+                close_price = current_data.close
+                pressure_price_actual = prev_chance.pressure_price / 100.0
+                distance_pct = (pressure_price_actual - close_price) / close_price * 100
+                
                 return RPointPluginResult(
                     "上冲乏力",
                     True,
-                    f"从C点涨幅{cumulative_gain:.2f}%+前日赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold})+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                    f"从C点涨幅{cumulative_gain:.2f}%+前日赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold},股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                 )
             
             return RPointPluginResult("上冲乏力", False, "")
@@ -664,10 +734,13 @@ class RPointPluginService:
         插件6: 高位发R
         
         条件:
-        1. 均线呈现多头排列（5日>10日>20日>30日>60日）
-        2. 当前股价 > 10日均线价格（确认目前是短期高点）
-        3. 目前股价跌破前一日支撑位
-        4. 当天MACD出现死叉，或已经出现死叉（之前5个交易日内出现死叉也算）
+        1. 均线多头排列判断：
+           - 当前是多头排列（5日>10日>20日>30日>60日），或
+           - 前3个交易日出现过多头排列但当前不是多头排列
+        2. 从当前往前20个交易日的最低价涨幅 > 8%
+        3. 当前股价 > 10日均线价格（确认目前是短期高点）
+        4. 目前股价跌破前一日支撑位
+        5. 当天MACD出现死叉，或已经出现死叉（之前5个交易日内出现死叉也算）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -681,31 +754,96 @@ class RPointPluginService:
             
             current_price = current_data.close
             
-            # === 条件1: 均线多头排列（5>10>20>30>60）===
+            # === 条件1: 均线多头排列（当前或前3个交易日出现过）===
             # 检查数据完整性
             if current_index < 0 or current_index >= len(ma_data.get('ma5', [])):
                 return RPointPluginResult("高位发R", False, "")
             
-            ma5 = ma_data.get('ma5', [])[current_index] if ma_data.get('ma5') else None
-            ma10 = ma_data.get('ma10', [])[current_index] if ma_data.get('ma10') else None
-            ma20 = ma_data.get('ma20', [])[current_index] if ma_data.get('ma20') else None
-            ma30 = ma_data.get('ma30', [])[current_index] if ma_data.get('ma30') else None
-            ma60 = ma_data.get('ma60', [])[current_index] if ma_data.get('ma60') else None
+            # 检查当前和前3个交易日是否出现过多头排列
+            bullish_alignment_info = None
+            checked_indices = []
             
-            # 检查所有均线是否存在
-            if None in [ma5, ma10, ma20, ma30, ma60]:
+            # 检查范围：当前及前3个交易日
+            for check_idx in range(current_index, max(-1, current_index - 4), -1):
+                if check_idx < 0:
+                    continue
+                
+                ma5 = ma_data.get('ma5', [])[check_idx] if ma_data.get('ma5') else None
+                ma10 = ma_data.get('ma10', [])[check_idx] if ma_data.get('ma10') else None
+                ma20 = ma_data.get('ma20', [])[check_idx] if ma_data.get('ma20') else None
+                ma30 = ma_data.get('ma30', [])[check_idx] if ma_data.get('ma30') else None
+                ma60 = ma_data.get('ma60', [])[check_idx] if ma_data.get('ma60') else None
+                
+                # 跳过数据不完整的索引
+                if None in [ma5, ma10, ma20, ma30, ma60]:
+                    continue
+                
+                checked_indices.append(check_idx)
+                
+                # 检查是否多头排列
+                if ma5 > ma10 > ma20 > ma30 > ma60:
+                    is_current = (check_idx == current_index)
+                    bullish_alignment_info = {
+                        'index': check_idx,
+                        'is_current': is_current,
+                        'ma5': ma5,
+                        'ma10': ma10,
+                        'ma20': ma20,
+                        'ma30': ma30,
+                        'ma60': ma60
+                    }
+                    break
+            
+            # 如果当前和前3个交易日都没有多头排列，不触发
+            if not bullish_alignment_info:
                 return RPointPluginResult("高位发R", False, "")
             
-            # 检查多头排列
-            is_bullish_alignment = ma5 > ma10 > ma20 > ma30 > ma60
-            if not is_bullish_alignment:
+            # 获取当前均线值（用于后续条件2判断）
+            ma5_current = ma_data.get('ma5', [])[current_index] if ma_data.get('ma5') else None
+            ma10_current = ma_data.get('ma10', [])[current_index] if ma_data.get('ma10') else None
+            ma20_current = ma_data.get('ma20', [])[current_index] if ma_data.get('ma20') else None
+            ma30_current = ma_data.get('ma30', [])[current_index] if ma_data.get('ma30') else None
+            ma60_current = ma_data.get('ma60', [])[current_index] if ma_data.get('ma60') else None
+            
+            if None in [ma10_current]:
                 return RPointPluginResult("高位发R", False, "")
             
-            # === 条件2: 当前股价 > 10日均线（确认短期高点）===
-            if current_price <= ma10:
+            # === 条件2: 从当前往前20个交易日的最低价涨幅 > 8% ===
+            # 获取前20个交易日的数据
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if len(prev_dates) < 20:
                 return RPointPluginResult("高位发R", False, "")
             
-            # === 条件3: 跌破前一日支撑位 ===
+            # 找出前20个交易日的最低价
+            lowest_price = None
+            lowest_date = None
+            
+            for prev_date in prev_dates[:20]:
+                prev_data = self._daily_cache.get(prev_date)
+                if not prev_data:
+                    prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
+                if prev_data and prev_data.low:
+                    if lowest_price is None or prev_data.low < lowest_price:
+                        lowest_price = prev_data.low
+                        lowest_date = prev_date
+            
+            # 检查是否找到最低价
+            if lowest_price is None or lowest_price <= 0:
+                return RPointPluginResult("高位发R", False, "")
+            
+            # 计算涨幅
+            gain_from_lowest = ((current_price - lowest_price) / lowest_price) * 100
+            
+            # 涨幅必须大于8%
+            if gain_from_lowest <= 8:
+                logger.debug(f"[高位发R] {stock_code} {date_str} 20日最低价{lowest_price:.2f}至当前{current_price:.2f}涨幅{gain_from_lowest:.2f}%不满足>8%条件")
+                return RPointPluginResult("高位发R", False, "")
+            
+            # === 条件3: 当前股价 > 10日均线（确认短期高点）===
+            if current_price <= ma10_current:
+                return RPointPluginResult("高位发R", False, "")
+            
+            # === 条件4: 跌破前一日支撑位 ===
             # 获取前一交易日
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
             if not prev_dates or len(prev_dates) < 1:
@@ -732,7 +870,7 @@ class RPointPluginService:
             if not is_break_support:
                 return RPointPluginResult("高位发R", False, "")
             
-            # === 条件4: MACD死叉（当天或前5个交易日内）===
+            # === 条件5: MACD死叉（当天或前5个交易日内）===
             dif_list = macd_data.get('dif', [])
             dea_list = macd_data.get('dea', [])
             
@@ -773,8 +911,16 @@ class RPointPluginService:
                 return RPointPluginResult("高位发R", False, "")
             
             # === 全部条件满足，触发高位发R ===
-            reason = (f"多头排列(MA5:{ma5:.2f}>MA10:{ma10:.2f}>MA20:{ma20:.2f}>MA30:{ma30:.2f}>MA60:{ma60:.2f}), "
-                     f"股价({current_price:.2f})>MA10, "
+            # 构建多头排列描述
+            ma_info = bullish_alignment_info
+            if ma_info['is_current']:
+                ma_desc = f"当前多头排列(MA5:{ma_info['ma5']:.2f}>MA10:{ma_info['ma10']:.2f}>MA20:{ma_info['ma20']:.2f}>MA30:{ma_info['ma30']:.2f}>MA60:{ma_info['ma60']:.2f})"
+            else:
+                ma_desc = f"前{current_index - ma_info['index']}日多头排列(MA5:{ma_info['ma5']:.2f}>MA10:{ma_info['ma10']:.2f}>MA20:{ma_info['ma20']:.2f}>MA30:{ma_info['ma30']:.2f}>MA60:{ma_info['ma60']:.2f})"
+            
+            reason = (f"{ma_desc}, "
+                     f"20日最低价{lowest_price:.2f}({lowest_date})涨至{current_price:.2f}涨幅{gain_from_lowest:.2f}%, "
+                     f"股价({current_price:.2f})>MA10({ma10_current:.2f}), "
                      f"跌破支撑({support_price_actual:.2f}), "
                      f"MACD死叉")
             
@@ -793,7 +939,7 @@ class RPointPluginService:
         条件:
         1. 从当前往前20个交易日找到最高价日X日，X日最高价距离当前价格 > 18%
         2. X日往前推22个交易日，X日应该是这23天的前30%高位区域（相对高点）
-        3. X-22到X日整体趋势向上（涨幅 >= 10%）
+        3. X-22日到X日这23天，最低价到最高价的涨幅 >= 18%
         4. 当前股价跌破前一日支撑位
         5. MACD出现死叉（前5个交易日内）或已形成死叉且当前未出现金叉
         """
@@ -830,12 +976,42 @@ class RPointPluginService:
             if drop_ratio <= 0.18:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # === 条件2 & 3: X日是X-22到X日的前30%高位区域 + 趋势向上 ===
+            # === 条件2: X-22日到X日这23天，最低价到最高价的涨幅 >= 18% ===
             if x_day_index < 22:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # 计算X-22到X日这23天的所有最高价
+            # 计算X-22到X日这23天的最低价和最高价
             box_start_index = x_day_index - 22
+            box_lowest_price = None
+            box_highest_price = None
+            box_lowest_date = None
+            box_highest_date = None
+            
+            for i in range(box_start_index, x_day_index + 1):
+                # 找最低价
+                if box_lowest_price is None or kline_data[i].low < box_lowest_price:
+                    box_lowest_price = kline_data[i].low
+                    box_lowest_date = kline_data[i].time.strftime('%Y-%m-%d')
+                
+                # 找最高价
+                if box_highest_price is None or kline_data[i].high > box_highest_price:
+                    box_highest_price = kline_data[i].high
+                    box_highest_date = kline_data[i].time.strftime('%Y-%m-%d')
+            
+            # 检查数据有效性
+            if box_lowest_price is None or box_highest_price is None or box_lowest_price <= 0:
+                return RPointPluginResult("箱体回踩被跌破", False, "")
+            
+            # 计算涨幅
+            box_gain_ratio = (box_highest_price - box_lowest_price) / box_lowest_price
+            
+            # 涨幅必须 >= 18%
+            if box_gain_ratio < 0.18:
+                logger.debug(f"[箱体回踩] {stock_code} X-22至X日涨幅{box_gain_ratio*100:.2f}%不满足>=18%条件")
+                return RPointPluginResult("箱体回踩被跌破", False, "")
+            
+            # === 条件2补充: X日应该是这23天的前30%高位区域（相对高点）===
+            # 计算X-22到X日这23天的所有最高价
             box_highs = [kline_data[i].high for i in range(box_start_index, x_day_index + 1)]
             
             # 排序找前30%分界线
@@ -845,12 +1021,7 @@ class RPointPluginService:
             
             # X日最高价应该在前30%高位区域
             if x_day_high < top_30_threshold:
-                return RPointPluginResult("箱体回踩被跌破", False, "")
-            
-            # 检查趋势向上：X-22日到X日涨幅 >= 10%
-            box_start_price = kline_data[box_start_index].close
-            trend_ratio = (x_day_high - box_start_price) / box_start_price
-            if trend_ratio < 0.10:
+                logger.debug(f"[箱体回踩] {stock_code} X日最高价{x_day_high:.2f}不在前30%高位区域(阈值{top_30_threshold:.2f})")
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
             # === 条件4: 跌破前一日支撑位 ===
@@ -929,13 +1100,14 @@ class RPointPluginService:
             # === 全部条件满足，触发箱体回踩被跌破 ===
             x_day_date = kline_data[x_day_index].time.strftime('%Y-%m-%d')
             reason = (f"X日({x_day_date})最高价{x_day_high:.2f}在23天前30%高位, "
-                     f"当前({current_price:.2f})跌破{drop_ratio*100:.1f}%, "
+                     f"X-22至X日最低价{box_lowest_price:.2f}({box_lowest_date})至最高价{box_highest_price:.2f}({box_highest_date})涨幅{box_gain_ratio*100:.1f}%, "
+                     f"当前({current_price:.2f})较X日跌破{drop_ratio*100:.1f}%, "
                      f"跌破支撑({support_price_actual:.2f}), "
                      f"MACD死叉")
             
             logger.info(f"[箱体回踩被跌破触发] {stock_code} {date_str}: X日={x_day_date}, "
-                       f"X日高{x_day_high:.2f}, 当前{current_price:.2f}, 跌幅{drop_ratio*100:.1f}%, "
-                       f"趋势涨幅{trend_ratio*100:.1f}%")
+                       f"X日高{x_day_high:.2f}在前30%高位(阈值{top_30_threshold:.2f}), 当前{current_price:.2f}, 跌幅{drop_ratio*100:.1f}%, "
+                       f"箱体涨幅{box_gain_ratio*100:.1f}%")
             return RPointPluginResult("箱体回踩被跌破", True, reason)
             
         except Exception as e:
@@ -966,11 +1138,11 @@ class RPointPluginService:
             赔率得分阈值
         """
         thresholds = {
-            "短线": 6.0,
-            "波段": 4.8,
-            "中长线": 3.6
+            "短线": 12.0,
+            "波段": 10.0,
+            "中长线": 8.0
         }
-        return thresholds.get(stock_nature, 4.8)  # 默认波段
+        return thresholds.get(stock_nature, 10.0)  # 默认波段
     
     def _get_win_ratio_threshold_for_weak_breakout(self, stock_nature: str) -> float:
         """
@@ -983,11 +1155,11 @@ class RPointPluginService:
             赔率得分阈值
         """
         thresholds = {
-            "短线": 9.6,
-            "波段": 8.0,
-            "中长线": 6.0
+            "短线": 15.0,
+            "波段": 12.0,
+            "中长线": 10.0
         }
-        return thresholds.get(stock_nature, 8.0)  # 默认波段
+        return thresholds.get(stock_nature, 12.0)  # 默认波段
     
     def _check_bearish_kline_patterns(self, daily_data, stock_code: str = None) -> List[str]:
         """
