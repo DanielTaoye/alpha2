@@ -6,7 +6,98 @@
     <title>阿尔法策略2.0系统 - 智能股票K线分析平台</title>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="css/styles.css?v=20251118020">
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <!-- ECharts 多CDN备份加载方案 -->
+    <script>
+        // ECharts CDN列表（按优先级排序：国内CDN优先）
+        const echartsUrls = [
+            'https://lib.baomitu.com/echarts/5.4.3/echarts.min.js',           // 国内：360前端静态资源库
+            'https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js', // 国内：BootCDN
+            'https://unpkg.com/echarts@5.4.3/dist/echarts.min.js',            // 国际：unpkg
+            'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js', // 国际：jsdelivr
+            'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js' // 国际：cloudflare
+        ];
+
+        let currentCdnIndex = 0;
+        let loadStartTime = Date.now();
+        const TIMEOUT_PER_CDN = 5000; // 每个CDN尝试超时时间（毫秒）
+        window.echartsLoadStatus = 'loading'; // 全局加载状态
+
+        function isValidECharts() {
+            // 验证 ECharts 是否正确加载
+            try {
+                return typeof echarts !== 'undefined' 
+                    && typeof echarts.init === 'function'
+                    && typeof echarts.version === 'string';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function loadECharts() {
+            if (currentCdnIndex >= echartsUrls.length) {
+                console.error('❌ 所有ECharts CDN都加载失败');
+                window.echartsLoadStatus = 'failed';
+                document.body.insertAdjacentHTML('afterbegin', 
+                    '<div id="echarts-error-banner" style="background:#ff4444;color:white;padding:12px;text-align:center;font-size:14px;z-index:9999;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.2);">⚠️ ECharts库加载失败，图表功能不可用。<a href="javascript:location.reload()" style="color:white;text-decoration:underline;margin-left:10px;font-weight:bold;">🔄 刷新页面</a></div>'
+                );
+                return;
+            }
+
+            console.log(`🔄 尝试加载 ECharts [${currentCdnIndex + 1}/${echartsUrls.length}]: ${echartsUrls[currentCdnIndex]}`);
+            
+            const script = document.createElement('script');
+            script.src = echartsUrls[currentCdnIndex];
+            let hasTimeout = false;
+            
+            // 设置超时定时器
+            const timeoutId = setTimeout(() => {
+                if (window.echartsLoadStatus === 'loading') {
+                    hasTimeout = true;
+                    console.warn(`⏱️ ECharts加载超时 (${TIMEOUT_PER_CDN}ms): ${echartsUrls[currentCdnIndex]}`);
+                    script.onerror = null;
+                    script.onload = null;
+                    document.head.removeChild(script);
+                    currentCdnIndex++;
+                    loadECharts(); // 尝试下一个CDN
+                }
+            }, TIMEOUT_PER_CDN);
+            
+            script.onload = function() {
+                if (hasTimeout) return; // 如果已超时，忽略
+                
+                clearTimeout(timeoutId);
+                
+                // 验证 ECharts 是否真的可用
+                setTimeout(() => {
+                    if (isValidECharts()) {
+                        const loadTime = Date.now() - loadStartTime;
+                        console.log(`✅ ECharts加载并验证成功 (耗时${loadTime}ms): ${echartsUrls[currentCdnIndex]}`);
+                        console.log(`📦 ECharts版本: ${echarts.version}`);
+                        window.echartsLoadStatus = 'success';
+                    } else {
+                        console.warn(`⚠️ ECharts脚本加载但验证失败: ${echartsUrls[currentCdnIndex]}`);
+                        window.echarts = undefined; // 清除无效对象
+                        currentCdnIndex++;
+                        loadECharts(); // 尝试下一个CDN
+                    }
+                }, 100);
+            };
+            
+            script.onerror = function(e) {
+                if (hasTimeout) return; // 如果已超时，忽略
+                
+                clearTimeout(timeoutId);
+                console.warn(`❌ ECharts加载失败: ${echartsUrls[currentCdnIndex]}`, e);
+                currentCdnIndex++;
+                loadECharts(); // 尝试下一个CDN
+            };
+            
+            document.head.appendChild(script);
+        }
+
+        // 立即开始加载
+        loadECharts();
+    </script>
 </head>
 <body>
     <div class="header">

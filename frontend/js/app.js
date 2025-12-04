@@ -18,6 +18,61 @@ let autoRefreshInterval = null; // 自动刷新定时器
 let predictedVolume = null; // 预测的成交量
 let predictedVolumeType = null; // 预测的成交量类型（基于预测成交量实时计算）
 
+// ECharts加载状态检测和等待函数
+function waitForECharts(timeout = 15000) {
+    return new Promise((resolve, reject) => {
+        // 检查 ECharts 是否已经加载并验证
+        function isEChartsReady() {
+            try {
+                return typeof echarts !== 'undefined' 
+                    && typeof echarts.init === 'function'
+                    && window.echartsLoadStatus === 'success';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // 如果ECharts已经加载，直接返回
+        if (isEChartsReady()) {
+            console.log('✅ ECharts已就绪');
+            resolve(echarts);
+            return;
+        }
+
+        // 检查是否已经加载失败
+        if (window.echartsLoadStatus === 'failed') {
+            reject(new Error('ECharts加载失败：所有CDN都不可用'));
+            return;
+        }
+
+        const startTime = Date.now();
+        
+        // 定期检查ECharts是否已加载
+        const checkInterval = setInterval(() => {
+            // 检查是否加载成功
+            if (isEChartsReady()) {
+                clearInterval(checkInterval);
+                console.log('✅ ECharts已就绪');
+                resolve(echarts);
+                return;
+            }
+            
+            // 检查是否加载失败
+            if (window.echartsLoadStatus === 'failed') {
+                clearInterval(checkInterval);
+                reject(new Error('ECharts加载失败：所有CDN都不可用'));
+                return;
+            }
+            
+            // 检查是否超时
+            if (Date.now() - startTime > timeout) {
+                clearInterval(checkInterval);
+                reject(new Error(`ECharts加载超时 (${timeout}ms)，当前状态: ${window.echartsLoadStatus || 'unknown'}`));
+            }
+        }, 100);
+    });
+}
+
 // 更新状态指示器
 function updateStatus(online, text) {
     const indicator = document.getElementById('status-indicator');
@@ -485,7 +540,7 @@ async function loadStockData(stockCode, tableName, period) {
         }
         
         try {
-            renderChart(klineData, {}, period);
+            await renderChart(klineData, {}, period);
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
             
@@ -513,14 +568,20 @@ async function loadStockData(stockCode, tableName, period) {
 
     } catch (error) {
         console.error(`加载${stockCode}数据失败:`, error);
+        
+        // 判断是否是 ECharts 加载失败
+        const isEChartsError = error.message && error.message.includes('ECharts');
+        const errorIcon = isEChartsError ? '📊' : '⚠️';
+        const errorTitle = isEChartsError ? 'ECharts库加载失败' : '数据加载失败';
+        const retryButton = isEChartsError 
+            ? '<button onclick="location.reload()" style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">🔄 刷新页面</button>'
+            : '<button onclick="selectStock()" style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">重试</button>';
+        
         document.getElementById('mainChart').innerHTML = `
             <div class="error">
-                <p>📊 数据加载失败</p>
-                <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
-                <button onclick="selectStock()" 
-                        style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">
-                    重试
-                </button>
+                <p>${errorIcon} ${errorTitle}</p>
+                <p style="font-size: 12px; margin-top: 10px; color: #666;">${error.message}</p>
+                ${retryButton}
             </div>
         `;
     }
@@ -1140,8 +1201,11 @@ function calculateStartPercent(totalDataPoints, period) {
 }
 
 // 渲染图表
-function renderChart(klineData, analysisData, period) {
+async function renderChart(klineData, analysisData, period) {
     try {
+        // 等待ECharts加载完成
+        await waitForECharts();
+        
         // 更新当前周期
         currentPeriod = period;
         
@@ -1982,6 +2046,20 @@ function renderChart(klineData, analysisData, period) {
         
     } catch (error) {
         console.error(`[${period}] renderChart异常:`, error);
+        
+        // 显示友好的错误提示
+        const chartDom = document.getElementById('mainChart');
+        if (chartDom && error.message && error.message.includes('ECharts')) {
+            chartDom.innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px;text-align:center;background:#fff5f5;border-radius:8px;">
+                    <div style="font-size:48px;margin-bottom:20px;">📊</div>
+                    <div style="font-size:18px;color:#e53e3e;margin-bottom:10px;font-weight:bold;">图表加载失败</div>
+                    <div style="font-size:14px;color:#666;margin-bottom:20px;">${error.message}</div>
+                    <button onclick="location.reload()" style="padding:10px 20px;background:#4a90e2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;">🔄 刷新页面</button>
+                </div>
+            `;
+        }
+        
         throw error;
     }
 }
@@ -3048,7 +3126,7 @@ async function refreshLatestKline() {
             
             // 重新渲染图表
             console.log('[刷新最新K线] 重新渲染图表...');
-            renderChart(klineData, {}, 'day');
+            await renderChart(klineData, {}, 'day');
             
             console.log('[刷新最新K线] ✅ 更新完成');
         }

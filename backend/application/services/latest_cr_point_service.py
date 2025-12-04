@@ -89,8 +89,8 @@ class LatestCRPointService:
                     'message': '没有最新K线数据'
                 }
             
-            # 2. 获取历史K线数据（用于MA、MACD等指标）
-            kline_data_result = self.kline_service.get_kline_data(table_name, 'day')
+            # 2. 获取历史K线数据（用于MA、MACD等指标，排除今天）
+            kline_data_result = self.kline_service.get_kline_data(table_name, 'day', exclude_today=True)
             
             # get_kline_data直接返回data字典，不包含code字段
             if not kline_data_result:
@@ -100,6 +100,77 @@ class LatestCRPointService:
                 }
             
             kline_data = kline_data_result.get('kline_data', [])  # 🔥 修复：字段名是 kline_data 不是 klines
+            
+            # 🔥 【新增】获取历史CR点数据（用于插件判断）
+            logger.info(f"  🔥 开始获取历史CR点数据...")
+            historical_c_points = []
+            historical_r_points = []
+            try:
+                if kline_data:
+                    # 转换为KLineData对象
+                    from domain.models.kline import KLineData
+                    from datetime import datetime as dt
+                    
+                    kline_objects = []
+                    for kline in kline_data:
+                        kline_obj = KLineData(
+                            time=dt.strptime(kline['time'], '%Y-%m-%d %H:%M:%S'),
+                            open=kline['open'],
+                            high=kline['high'],
+                            low=kline['low'],
+                            close=kline['close'],
+                            volume=kline['volume'],
+                            liangbi=kline.get('liangbi', 0),
+                            weibi=kline.get('weibi', 0)
+                        )
+                        kline_objects.append(kline_obj)
+                    
+                    # 获取历史成交量类型和多头组合
+                    from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
+                    daily_chance_repo = DailyChanceRepositoryImpl()
+                    
+                    volume_types_hist = {}
+                    bullish_patterns_hist = {}
+                    
+                    start_date = kline_data[0]['time'].split(' ')[0]
+                    end_date = kline_data[-1]['time'].split(' ')[0]
+                    
+                    daily_chances = daily_chance_repo.find_by_stock_code(
+                        full_stock_code, start_date, end_date
+                    )
+                    
+                    for dc in daily_chances:
+                        date_str = dc.date.strftime('%Y-%m-%d')
+                        if dc.volume_type:
+                            volume_types_hist[date_str] = dc.volume_type
+                        if dc.bullish_pattern:
+                            bullish_patterns_hist[date_str] = dc.bullish_pattern
+                    
+                    # 使用CRPointService分析历史CR点
+                    from application.services.cr_point_service import CRPointService
+                    cr_service = CRPointService()
+                    
+                    logger.info(f"  🔥 调用 analyze_cr_points 分析历史数据（共{len(kline_objects)}条K线）...")
+                    cr_result = cr_service.analyze_cr_points(
+                        full_stock_code,
+                        '',  # stock_name
+                        kline_objects,
+                        ma_data=kline_data_result.get('ma', {}),
+                        macd_data=kline_data_result.get('macd', {}),
+                        volume_types=volume_types_hist,
+                        bullish_patterns=bullish_patterns_hist
+                    )
+                    
+                    # 提取历史C点和R点
+                    historical_c_points = cr_result.get('c_points', []) + cr_result.get('strategy2_c_points', [])
+                    historical_r_points = cr_result.get('r_points', [])
+                    
+                    logger.info(f"  ✅ 历史CR点数据获取成功: C点 {len(historical_c_points)} 个, R点 {len(historical_r_points)} 个")
+                else:
+                    logger.warning(f"  ⚠️ 没有历史K线数据")
+            except Exception as e:
+                logger.error(f"  ❌ 获取历史CR点数据失败: {e}", exc_info=True)
+                # 继续执行，使用空列表
             
             # 🔥 重要：将最新一天的数据追加到kline_data中
             # 因为最新一天的数据还没写入数据库，需要手动追加
@@ -232,7 +303,9 @@ class LatestCRPointService:
                 current_kline['date'],
                 volume_type,
                 total_win_ratio_score,
-                cached_cr_service  # 传入缓存的服务
+                cached_cr_service,  # 传入缓存的服务
+                historical_c_points,  # 传入历史C点
+                historical_r_points  # 传入历史R点
             )
             logger.info(f"  🔥 策略1计算结果: 基础分={strategy1_result.get('base_score', 0):.2f}, 最终分={strategy1_result.get('score', 0):.2f}")
             
@@ -271,12 +344,23 @@ class LatestCRPointService:
             )
             
             # 11. 检查R点
+            # 获取最近的C点日期（用于R点判断）
+            last_c_point_date = None
+            if historical_c_points:
+                # 历史C点已经按日期排序，取最后一个
+                last_c = historical_c_points[-1]
+                if isinstance(last_c, dict):
+                    last_c_point_date = last_c.get('trigger_date')
+                else:
+                    last_c_point_date = getattr(last_c, 'trigger_date', None)
+            
             r_point_result = self._check_r_point(
                 full_stock_code,  # 🔥 使用带前缀的完整代码
                 current_kline['date'],
                 ma_data,
                 macd_data,
-                kline_data
+                kline_data,
+                last_c_point_date  # 传入最近的C点日期
             )
             
             # 12. 不再需要清空缓存（全局缓存会自动管理）
@@ -358,7 +442,9 @@ class LatestCRPointService:
         date_str: str,
         volume_type: Optional[str],
         total_win_ratio_score: float,
-        cr_service = None  # 使用传入的缓存服务
+        cr_service = None,  # 使用传入的缓存服务
+        historical_c_points: Optional[List] = None,  # 历史C点
+        historical_r_points: Optional[List] = None  # 历史R点
     ) -> Dict:
         """检查策略1的C点"""
         try:
@@ -369,6 +455,8 @@ class LatestCRPointService:
             logger.info(f"    - volume_type: {volume_type}")
             logger.info(f"    - total_win_ratio_score: {total_win_ratio_score}")
             logger.info(f"    - cr_service: {'传入的服务' if cr_service else '默认服务'}")
+            logger.info(f"    - historical_c_points: {len(historical_c_points) if historical_c_points else 0} 个")
+            logger.info(f"    - historical_r_points: {len(historical_r_points) if historical_r_points else 0} 个")
             
             # 将日期字符串转换为datetime对象
             from datetime import datetime
@@ -387,8 +475,8 @@ class LatestCRPointService:
                     date_obj,
                     volume_type,
                     total_win_ratio_score,
-                    None,  # historical_r_points
-                    None   # historical_c_points
+                    historical_r_points,  # 传入历史R点
+                    historical_c_points  # 传入历史C点
                 )
             
             logger.info(f"  ✅ [Strategy1] 计算完成:")
@@ -483,7 +571,8 @@ class LatestCRPointService:
         date_str: str,
         ma_data: Dict,
         macd_data: Dict,
-        kline_data: List[Dict]
+        kline_data: List[Dict],
+        c_point_date = None  # 最近的C点日期
     ) -> Dict:
         """检查R点"""
         try:
@@ -493,12 +582,22 @@ class LatestCRPointService:
             # 找到当前日期在kline_data中的索引
             current_index = len(kline_data) - 1
             
+            # 转换c_point_date为datetime对象
+            c_point_date_obj = None
+            if c_point_date:
+                if isinstance(c_point_date, str):
+                    c_point_date_obj = datetime.strptime(c_point_date.split(' ')[0], '%Y-%m-%d')
+                elif hasattr(c_point_date, 'strftime'):
+                    c_point_date_obj = c_point_date
+            
+            logger.info(f"  🔥 检查R点: 最近C点日期={c_point_date_obj}")
+            
             # 调用R点服务
             # 返回: (是否触发R点, 触发的插件列表)
             is_triggered, triggered_plugins = self.r_point_service.check_r_point(
                 stock_code,
                 date_obj,
-                None,  # c_point_date
+                c_point_date_obj,  # 传入最近的C点日期
                 ma_data,
                 macd_data,
                 current_index,
