@@ -1,11 +1,16 @@
 """
-刷新生产库 b_daily_chance 表最近3个月的 volume_type
+刷新生产库 b_daily_chance 表最近3个月的数据
 
 功能说明：
 1. 连接生产主库
 2. 从 stock_list.csv 读取股票列表
 3. 从 basic_stock_股票代码 表获取日K线数据（period_type='1day'）
-4. 只更新 b_daily_chance 表的 volume_type 字段
+4. 更新 b_daily_chance 表的以下字段：
+   - volume_type: 成交量类型
+   - bullish_pattern: 多头K线组合
+   - bearish_pattern: 空头K线组合
+
+定时任务：每天下午5点执行
 """
 import sys
 import os
@@ -22,20 +27,32 @@ project_root = os.path.dirname(backend_dir)
 sys.path.insert(0, backend_dir)
 sys.path.insert(0, project_root)
 
-# 生产主库配置（直接导入）
-from config_production_master import DATABASE_CONFIG
-
-# 日志配置
+# 日志配置（先配置日志，再导入其他模块）
 import logging
+log_dir = os.path.join(script_dir, 'logs')
+os.makedirs(log_dir, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(script_dir, 'logs', 'refresh_volume_type.log'), encoding='utf-8')
+        logging.FileHandler(os.path.join(log_dir, 'refresh_volume_type.log'), encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
+
+# 生产主库配置（直接导入）
+from config_production_master import DATABASE_CONFIG
+
+# 导入K线组合服务
+try:
+    from domain.services.bullish_pattern_service import BullishPatternService
+    from domain.services.bearish_pattern_service import BearishPatternService
+    PATTERN_SERVICES_AVAILABLE = True
+    logger.info("K线组合服务导入成功")
+except ImportError as e:
+    logger.warning(f"K线组合服务导入失败: {e}")
+    PATTERN_SERVICES_AVAILABLE = False
 
 
 def get_production_connection():
@@ -474,6 +491,39 @@ def update_volume_type_batch(conn, updates: List[Tuple[str, str, str]]) -> int:
         return 0
 
 
+def update_patterns_batch(conn, updates: List[Tuple[str, str, str, str]]) -> int:
+    """
+    批量更新 b_daily_chance 表的 bullish_pattern 和 bearish_pattern
+    
+    Args:
+        conn: 数据库连接
+        updates: 更新列表，每个元素为 (stock_code, date, bullish_pattern, bearish_pattern)
+        
+    Returns:
+        更新的记录数
+    """
+    if not updates:
+        return 0
+    
+    try:
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE b_daily_chance 
+            SET bullish_pattern = %s, bearish_pattern = %s
+            WHERE stock_code = %s AND date = %s
+        """
+        
+        cursor.executemany(sql, [(bp, bep, sc, d) for sc, d, bp, bep in updates])
+        updated_count = cursor.rowcount
+        
+        return updated_count
+        
+    except Exception as e:
+        logger.error(f"批量更新K线组合失败: {e}")
+        return 0
+
+
 def get_stock_table_name(stock_code: str) -> str:
     """
     根据股票代码获取K线数据表名
@@ -490,12 +540,12 @@ def get_stock_table_name(stock_code: str) -> str:
     return f"basic_data_{stock_code.lower()}"
 
 
-def process_stock(conn, stock_code: str, stock_name: str, start_date: datetime, end_date: datetime) -> int:
+def process_stock(conn, stock_code: str, stock_name: str, start_date: datetime, end_date: datetime) -> Tuple[int, int]:
     """
-    处理单只股票的成交量类型计算
+    处理单只股票的成交量类型和K线组合计算
     
     Returns:
-        更新的记录数
+        (成交量类型更新数, K线组合更新数)
     """
     table_name = get_stock_table_name(stock_code)
     
@@ -508,7 +558,7 @@ def process_stock(conn, stock_code: str, stock_name: str, start_date: datetime, 
     
     if not chance_dates:
         logger.debug(f"股票 {stock_code} 在 b_daily_chance 表中没有需要更新的数据")
-        return 0
+        return 0, 0
     
     # 获取足够的历史数据（需要前15天的数据，因为Z类型需要前10天）
     data_start_date = start_date - timedelta(days=20)
@@ -518,15 +568,26 @@ def process_stock(conn, stock_code: str, stock_name: str, start_date: datetime, 
     
     if not daily_data or len(daily_data) < 2:
         logger.warning(f"股票 {stock_code} 历史数据不足")
-        return 0
+        return 0, 0
     
     # 按日期排序
     daily_data.sort(key=lambda x: x['date'])
     
-    # 为每个日期计算成交量类型
-    updates = []
+    # 为每个日期计算成交量类型和K线组合
+    volume_updates = []
+    pattern_updates = []
     
     for target_date in chance_dates:
+        # 处理日期格式
+        if isinstance(target_date, datetime):
+            target_date_obj = target_date
+            target_date_cmp = target_date.date()
+        else:
+            target_date_obj = datetime.combine(target_date, datetime.min.time())
+            target_date_cmp = target_date
+        
+        date_str = target_date_obj.strftime('%Y-%m-%d')
+        
         # 在daily_data中找到目标日期的索引
         target_idx = None
         for i, data in enumerate(daily_data):
@@ -534,10 +595,6 @@ def process_stock(conn, stock_code: str, stock_name: str, start_date: datetime, 
             # 处理日期格式
             if isinstance(data_date, datetime):
                 data_date = data_date.date()
-            if isinstance(target_date, datetime):
-                target_date_cmp = target_date.date()
-            else:
-                target_date_cmp = target_date
             
             if data_date == target_date_cmp:
                 target_idx = i
@@ -546,58 +603,86 @@ def process_stock(conn, stock_code: str, stock_name: str, start_date: datetime, 
         if target_idx is None or target_idx < 1:
             continue
         
-        # 计算成交量类型
+        # 1. 计算成交量类型
         volume_type = calculate_volume_type(daily_data, target_idx)
-        
         if volume_type:
-            date_str = target_date.strftime('%Y-%m-%d') if isinstance(target_date, datetime) else str(target_date)
-            updates.append((stock_code, date_str, volume_type))
+            volume_updates.append((stock_code, date_str, volume_type))
+        
+        # 2. 计算K线组合（如果服务可用）
+        if PATTERN_SERVICES_AVAILABLE:
+            try:
+                # 计算多头组合
+                bullish_patterns = BullishPatternService.identify_bullish_patterns(
+                    stock_code=stock_code,
+                    table_name=table_name,
+                    target_date=target_date_obj
+                )
+                bullish_pattern_str = ','.join(bullish_patterns) if bullish_patterns else ''
+                
+                # 计算空头组合
+                bearish_patterns = BearishPatternService.identify_bearish_patterns(
+                    stock_code=stock_code,
+                    table_name=table_name,
+                    target_date=target_date_obj
+                )
+                bearish_pattern_str = ','.join(bearish_patterns) if bearish_patterns else ''
+                
+                # 只要有数据就更新（包括空字符串，表示没有组合）
+                pattern_updates.append((stock_code, date_str, bullish_pattern_str, bearish_pattern_str))
+                
+            except Exception as e:
+                logger.debug(f"计算K线组合失败: {stock_code} {date_str}: {e}")
     
     # 批量更新
-    if updates:
-        updated_count = update_volume_type_batch(conn, updates)
-        return updated_count
+    volume_count = 0
+    pattern_count = 0
     
-    return 0
+    if volume_updates:
+        volume_count = update_volume_type_batch(conn, volume_updates)
+    
+    if pattern_updates:
+        pattern_count = update_patterns_batch(conn, pattern_updates)
+    
+    return volume_count, pattern_count
 
 
-def main():
-    """主函数"""
-    import argparse
+def refresh_job(test_limit: int = 0, days: int = 90):
+    """
+    定时任务：刷新成交量类型和K线组合
     
-    parser = argparse.ArgumentParser(description='刷新生产库 b_daily_chance 表的 volume_type')
-    parser.add_argument('--test', type=int, default=0, help='测试模式，只处理前N只股票')
-    parser.add_argument('--days', type=int, default=90, help='刷新最近N天的数据，默认90天（3个月）')
-    args = parser.parse_args()
-    
+    Args:
+        test_limit: 测试模式，只处理前N只股票，0表示处理全部
+        days: 刷新最近N天的数据，默认90天（3个月）
+    """
     # 确保日志目录存在
     log_dir = os.path.join(script_dir, 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
     logger.info("=" * 70)
-    logger.info("开始刷新生产库 b_daily_chance 表的 volume_type")
+    logger.info("开始刷新生产库 b_daily_chance 表的数据")
     logger.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    if args.test > 0:
-        logger.info(f"【测试模式】只处理前 {args.test} 只股票")
+    logger.info("刷新内容: volume_type（成交量类型）、bullish_pattern（多头组合）、bearish_pattern（空头组合）")
+    if test_limit > 0:
+        logger.info(f"【测试模式】只处理前 {test_limit} 只股票")
     logger.info("=" * 70)
     
     # 设置日期范围
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=args.days)
+    start_date = end_date - timedelta(days=days)
     
-    logger.info(f"日期范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} ({args.days}天)")
+    logger.info(f"日期范围: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} ({days}天)")
     
     # 加载股票列表
     csv_path = os.path.join(project_root, 'stock_list.csv')
     if not os.path.exists(csv_path):
         logger.error(f"股票列表文件不存在: {csv_path}")
-        sys.exit(1)
+        return
     
     stocks = load_stock_list(csv_path)
     
     # 测试模式：只处理前N只股票
-    if args.test > 0:
-        stocks = stocks[:args.test]
+    if test_limit > 0:
+        stocks = stocks[:test_limit]
     
     logger.info(f"从 stock_list.csv 加载了 {len(stocks)} 只股票")
     
@@ -607,10 +692,11 @@ def main():
         logger.info(f"成功连接生产主库: {DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}")
     except Exception as e:
         logger.error(f"连接生产主库失败: {e}")
-        sys.exit(1)
+        return
     
     # 统计信息
-    total_updated = 0
+    total_volume_updated = 0
+    total_pattern_updated = 0
     success_count = 0
     failed_stocks = []
     skipped_stocks = []
@@ -625,13 +711,14 @@ def main():
                 logger.info(f"\n进度: [{i}/{len(stocks)}] 正在处理: {stock_code} ({stock_name})")
             
             try:
-                updated = process_stock(conn, stock_code, stock_name, start_date, end_date)
+                volume_count, pattern_count = process_stock(conn, stock_code, stock_name, start_date, end_date)
                 
-                if updated > 0:
-                    total_updated += updated
+                if volume_count > 0 or pattern_count > 0:
+                    total_volume_updated += volume_count
+                    total_pattern_updated += pattern_count
                     success_count += 1
                     if i % 100 == 0:
-                        logger.info(f"  更新了 {updated} 条记录")
+                        logger.info(f"  更新: 成交量类型 {volume_count} 条, K线组合 {pattern_count} 条")
                 else:
                     skipped_stocks.append(stock_code)
                     
@@ -646,7 +733,9 @@ def main():
         logger.info(f"成功更新: {success_count} 只股票")
         logger.info(f"跳过: {len(skipped_stocks)} 只（无数据或无需更新）")
         logger.info(f"失败: {len(failed_stocks)} 只")
-        logger.info(f"总更新记录数: {total_updated}")
+        logger.info(f"成交量类型更新记录数: {total_volume_updated}")
+        logger.info(f"K线组合更新记录数: {total_pattern_updated}")
+        logger.info(f"总更新记录数: {total_volume_updated + total_pattern_updated}")
         
         if failed_stocks and len(failed_stocks) <= 20:
             logger.warning(f"失败的股票: {', '.join(failed_stocks)}")
@@ -657,10 +746,64 @@ def main():
         
     except Exception as e:
         logger.error(f"执行过程中出错: {e}", exc_info=True)
-        sys.exit(1)
     finally:
         conn.close()
         logger.info("数据库连接已关闭")
+
+
+def main():
+    """主函数：支持直接运行或定时任务"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='刷新生产库 b_daily_chance 表的数据')
+    parser.add_argument('--test', type=int, default=0, help='测试模式，只处理前N只股票')
+    parser.add_argument('--days', type=int, default=90, help='刷新最近N天的数据，默认90天（3个月）')
+    parser.add_argument('--scheduler', action='store_true', help='启动定时任务模式（每天17:00执行）')
+    args = parser.parse_args()
+    
+    if args.scheduler:
+        # 定时任务模式
+        try:
+            from apscheduler.schedulers.blocking import BlockingScheduler
+            from apscheduler.triggers.cron import CronTrigger
+        except ImportError:
+            logger.error("=" * 70)
+            logger.error("❌ 错误: APScheduler 未安装")
+            logger.error("=" * 70)
+            logger.error("请运行以下命令安装:")
+            logger.error("  pip install APScheduler")
+            logger.error("  或")
+            logger.error("  pip3 install APScheduler")
+            logger.error("=" * 70)
+            sys.exit(1)
+        
+        logger.info("=" * 70)
+        logger.info("启动定时任务模式")
+        logger.info("定时任务配置: 每天 17:00 执行")
+        logger.info("=" * 70)
+        
+        scheduler = BlockingScheduler()
+        
+        # 添加定时任务：每天17:00执行
+        scheduler.add_job(
+            lambda: refresh_job(test_limit=0, days=90),  # 定时任务使用默认参数
+            trigger=CronTrigger(hour=17, minute=0),
+            id='refresh_volume_and_patterns',
+            name='刷新成交量类型和K线组合',
+            replace_existing=True
+        )
+        
+        try:
+            logger.info("✅ 定时任务已启动，等待执行...")
+            # 立即执行一次（可选）
+            # refresh_job()
+            scheduler.start()
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("⛔ 定时任务已停止")
+            scheduler.shutdown()
+    else:
+        # 直接执行模式
+        refresh_job(test_limit=args.test, days=args.days)
 
 
 if __name__ == '__main__':
