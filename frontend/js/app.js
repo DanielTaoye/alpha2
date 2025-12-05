@@ -3124,9 +3124,58 @@ async function refreshLatestKline() {
                 console.error('[刷新最新K线] 更新预测成交量失败:', error);
             }
             
-            // 重新渲染图表
+            // 获取最新的CR点数据（仅获取当天的，不重新计算历史数据）
+            try {
+                const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stockCode: currentStockCode,
+                        tableName: currentTableName
+                    })
+                });
+                
+                const latestResult = await latestResponse.json();
+                console.log('[刷新最新K线] 获取最新CR点数据成功:', latestResult);
+                
+                if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
+                    const latestData = latestResult.data;
+                    
+                    // 更新策略评分（如果有）
+                    if (latestData.date) {
+                        // 更新策略1评分
+                        if (latestData.strategy1) {
+                            if (!crPointsData.strategy1_scores) {
+                                crPointsData.strategy1_scores = {};
+                            }
+                            crPointsData.strategy1_scores[latestData.date] = latestData.strategy1;
+                            console.log(`[刷新最新K线] 更新策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
+                        }
+                        
+                        // 更新策略2评分
+                        if (latestData.strategy2) {
+                            if (!crPointsData.strategy2_scores) {
+                                crPointsData.strategy2_scores = {};
+                            }
+                            crPointsData.strategy2_scores[latestData.date] = latestData.strategy2;
+                            console.log(`[刷新最新K线] 更新策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
+                        }
+                    }
+                }
+            } catch (latestError) {
+                console.warn('[刷新最新K线] 获取最新CR点失败:', latestError);
+            }
+            
+            // 重新渲染图表，保留现有的CR点数据
             console.log('[刷新最新K线] 重新渲染图表...');
             await renderChart(klineData, {}, 'day');
+            
+            // 更新CR点显示
+            if (chart) {
+                updateChartWithCRPoints();
+            }
             
             console.log('[刷新最新K线] ✅ 更新完成');
         }
