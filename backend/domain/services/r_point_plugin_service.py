@@ -424,18 +424,20 @@ class RPointPluginService:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
             # 检查当前股价距离压力线的距离
-            # 要求：0% < (压力线-股价)/股价 < 10%
+            # 从配置中获取距离阈值（默认10%）
+            distance_threshold = self.config_service.get_pressure_stagnation_distance_threshold()
+            
             if prev_chance.pressure_price and prev_chance.pressure_price > 0:
                 close_price = current_data.close
                 # 压力线价格需要除以100（数据库存储格式：1660代表16.60元）
                 pressure_price_actual = prev_chance.pressure_price / 100.0
                 distance_pct = (pressure_price_actual - close_price) / close_price * 100
                 
-                logger.info(f"[临近压力位滞涨-距离检查] {stock_code} {date_str} 股价{close_price:.2f}, 压力线{pressure_price_actual:.2f}, 距离{distance_pct:.2f}%, 赔率{day_win_ratio_score:.1f}")
+                logger.info(f"[临近压力位滞涨-距离检查] {stock_code} {date_str} 股价{close_price:.2f}, 压力线{pressure_price_actual:.2f}, 距离{distance_pct:.2f}%, 赔率{day_win_ratio_score:.1f}, 距离阈值{distance_threshold}%")
                 
-                # 如果不在0%-10%的范围内，不触发插件
-                if not (0 < distance_pct < 10):
-                    logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-10%范围内")
+                # 如果不在0%-阈值%的范围内，不触发插件
+                if not (0 < distance_pct < distance_threshold):
+                    logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-{distance_threshold}%范围内")
                     return RPointPluginResult("临近压力位滞涨", False, "")
             else:
                 # 没有压力线数据，不触发插件
@@ -808,7 +810,10 @@ class RPointPluginService:
             if None in [ma10_current]:
                 return RPointPluginResult("高位发R", False, "")
             
-            # === 条件2: 从当前往前20个交易日的最低价涨幅 > 8% ===
+            # === 条件2: 从当前往前20个交易日的最低价涨幅 > 配置阈值 ===
+            # 从配置中获取涨幅阈值（默认8%）
+            gain_threshold = self.config_service.get_high_position_gain_threshold()
+            
             # 获取前20个交易日的数据
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
             if len(prev_dates) < 20:
@@ -834,9 +839,9 @@ class RPointPluginService:
             # 计算涨幅
             gain_from_lowest = ((current_price - lowest_price) / lowest_price) * 100
             
-            # 涨幅必须大于8%
-            if gain_from_lowest <= 8:
-                logger.debug(f"[高位发R] {stock_code} {date_str} 20日最低价{lowest_price:.2f}至当前{current_price:.2f}涨幅{gain_from_lowest:.2f}%不满足>8%条件")
+            # 涨幅必须大于阈值
+            if gain_from_lowest <= gain_threshold:
+                logger.debug(f"[高位发R] {stock_code} {date_str} 20日最低价{lowest_price:.2f}至当前{current_price:.2f}涨幅{gain_from_lowest:.2f}%不满足>{gain_threshold}%条件")
                 return RPointPluginResult("高位发R", False, "")
             
             # === 条件3: 当前股价 > 10日均线（确认短期高点）===

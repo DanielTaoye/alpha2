@@ -92,7 +92,18 @@ class ConfigService:
         config = self.get_config()
         return config.get('market_type', 'bull')
     
-    def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None, market_type: str = None) -> Dict[str, Any]:
+    def get_pressure_stagnation_distance_threshold(self) -> float:
+        """获取临近压力位滞涨插件的距离阈值（百分比）"""
+        config = self.get_config()
+        return float(config.get('r_point_plugins', {}).get('pressure_stagnation', {}).get('distance_threshold_pct', 10.0))
+    
+    def get_high_position_gain_threshold(self) -> float:
+        """获取高位发R插件的涨幅阈值（百分比）"""
+        config = self.get_config()
+        return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 8.0))
+    
+    def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None, market_type: str = None, 
+                     pressure_distance_threshold: float = None, high_position_gain_threshold: float = None) -> Dict[str, Any]:
         """更新配置"""
         config = self.get_config()
         
@@ -109,6 +120,25 @@ class ConfigService:
                 raise ValueError(f"无效的市场类型: {market_type}，必须是 'bull' 或 'bear'")
             config['market_type'] = market_type
             logger.info(f"市场类型更新为: {market_type}")
+        
+        # 确保r_point_plugins配置存在
+        if 'r_point_plugins' not in config:
+            config['r_point_plugins'] = {
+                'pressure_stagnation': {},
+                'high_position_r': {}
+            }
+        
+        if pressure_distance_threshold is not None:
+            if 'pressure_stagnation' not in config['r_point_plugins']:
+                config['r_point_plugins']['pressure_stagnation'] = {}
+            config['r_point_plugins']['pressure_stagnation']['distance_threshold_pct'] = pressure_distance_threshold
+            logger.info(f"临近压力位滞涨-距离阈值更新为: {pressure_distance_threshold}%")
+        
+        if high_position_gain_threshold is not None:
+            if 'high_position_r' not in config['r_point_plugins']:
+                config['r_point_plugins']['high_position_r'] = {}
+            config['r_point_plugins']['high_position_r']['gain_threshold_pct'] = high_position_gain_threshold
+            logger.info(f"高位发R-涨幅阈值更新为: {high_position_gain_threshold}%")
         
         config['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         

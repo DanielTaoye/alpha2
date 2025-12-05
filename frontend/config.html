@@ -430,6 +430,14 @@
                 <span class="value" id="currentMarketType">加载中...</span>
             </div>
             <div class="config-item">
+                <span class="label">临近压力位滞涨-距离阈值</span>
+                <span class="value" id="currentPressureDistance">加载中...</span>
+            </div>
+            <div class="config-item">
+                <span class="label">高位发R-涨幅阈值</span>
+                <span class="value" id="currentHighPositionGain">加载中...</span>
+            </div>
+            <div class="config-item">
                 <span class="label">最后更新时间</span>
                 <span class="value" id="lastUpdated" style="font-size: 14px;">-</span>
             </div>
@@ -494,6 +502,70 @@
                         市场类型由人工判断设置，不根据历史数据自动判断。<br>
                         某些插件的行为会根据市场类型调整策略（具体插件待后续配置）。
                     </p>
+                </div>
+            </div>
+
+            <!-- R点插件配置 -->
+            <div class="config-section">
+                <h2>
+                    R点插件配置
+                    <span class="strategy-badge" style="background: #FF5722;">卖出信号</span>
+                </h2>
+                
+                <div class="form-group">
+                    <label for="pressureDistanceThreshold">临近压力位滞涨 - 距离阈值</label>
+                    <div class="input-wrapper">
+                        <input type="number" id="pressureDistanceThreshold" min="0" max="30" step="0.5" value="10">
+                        <span class="unit">%</span>
+                    </div>
+                    <div class="slider-wrapper">
+                        <input type="range" id="pressureDistanceSlider" min="0" max="30" step="0.5" value="10">
+                        <div class="range-labels">
+                            <span>0%</span>
+                            <span>15%</span>
+                            <span>30%</span>
+                        </div>
+                    </div>
+                    <p class="description">
+                        控制"临近压力位滞涨"插件的触发条件：当股价距离压力线在0%-阈值%范围内时触发。<br>
+                        阈值越小，越严格要求股价接近压力位；阈值越大，触发范围越宽松。<br>
+                        推荐：保守型 5-8% | 默认 10% | 宽松型 12-15%
+                    </p>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setPressureDistancePreset(5)">保守型 (5%)</button>
+                    <button class="preset-btn" onclick="setPressureDistancePreset(8)">较严格 (8%)</button>
+                    <button class="preset-btn" onclick="setPressureDistancePreset(10)">默认 (10%)</button>
+                    <button class="preset-btn" onclick="setPressureDistancePreset(15)">宽松型 (15%)</button>
+                </div>
+
+                <div class="form-group" style="margin-top: 25px;">
+                    <label for="highPositionGainThreshold">高位发R - 涨幅阈值</label>
+                    <div class="input-wrapper">
+                        <input type="number" id="highPositionGainThreshold" min="0" max="30" step="0.5" value="8">
+                        <span class="unit">%</span>
+                    </div>
+                    <div class="slider-wrapper">
+                        <input type="range" id="highPositionGainSlider" min="0" max="30" step="0.5" value="8">
+                        <div class="range-labels">
+                            <span>0%</span>
+                            <span>15%</span>
+                            <span>30%</span>
+                        </div>
+                    </div>
+                    <p class="description">
+                        控制"高位发R"插件的触发条件：前20个交易日最低价到当前价格的涨幅需大于此阈值。<br>
+                        阈值越高，越严格要求股价有足够涨幅才触发；阈值越低，更早发出卖出信号。<br>
+                        推荐：保守型 12-15% | 默认 8% | 灵敏型 5-6%
+                    </p>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setHighPositionGainPreset(15)">保守型 (15%)</button>
+                    <button class="preset-btn" onclick="setHighPositionGainPreset(10)">较高 (10%)</button>
+                    <button class="preset-btn" onclick="setHighPositionGainPreset(8)">默认 (8%)</button>
+                    <button class="preset-btn" onclick="setHighPositionGainPreset(5)">灵敏型 (5%)</button>
                 </div>
             </div>
 
@@ -575,6 +647,22 @@
             document.getElementById('strategy2Threshold').value = this.value;
         });
 
+        document.getElementById('pressureDistanceThreshold').addEventListener('input', function() {
+            document.getElementById('pressureDistanceSlider').value = this.value;
+        });
+
+        document.getElementById('pressureDistanceSlider').addEventListener('input', function() {
+            document.getElementById('pressureDistanceThreshold').value = this.value;
+        });
+
+        document.getElementById('highPositionGainThreshold').addEventListener('input', function() {
+            document.getElementById('highPositionGainSlider').value = this.value;
+        });
+
+        document.getElementById('highPositionGainSlider').addEventListener('input', function() {
+            document.getElementById('highPositionGainThreshold').value = this.value;
+        });
+
         // 设置预设值
         function setStrategy1Preset(value) {
             document.getElementById('strategy1Threshold').value = value;
@@ -584,6 +672,16 @@
         function setStrategy2Preset(value) {
             document.getElementById('strategy2Threshold').value = value;
             document.getElementById('strategy2Slider').value = value;
+        }
+
+        function setPressureDistancePreset(value) {
+            document.getElementById('pressureDistanceThreshold').value = value;
+            document.getElementById('pressureDistanceSlider').value = value;
+        }
+
+        function setHighPositionGainPreset(value) {
+            document.getElementById('highPositionGainThreshold').value = value;
+            document.getElementById('highPositionGainSlider').value = value;
         }
 
         // 显示状态消息
@@ -611,6 +709,12 @@
                     document.getElementById('currentStrategy1').textContent = config.strategy1.c_point_threshold + ' 分';
                     document.getElementById('currentStrategy2').textContent = config.strategy2.c_point_threshold + ' 分';
                     
+                    // 更新R点插件参数显示
+                    const pressureDistance = config.r_point_plugins?.pressure_stagnation?.distance_threshold_pct || 10.0;
+                    const highPositionGain = config.r_point_plugins?.high_position_r?.gain_threshold_pct || 8.0;
+                    document.getElementById('currentPressureDistance').textContent = pressureDistance + ' %';
+                    document.getElementById('currentHighPositionGain').textContent = highPositionGain + ' %';
+                    
                     // 更新市场类型显示
                     const marketType = config.market_type || 'bull';
                     const marketTypeText = marketType === 'bull' ? '🐂 牛市' : '🐻 熊市';
@@ -625,6 +729,12 @@
                     document.getElementById('strategy1Slider').value = config.strategy1.c_point_threshold;
                     document.getElementById('strategy2Threshold').value = config.strategy2.c_point_threshold;
                     document.getElementById('strategy2Slider').value = config.strategy2.c_point_threshold;
+                    
+                    // 更新R点插件输入框
+                    document.getElementById('pressureDistanceThreshold').value = pressureDistance;
+                    document.getElementById('pressureDistanceSlider').value = pressureDistance;
+                    document.getElementById('highPositionGainThreshold').value = highPositionGain;
+                    document.getElementById('highPositionGainSlider').value = highPositionGain;
                     
                     // 更新市场类型单选框
                     if (marketType === 'bull') {
@@ -655,6 +765,8 @@
                 const strategy1 = parseFloat(document.getElementById('strategy1Threshold').value);
                 const strategy2 = parseFloat(document.getElementById('strategy2Threshold').value);
                 const marketType = document.querySelector('input[name="marketType"]:checked').value;
+                const pressureDistance = parseFloat(document.getElementById('pressureDistanceThreshold').value);
+                const highPositionGain = parseFloat(document.getElementById('highPositionGainThreshold').value);
 
                 // 参数验证
                 if (isNaN(strategy1) || strategy1 < 0 || strategy1 > 100) {
@@ -667,6 +779,16 @@
                     return;
                 }
 
+                if (isNaN(pressureDistance) || pressureDistance < 0 || pressureDistance > 100) {
+                    showMessage('临近压力位滞涨-距离阈值必须在0-100之间', true);
+                    return;
+                }
+
+                if (isNaN(highPositionGain) || highPositionGain < 0 || highPositionGain > 100) {
+                    showMessage('高位发R-涨幅阈值必须在0-100之间', true);
+                    return;
+                }
+
                 const response = await fetch(`${API_BASE_URL}/config`, {
                     method: 'POST',
                     headers: {
@@ -675,7 +797,9 @@
                     body: JSON.stringify({
                         strategy1_threshold: strategy1,
                         strategy2_threshold: strategy2,
-                        market_type: marketType
+                        market_type: marketType,
+                        pressure_distance_threshold: pressureDistance,
+                        high_position_gain_threshold: highPositionGain
                     })
                 });
 
