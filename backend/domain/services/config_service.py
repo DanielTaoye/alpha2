@@ -100,7 +100,7 @@ class ConfigService:
     def get_high_position_gain_threshold(self) -> float:
         """获取高位发R插件的涨幅阈值（百分比）"""
         config = self.get_config()
-        return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 8.0))
+        return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 18.0))
     
     def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None, market_type: str = None, 
                      pressure_distance_threshold: float = None, high_position_gain_threshold: float = None) -> Dict[str, Any]:

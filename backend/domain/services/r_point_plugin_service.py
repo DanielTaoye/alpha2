@@ -739,7 +739,7 @@ class RPointPluginService:
         1. 均线多头排列判断：
            - 当前是多头排列（5日>10日>20日>30日>60日），或
            - 前3个交易日出现过多头排列但当前不是多头排列
-        2. 从当前往前20个交易日的最低价涨幅 > 8%
+        2. 从当前往前20个交易日的最低价涨幅 > 18%
         3. 当前股价 > 10日均线价格（确认目前是短期高点）
         4. 目前股价跌破前一日支撑位
         5. 当天MACD出现死叉，或已经出现死叉（之前5个交易日内出现死叉也算）
@@ -811,7 +811,7 @@ class RPointPluginService:
                 return RPointPluginResult("高位发R", False, "")
             
             # === 条件2: 从当前往前20个交易日的最低价涨幅 > 配置阈值 ===
-            # 从配置中获取涨幅阈值（默认8%）
+            # 从配置中获取涨幅阈值（默认18%）
             gain_threshold = self.config_service.get_high_position_gain_threshold()
             
             # 获取前20个交易日的数据

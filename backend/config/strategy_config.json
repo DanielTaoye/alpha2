@@ -13,7 +13,7 @@
       "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
     },
     "high_position_r": {
-      "gain_threshold_pct": 8.0,
+      "gain_threshold_pct": 18.0,
       "description": "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值"
     }
   },
