@@ -1,4 +1,13 @@
-"""MACD技术指标计算服务"""
+"""MACD技术指标计算服务 - 标准日K线MACD计算
+参数配置: 快速EMA=12, 慢速EMA=26, 信号线周期=9
+
+计算公式:
+- EMA(12) = 前一日EMA(12) × 11/13 + 当日收盘价 × 2/13
+- EMA(26) = 前一日EMA(26) × 25/27 + 当日收盘价 × 2/27  
+- DIF = EMA(12) - EMA(26)
+- DEA = 前一日DEA × 8/10 + 当日DIF × 2/10 (首日DEA使用DIF的9日SMA初始化)
+- MACD柱 = (DIF - DEA) × 2
+"""
 from typing import List, Dict, Optional
 from infrastructure.logging.logger import get_logger
 
@@ -6,35 +15,104 @@ logger = get_logger(__name__)
 
 
 class MACDService:
-    """MACD技术指标计算服务"""
+    """MACD技术指标计算服务 - 标准日K线实现"""
     
     @staticmethod
     def calculate_ema(prices: List[float], period: int) -> List[Optional[float]]:
         """
         计算指数移动平均线(EMA)
         
+        公式: EMA = 前一日EMA × (period-1)/(period+1) + 当日价格 × 2/(period+1)
+        首日EMA使用简单移动平均(SMA)初始化
+        
         Args:
             prices: 价格列表
             period: 周期
             
         Returns:
-            EMA值列表
+            EMA值列表（与输入长度相同，前period-1个为None）
         """
         if len(prices) < period:
             return [None] * len(prices)
         
         ema = [None] * len(prices)
-        multiplier = 2 / (period + 1)
+        # EMA平滑系数: 2/(period+1)
+        multiplier = 2.0 / (period + 1)
         
-        # 第一个EMA使用SMA（简单移动平均）
+        # 第一个EMA使用SMA（简单移动平均）初始化
         sma = sum(prices[:period]) / period
         ema[period - 1] = sma
         
-        # 后续EMA计算
+        # 后续EMA计算: EMA[i] = 前一日EMA × (1-multiplier) + 当日价格 × multiplier
         for i in range(period, len(prices)):
-            ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1]
+            ema[i] = ema[i - 1] * (1 - multiplier) + prices[i] * multiplier
         
         return ema
+    
+    @staticmethod
+    def calculate_dea(dif_values: List[Optional[float]], signal_period: int = 9) -> List[Optional[float]]:
+        """
+        计算DEA（信号线）
+        
+        公式: DEA = 前一日DEA × 8/10 + 当日DIF × 2/10
+        首日DEA使用DIF的9日SMA初始化
+        
+        Args:
+            dif_values: DIF值列表
+            signal_period: 信号线周期，默认9
+            
+        Returns:
+            DEA值列表（与输入长度相同）
+        """
+        dea = [None] * len(dif_values)
+        
+        # 找到第一个有效DIF的索引
+        first_valid_idx = None
+        for i, val in enumerate(dif_values):
+            if val is not None:
+                first_valid_idx = i
+                break
+        
+        if first_valid_idx is None:
+            return dea
+        
+        # 收集有效DIF值
+        valid_dif_count = 0
+        for i in range(first_valid_idx, len(dif_values)):
+            if dif_values[i] is not None:
+                valid_dif_count += 1
+        
+        if valid_dif_count < signal_period:
+            return dea
+        
+        # DEA平滑系数: 2/10 = 0.2 (对应signal_period=9时的 2/(9+1))
+        multiplier = 2.0 / (signal_period + 1)
+        
+        # 计算首个DEA: 使用前signal_period个有效DIF的SMA
+        valid_count = 0
+        sma_sum = 0
+        sma_idx = None
+        
+        for i in range(first_valid_idx, len(dif_values)):
+            if dif_values[i] is not None:
+                sma_sum += dif_values[i]
+                valid_count += 1
+                if valid_count == signal_period:
+                    sma_idx = i
+                    break
+        
+        if sma_idx is None:
+            return dea
+        
+        # 首日DEA = DIF的9日SMA
+        dea[sma_idx] = sma_sum / signal_period
+        
+        # 后续DEA计算: DEA = 前一日DEA × (1-multiplier) + 当日DIF × multiplier
+        for i in range(sma_idx + 1, len(dif_values)):
+            if dif_values[i] is not None and dea[i - 1] is not None:
+                dea[i] = dea[i - 1] * (1 - multiplier) + dif_values[i] * multiplier
+        
+        return dea
     
     @staticmethod
     def calculate_macd(close_prices: List[float], 
@@ -42,12 +120,15 @@ class MACDService:
                       slow_period: int = 26, 
                       signal_period: int = 9) -> Dict[str, List[Optional[float]]]:
         """
-        计算MACD指标
+        计算MACD指标 - 标准日K线实现
         
         MACD (Moving Average Convergence Divergence) - 平滑异同移动平均线
-        - DIF (差离值): 快线EMA - 慢线EMA
-        - DEA (信号线): DIF的signal_period日EMA
-        - MACD柱: 2 * (DIF - DEA)
+        
+        计算流程:
+        1. 计算EMA(12)和EMA(26)
+        2. DIF = EMA(12) - EMA(26)
+        3. DEA = DIF的9日EMA（首日用SMA初始化）
+        4. MACD柱 = (DIF - DEA) × 2
         
         Args:
             close_prices: 收盘价列表
@@ -58,51 +139,35 @@ class MACDService:
         Returns:
             包含dif、dea、macd的字典
         """
+        n = len(close_prices)
         result = {
-            'dif': [None] * len(close_prices),
-            'dea': [None] * len(close_prices),
-            'macd': [None] * len(close_prices)
+            'dif': [None] * n,
+            'dea': [None] * n,
+            'macd': [None] * n
         }
         
         # 数据不足，无法计算
-        if len(close_prices) < slow_period:
-            logger.warning(f"数据不足，无法计算MACD (需要至少{slow_period}个数据点，实际{len(close_prices)}个)")
+        if n < slow_period:
+            logger.warning(f"数据不足，无法计算MACD (需要至少{slow_period}个数据点，实际{n}个)")
             return result
         
-        # 计算快线和慢线EMA
+        # Step 1: 计算快线EMA(12)和慢线EMA(26)
         ema_fast = MACDService.calculate_ema(close_prices, fast_period)
         ema_slow = MACDService.calculate_ema(close_prices, slow_period)
         
-        # 计算DIF (快线 - 慢线)
-        dif_start_index = None
-        for i in range(len(close_prices)):
+        # Step 2: 计算DIF = EMA(12) - EMA(26)
+        # DIF从第slow_period个数据开始有效（索引slow_period-1）
+        for i in range(slow_period - 1, n):
             if ema_fast[i] is not None and ema_slow[i] is not None:
-                if dif_start_index is None:
-                    dif_start_index = i
                 result['dif'][i] = ema_fast[i] - ema_slow[i]
         
-        # 计算DEA (DIF的signal_period日EMA)
-        if dif_start_index is not None:
-            # 提取有效的DIF值（从dif_start_index开始）
-            valid_dif_values = []
-            for i in range(dif_start_index, len(result['dif'])):
-                if result['dif'][i] is not None:
-                    valid_dif_values.append(result['dif'][i])
-            
-            # 对有效DIF值计算EMA
-            if len(valid_dif_values) >= signal_period:
-                dea_values = MACDService.calculate_ema(valid_dif_values, signal_period)
-                
-                # 将DEA值填充回结果数组
-                for i, dea_val in enumerate(dea_values):
-                    actual_index = dif_start_index + i
-                    if actual_index < len(result['dea']) and dea_val is not None:
-                        result['dea'][actual_index] = dea_val
+        # Step 3: 计算DEA = DIF的signal_period日EMA
+        result['dea'] = MACDService.calculate_dea(result['dif'], signal_period)
         
-        # 计算MACD柱 = 2 * (DIF - DEA)
-        for i in range(len(close_prices)):
+        # Step 4: 计算MACD柱 = (DIF - DEA) × 2
+        for i in range(n):
             if result['dif'][i] is not None and result['dea'][i] is not None:
-                result['macd'][i] = 2 * (result['dif'][i] - result['dea'][i])
+                result['macd'][i] = (result['dif'][i] - result['dea'][i]) * 2
         
         # 统计有效数据数量
         valid_dif = sum(1 for x in result['dif'] if x is not None)

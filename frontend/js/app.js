@@ -752,61 +752,150 @@ function mergeLatestKline(existingKlineData, latestKlineData) {
     return existingKlineData;
 }
 
-// 计算MACD指标
+/**
+ * 计算MACD指标 - 标准日K线实现（与后端一致）
+ * 
+ * 参数配置: 快速EMA=12, 慢速EMA=26, 信号线周期=9
+ * 
+ * 计算公式:
+ * - EMA(12) = 前一日EMA(12) × 11/13 + 当日收盘价 × 2/13
+ * - EMA(26) = 前一日EMA(26) × 25/27 + 当日收盘价 × 2/27  
+ * - DIF = EMA(12) - EMA(26)
+ * - DEA = 前一日DEA × 8/10 + 当日DIF × 2/10 (首日DEA使用DIF的9日SMA初始化)
+ * - MACD柱 = (DIF - DEA) × 2
+ */
 function calculateMACD(klineData) {
     const closes = klineData.map(item => item.close);
-    const shortPeriod = 12;
-    const longPeriod = 26;
+    const n = closes.length;
+    const fastPeriod = 12;
+    const slowPeriod = 26;
     const signalPeriod = 9;
     
-    // 计算EMA
+    // 初始化结果数组（与输入长度相同，便于索引对齐）
+    const result = {
+        dif: Array(n).fill(null),
+        dea: Array(n).fill(null),
+        macd: Array(n).fill(null)
+    };
+    
+    if (n < slowPeriod) {
+        console.warn(`[MACD] 数据不足，需要至少${slowPeriod}个数据点，实际${n}个`);
+        return result;
+    }
+    
+    /**
+     * 计算EMA - 返回与输入等长的数组
+     * 公式: EMA = 前一日EMA × (1 - 2/(period+1)) + 当日价格 × 2/(period+1)
+     * 首日EMA使用SMA初始化
+     */
     function calculateEMA(data, period) {
-        const ema = [];
-        const multiplier = 2 / (period + 1);
+        const ema = Array(data.length).fill(null);
+        if (data.length < period) return ema;
         
-        // 第一个EMA使用SMA
+        const multiplier = 2.0 / (period + 1);
+        
+        // 首个EMA使用SMA初始化
         let sum = 0;
-        for (let i = 0; i < period && i < data.length; i++) {
+        for (let i = 0; i < period; i++) {
             sum += data[i];
         }
-        ema.push(sum / period);
+        ema[period - 1] = sum / period;
         
-        // 后续使用EMA公式
+        // 后续EMA计算
         for (let i = period; i < data.length; i++) {
-            const value = (data[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
-            ema.push(value);
+            ema[i] = ema[i - 1] * (1 - multiplier) + data[i] * multiplier;
         }
         
         return ema;
     }
     
-    // 计算短期和长期EMA
-    const ema12 = calculateEMA(closes, shortPeriod);
-    const ema26 = calculateEMA(closes, longPeriod);
-    
-    // 计算DIF
-    const dif = [];
-    const startIndex = longPeriod - 1;
-    for (let i = 0; i < ema12.length && i < ema26.length; i++) {
-        dif.push(ema12[i] - ema26[i]);
+    /**
+     * 计算DEA（信号线）
+     * 公式: DEA = 前一日DEA × 8/10 + 当日DIF × 2/10
+     * 首日DEA使用DIF的9日SMA初始化
+     */
+    function calculateDEA(difValues, period) {
+        const dea = Array(difValues.length).fill(null);
+        
+        // 找到第一个有效DIF的索引
+        let firstValidIdx = -1;
+        for (let i = 0; i < difValues.length; i++) {
+            if (difValues[i] !== null) {
+                firstValidIdx = i;
+                break;
+            }
+        }
+        
+        if (firstValidIdx < 0) return dea;
+        
+        // 统计有效DIF数量
+        let validCount = 0;
+        for (let i = firstValidIdx; i < difValues.length; i++) {
+            if (difValues[i] !== null) validCount++;
+        }
+        
+        if (validCount < period) return dea;
+        
+        const multiplier = 2.0 / (period + 1);
+        
+        // 计算首个DEA: 使用前period个有效DIF的SMA
+        let smaSum = 0;
+        let count = 0;
+        let smaIdx = -1;
+        
+        for (let i = firstValidIdx; i < difValues.length; i++) {
+            if (difValues[i] !== null) {
+                smaSum += difValues[i];
+                count++;
+                if (count === period) {
+                    smaIdx = i;
+                    break;
+                }
+            }
+        }
+        
+        if (smaIdx < 0) return dea;
+        
+        // 首日DEA = DIF的9日SMA
+        dea[smaIdx] = smaSum / period;
+        
+        // 后续DEA计算
+        for (let i = smaIdx + 1; i < difValues.length; i++) {
+            if (difValues[i] !== null && dea[i - 1] !== null) {
+                dea[i] = dea[i - 1] * (1 - multiplier) + difValues[i] * multiplier;
+            }
+        }
+        
+        return dea;
     }
     
-    // 计算DEA (DIF的9日EMA)
-    const dea = calculateEMA(dif, signalPeriod);
+    // Step 1: 计算快线EMA(12)和慢线EMA(26)
+    const ema12 = calculateEMA(closes, fastPeriod);
+    const ema26 = calculateEMA(closes, slowPeriod);
     
-    // 计算MACD柱
-    const macd = [];
-    const deaStartIndex = signalPeriod - 1;
-    for (let i = 0; i < dea.length; i++) {
-        macd.push((dif[i] - dea[i]) * 2);
+    // Step 2: 计算DIF = EMA(12) - EMA(26)
+    // DIF从第slowPeriod个数据开始有效（索引slowPeriod-1）
+    for (let i = slowPeriod - 1; i < n; i++) {
+        if (ema12[i] !== null && ema26[i] !== null) {
+            result.dif[i] = ema12[i] - ema26[i];
+        }
     }
     
-    // 填充前面的空值
-    const result = {
-        dif: Array(startIndex).fill(null).concat(dif),
-        dea: Array(startIndex + deaStartIndex).fill(null).concat(dea),
-        macd: Array(startIndex + deaStartIndex).fill(null).concat(macd)
-    };
+    // Step 3: 计算DEA = DIF的signalPeriod日EMA
+    result.dea = calculateDEA(result.dif, signalPeriod);
+    
+    // Step 4: 计算MACD柱 = (DIF - DEA) × 2
+    for (let i = 0; i < n; i++) {
+        if (result.dif[i] !== null && result.dea[i] !== null) {
+            result.macd[i] = (result.dif[i] - result.dea[i]) * 2;
+        }
+    }
+    
+    // 统计有效数据
+    const validDif = result.dif.filter(x => x !== null).length;
+    const validDea = result.dea.filter(x => x !== null).length;
+    const validMacd = result.macd.filter(x => x !== null).length;
+    console.log(`[MACD] 计算完成: DIF有效${validDif}个, DEA有效${validDea}个, MACD柱有效${validMacd}个`);
     
     return result;
 }
