@@ -56,6 +56,12 @@ def batch_backtest():
     return send_from_directory(app.static_folder, 'batch_backtest.html')
 
 
+@app.route('/high_score.html')
+def high_score():
+    """返回高分推荐页面"""
+    return send_from_directory(app.static_folder, 'high_score.html')
+
+
 @app.route('/api/debug/routes')
 def debug_routes():
     """调试：显示所有注册的路由"""

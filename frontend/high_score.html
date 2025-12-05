@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高分推荐 - 阿尔法策略2.0系统</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="css/styles.css?v=20251118020">
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f5f5f5;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .header .header-left {
+            margin-left: 0;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            gap: 10px;
+            flex: 0 0 auto;
+        }
+
+        .back-btn {
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .back-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .header-center h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+
+        .control-panel {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .filter-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .status-info {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .ranking-table-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .ranking-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ranking-header h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .ranking-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .ranking-table thead {
+            background: #f8f9fa;
+        }
+
+        .ranking-table th {
+            padding: 15px;
+            text-align: left;
+            font-weight: bold;
+            color: #333;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .ranking-table td {
+            padding: 15px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .ranking-table tbody tr:hover {
+            background: #f9f9f9;
+        }
+
+        .rank-cell {
+            font-weight: bold;
+            font-size: 18px;
+            color: #667eea;
+            text-align: center;
+            width: 60px;
+        }
+
+        .stock-code-cell {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .stock-name-cell {
+            color: #666;
+        }
+
+        .score-cell {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .score-strategy1 {
+            color: #4caf50;
+        }
+
+        .score-strategy2 {
+            color: #ff9800;
+        }
+
+        .score-max {
+            color: #667eea;
+            font-size: 18px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
+        .badge-triggered {
+            background: #4caf50;
+            color: white;
+        }
+
+        .badge-not-triggered {
+            background: #e0e0e0;
+            color: #666;
+        }
+
+        .nature-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #999;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .summary-info {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .clickable-row {
+            cursor: pointer;
+        }
+
+        .clickable-row:hover {
+            background: #f0f7ff !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div class="header-left">
+                <a href="/" class="back-btn">← 返回首页</a>
+            </div>
+            <div class="header-center">
+                <h1>⭐ <span style="color: #ff4444;">高分推荐</span></h1>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator"></div>
+                <span id="status-text">实时监控中...</span>
+                <span id="update-time" style="font-size: 12px; opacity: 0.8;"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <div class="control-row">
+                <button class="filter-btn active" onclick="filterStrategy(null)">全部策略</button>
+                <button class="filter-btn" onclick="filterStrategy('1')">策略1 (≥70分)</button>
+                <button class="filter-btn" onclick="filterStrategy('2')">策略2 (≥85分)</button>
+                <div class="status-info">
+                    <span>🔄 自动刷新: 每30秒</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 收盘后高分推荐 -->
+        <div class="ranking-table-container" style="margin-bottom: 20px;">
+            <div class="ranking-header">
+                <h2>📊 收盘后高分推荐（前20名）</h2>
+                <div style="font-size: 14px; opacity: 0.9;">
+                    <span id="after-hours-total-count">共 0 只股票达到阈值</span>
+                </div>
+            </div>
+
+            <div id="after-hours-ranking-content">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>正在加载收盘后排行榜数据...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 盘中高分推荐 -->
+        <div class="ranking-table-container">
+            <div class="ranking-header">
+                <h2>⚡ 盘中高分推荐（前20名）</h2>
+                <div style="font-size: 14px; opacity: 0.9;">
+                    <span id="intraday-total-count">共 0 只股票达到阈值</span>
+                </div>
+            </div>
+
+            <div id="intraday-ranking-content">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>正在加载盘中排行榜数据...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api';
+        let currentStrategyFilter = null;
+        let refreshInterval = null;
+
+        // 加载收盘后排行榜
+        async function loadAfterHoursRanking(strategy = null) {
+            try {
+                const url = `${API_BASE_URL}/ranking/realtime?strategy=${strategy || ''}&limit=20&type=after_hours`;
+                const response = await fetch(url);
+                const result = await response.json();
+
+                if (result.code === 200 && result.data) {
+                    displayRanking(result.data, 'after-hours');
+                    document.getElementById('after-hours-total-count').textContent = 
+                        `共 ${result.data.total || 0} 只股票达到阈值`;
+                } else {
+                    document.getElementById('after-hours-ranking-content').innerHTML = 
+                        '<div class="empty-state"><div class="empty-state-icon">⚠️</div><div>加载失败，请稍后重试</div></div>';
+                }
+            } catch (error) {
+                console.error('加载收盘后排行榜失败:', error);
+                document.getElementById('after-hours-ranking-content').innerHTML = 
+                    '<div class="empty-state"><div class="empty-state-icon">❌</div><div>网络错误，请检查连接</div></div>';
+            }
+        }
+
+        // 加载盘中排行榜
+        async function loadIntradayRanking(strategy = null) {
+            try {
+                const url = `${API_BASE_URL}/ranking/realtime?strategy=${strategy || ''}&limit=20&type=intraday`;
+                const response = await fetch(url);
+                const result = await response.json();
+
+                if (result.code === 200 && result.data) {
+                    displayRanking(result.data, 'intraday');
+                    document.getElementById('intraday-total-count').textContent = 
+                        `共 ${result.data.total || 0} 只股票达到阈值`;
+                } else {
+                    document.getElementById('intraday-ranking-content').innerHTML = 
+                        '<div class="empty-state"><div class="empty-state-icon">⚠️</div><div>加载失败，请稍后重试</div></div>';
+                }
+            } catch (error) {
+                console.error('加载盘中排行榜失败:', error);
+                document.getElementById('intraday-ranking-content').innerHTML = 
+                    '<div class="empty-state"><div class="empty-state-icon">❌</div><div>网络错误，请检查连接</div></div>';
+            }
+        }
+
+        // 加载所有排行榜
+        async function loadAllRankings(strategy = null) {
+            await Promise.all([
+                loadAfterHoursRanking(strategy),
+                loadIntradayRanking(strategy)
+            ]);
+            document.getElementById('update-time').textContent = 
+                `更新时间: ${new Date().toLocaleTimeString('zh-CN')}`;
+        }
+
+        // 显示排行榜
+        function displayRanking(data, type) {
+            const ranking = data.ranking || [];
+            const contentId = type === 'after-hours' ? 'after-hours-ranking-content' : 'intraday-ranking-content';
+
+            if (ranking.length === 0) {
+                document.getElementById(contentId).innerHTML = 
+                    '<div class="empty-state"><div class="empty-state-icon">📊</div><div>暂无达到阈值的高分股票</div></div>';
+                return;
+            }
+
+            let html = `
+                <table class="ranking-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">排名</th>
+                            <th style="width: 120px;">股票代码</th>
+                            <th style="width: 150px;">股票名称</th>
+                            <th style="width: 120px;">策略1评分</th>
+                            <th style="width: 120px;">策略2评分</th>
+                            <th style="width: 100px;">最高分</th>
+                            <th style="width: 100px;">成交量类型</th>
+                            <th style="width: 100px;">股性</th>
+                            <th style="width: 100px;">日期</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            ranking.forEach((item, index) => {
+                // 生成表名
+                const tableName = item.table_name || `basic_data_${item.stock_code.toLowerCase()}`;
+                // 获取股性（如果有）
+                const nature = item.nature || '未分类';
+                
+                html += `
+                    <tr class="clickable-row" onclick="openStock('${item.stock_code}', '${item.stock_name}', '${tableName}')">
+                        <td class="rank-cell">${index + 1}</td>
+                        <td class="stock-code-cell">${item.stock_code}</td>
+                        <td class="stock-name-cell">${item.stock_name}</td>
+                        <td class="score-cell score-strategy1">
+                            ${item.strategy1_score.toFixed(2)}
+                            ${item.strategy1_triggered ? 
+                                '<span class="badge badge-triggered">✓</span>' : 
+                                '<span class="badge badge-not-triggered">-</span>'}
+                        </td>
+                        <td class="score-cell score-strategy2">
+                            ${item.strategy2_score.toFixed(2)}
+                            ${item.strategy2_triggered ? 
+                                '<span class="badge badge-triggered">✓</span>' : 
+                                '<span class="badge badge-not-triggered">-</span>'}
+                        </td>
+                        <td class="score-cell score-max">${item.max_score.toFixed(2)}</td>
+                        <td>${item.volume_type || '-'}</td>
+                        <td><span class="nature-badge">${nature}</span></td>
+                        <td>${item.date || '-'}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+                <div class="summary-info">
+                    共找到 <strong>${data.total || 0}</strong> 只达到阈值的股票，显示前 <strong>${ranking.length}</strong> 名
+                </div>
+            `;
+
+            document.getElementById(contentId).innerHTML = html;
+        }
+
+        // 筛选策略
+        function filterStrategy(strategy) {
+            currentStrategyFilter = strategy;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // 重新加载所有排行榜
+            loadAllRankings(strategy);
+        }
+
+        // 打开股票详情
+        function openStock(stockCode, stockName, tableName) {
+            // 在新窗口打开股票详情页面
+            // 注意：这里需要根据实际的主页路由来调整
+            const url = `/index.html?stock=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}&table=${encodeURIComponent(tableName)}`;
+            window.open(url, '_blank');
+        }
+
+        // 启动自动刷新
+        function startAutoRefresh() {
+            // 立即加载一次
+            loadAllRankings(currentStrategyFilter);
+            
+            // 设置定时刷新（每30秒）
+            refreshInterval = setInterval(() => {
+                loadAllRankings(currentStrategyFilter);
+            }, 30000);
+        }
+
+        // 停止自动刷新
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        // 页面加载时启动
+        window.onload = () => {
+            startAutoRefresh();
+        };
+
+        // 页面卸载时停止
+        window.onbeforeunload = () => {
+            stopAutoRefresh();
+        };
+    </script>
+</body>
+</html>
+

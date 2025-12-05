@@ -14,7 +14,6 @@ body {
 }
 
 .header {
-    display: flex;
     align-items: center;
     justify-content: space-between;
     margin-bottom: 30px;
@@ -67,9 +66,9 @@ body {
 .header h1 {
     font-size: 36px;
     margin: 0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #ddd3d4 0%, #764ba2 100%);
     -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    -webkit-text-fill-color: transparent    ;
     background-clip: text;
     font-weight: 900;
     letter-spacing: 2px;
