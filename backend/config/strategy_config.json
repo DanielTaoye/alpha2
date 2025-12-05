@@ -13,11 +13,11 @@
       "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
     },
     "high_position_r": {
-      "gain_threshold_pct": 8.0,
+      "gain_threshold_pct": 10.5,
       "description": "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值"
     }
   },
   "market_type": "bull",
   "market_type_description": "市场类型：bull=牛市, bear=熊市（人工判断）",
-  "last_updated": "2025-12-05 11:44:30"
+  "last_updated": "2025-12-05 17:16:40"
 }

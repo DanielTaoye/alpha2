@@ -28,10 +28,10 @@ class RPointPluginService:
         """初始化R点插件服务"""
         from infrastructure.persistence.daily_repository_impl import DailyRepositoryImpl
         from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
-        from domain.services.config_service import ConfigService
+        from domain.services.config_service import get_config_service
         self.daily_repo = DailyRepositoryImpl()
         self.daily_chance_repo = DailyChanceRepositoryImpl()
-        self.config_service = ConfigService()
+        self.config_service = get_config_service()  # 使用单例，确保配置更新后生效
         # 数据缓存
         self._daily_cache = {}  # {date_str: DailyData}
         self._daily_chance_cache = {}  # {date_str: DailyChance}
