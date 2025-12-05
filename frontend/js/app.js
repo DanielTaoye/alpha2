@@ -166,10 +166,18 @@ function updateStockList() {
     });
 }
 
+// 搜索防抖定时器
+let searchDebounceTimer = null;
+
 // 筛选股票（搜索功能 - 搜索全部股票）
-function filterStocks() {
-    const searchText = document.getElementById('searchInput').value.toLowerCase().trim();
+async function filterStocks() {
+    const searchText = document.getElementById('searchInput').value.trim();
     const stockSelect = document.getElementById('stockSelect');
+    
+    // 清除之前的定时器
+    if (searchDebounceTimer) {
+        clearTimeout(searchDebounceTimer);
+    }
     
     // 如果搜索框为空，显示当前策略下的股票
     if (!searchText) {
@@ -177,39 +185,63 @@ function filterStocks() {
         return;
     }
     
-    // 搜索全部股票
-    stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
-    
-    let matchCount = 0;
-    
-    // 遍历所有策略组
-    for (const [strategyName, stocks] of Object.entries(allStockGroups)) {
-        stocks.forEach(stock => {
-            const stockText = `${stock.name} ${stock.code}`.toLowerCase();
+    // 防抖：延迟300ms执行搜索
+    searchDebounceTimer = setTimeout(async () => {
+        await performSearch(searchText, stockSelect);
+    }, 300);
+}
+
+// 执行搜索
+async function performSearch(keyword, stockSelect) {
+    try {
+        // 显示加载状态
+        stockSelect.innerHTML = '<option value="">正在搜索...</option>';
+        stockSelect.disabled = true;
+        
+        // 调用后端搜索接口
+        const response = await fetch(`${API_BASE_URL}/stocks/search?keyword=${encodeURIComponent(keyword)}&limit=100`);
+        const result = await response.json();
+        
+        stockSelect.disabled = false;
+        stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
+        
+        if (result.code === 200 && result.data && result.data.length > 0) {
+            const stocks = result.data;
             
-            // 如果匹配搜索词
-            if (stockText.includes(searchText)) {
+            stocks.forEach(stock => {
                 const option = document.createElement('option');
                 option.value = stock.code;
-                option.textContent = `${stock.name} (${stock.code}) - ${strategyName}`;
+                // 显示：股票名称 (股票代码) - 股性
+                option.textContent = `${stock.name} (${stock.code}) - ${stock.nature}`;
                 option.dataset.name = stock.name;
                 option.dataset.table = stock.table_name;
+                option.dataset.nature = stock.nature; // 保存股性信息
                 stockSelect.appendChild(option);
-                matchCount++;
-            }
-        });
-    }
-    
-    // 如果没有匹配结果，显示提示
-    if (matchCount === 0) {
+            });
+            
+            console.log(`搜索完成: 找到 ${stocks.length} 只股票`);
+        } else {
+            // 没有找到结果
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = `未找到匹配 "${keyword}" 的股票`;
+            option.disabled = true;
+            stockSelect.appendChild(option);
+        }
+        
+        stockSelect.value = '';
+        
+    } catch (error) {
+        console.error('搜索股票失败:', error);
+        stockSelect.disabled = false;
+        stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
+        
         const option = document.createElement('option');
         option.value = '';
-        option.textContent = `未找到匹配 "${searchText}" 的股票`;
+        option.textContent = '搜索失败，请稍后重试';
         option.disabled = true;
         stockSelect.appendChild(option);
     }
-    
-    stockSelect.value = '';
 }
 
 // 选择股票
@@ -233,8 +265,10 @@ async function selectStock() {
     currentStockCode = stockSelect.value;
     const stockName = selectedOption.dataset.name;
     currentTableName = selectedOption.dataset.table;
+    // 获取股性：如果是从搜索来的，使用 dataset.nature；否则使用当前策略
+    const stockNature = selectedOption.dataset.nature || currentStrategy;
 
-    renderStockView(currentStockCode, stockName, currentTableName);
+    renderStockView(currentStockCode, stockName, currentTableName, stockNature);
     await checkAvailablePeriods(currentTableName);
     const defaultPeriod = selectDefaultPeriod();
     loadStockData(currentStockCode, currentTableName, defaultPeriod);
@@ -251,15 +285,18 @@ function showEmptyState() {
 }
 
 // 渲染股票视图
-function renderStockView(stockCode, stockName, tableName) {
+function renderStockView(stockCode, stockName, tableName, stockNature = null) {
     const app = document.getElementById('app');
+    
+    // 使用传入的股性，如果没有则使用当前策略
+    const displayNature = stockNature || currentStrategy;
     
     app.innerHTML = `
         <div class="stock-info-bar">
             <div class="stock-info">
                 <div class="stock-name-large">${stockName}</div>
                 <div class="stock-code-large">${stockCode}</div>
-                <div class="strategy-tag ${currentStrategy}">${currentStrategy}</div>
+                <div class="strategy-tag ${displayNature}">${displayNature}</div>
             </div>
             <div class="period-selector">
                 <button class="period-btn" onclick="changePeriod('30min')">30分钟</button>

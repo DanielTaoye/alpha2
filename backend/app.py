@@ -71,8 +71,14 @@ def debug_routes():
 
 @app.route('/api/stock_groups', methods=['GET'])
 def get_stock_groups():
-    """获取股票分组信息"""
+    """获取股票分组信息（59支代表性股票）"""
     return stock_controller.get_stock_groups()
+
+
+@app.route('/api/stocks/search', methods=['GET'])
+def search_stocks():
+    """搜索全部股票（从 all_stock 表）"""
+    return stock_controller.search_stocks()
 
 
 @app.route('/api/available_periods', methods=['POST'])
