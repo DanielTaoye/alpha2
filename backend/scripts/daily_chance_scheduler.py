@@ -402,8 +402,12 @@ def main():
     )
     
     # 可选：立即执行一次测试
-    # logger.info("🔧 立即执行一次测试...")
-    # sync_daily_chance_job()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--now':
+        logger.info("🔧 立即执行一次任务...")
+        sync_daily_chance_job()
+        logger.info("✅ 任务执行完成，退出")
+        return
     
     try:
         logger.info("✅ 调度器已启动，等待执行任务...")

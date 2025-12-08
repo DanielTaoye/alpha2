@@ -21,6 +21,8 @@ from interfaces.controllers.config_controller import ConfigController
 from interfaces.controllers.backtest_controller import BacktestController
 from interfaces.controllers.latest_cr_point_controller import LatestCRPointController
 from interfaces.controllers.cache_controller import CacheController
+from interfaces.controllers.high_score_controller import HighScoreController
+from interfaces.controllers.streaming_score_controller import StreamingScoreController
 from infrastructure.config.app_config import SERVER_CONFIG
 
 # 初始化日志
@@ -40,6 +42,8 @@ config_controller = ConfigController()
 backtest_controller = BacktestController()
 latest_cr_point_controller = LatestCRPointController()
 cache_controller = CacheController()
+high_score_controller = HighScoreController()
+streaming_score_controller = StreamingScoreController()
 
 
 # ============ 路由定义 ============
@@ -239,11 +243,59 @@ def run_backtest():
     return backtest_controller.run_backtest()
 
 
+# ============= 高分股票扫描接口 =============
+@app.route('/api/high_score/scan', methods=['POST'])
+def scan_high_score_stocks():
+    """扫描高分股票（盘中实时推荐）"""
+    return high_score_controller.scan_high_score_stocks()
+
+
+@app.route('/api/high_score/thresholds', methods=['GET'])
+def get_high_score_thresholds():
+    """获取高分股票阈值配置"""
+    return high_score_controller.get_thresholds()
+
+
+@app.route('/api/high_score/clear_cache', methods=['POST'])
+def clear_high_score_cache():
+    """清空高分股票扫描缓存"""
+    return high_score_controller.clear_cache()
+
+
+# ============= 流式微批分数查询接口（快速）=============
+@app.route('/api/streaming/high_score', methods=['POST', 'GET'])
+def get_streaming_high_score():
+    """获取高分股票列表（流式微批，毫秒级查询）"""
+    return streaming_score_controller.get_high_score_stocks()
+
+
+@app.route('/api/streaming/status', methods=['GET'])
+def get_streaming_status():
+    """获取流式服务状态"""
+    return streaming_score_controller.get_service_status()
+
+
+@app.route('/api/streaming/start', methods=['POST'])
+def start_streaming():
+    """启动流式服务"""
+    return streaming_score_controller.start_service()
+
+
+@app.route('/api/streaming/stop', methods=['POST'])
+def stop_streaming():
+    """停止流式服务"""
+    return streaming_score_controller.stop_service()
+
+
 if __name__ == '__main__':
     logger.info("=" * 50)
     logger.info("阿尔法策略2.0系统启动")
     logger.info(f"服务器地址: {SERVER_CONFIG['host']}:{SERVER_CONFIG['port']}")
     logger.info(f"调试模式: {SERVER_CONFIG['debug']}")
+    logger.info("=" * 50)
+    logger.info("💡 流式微批服务未自动启动，请手动启动：")
+    logger.info("   - API: POST /api/streaming/start")
+    logger.info("   - 或运行: python backend/scripts/start_streaming_service.py")
     logger.info("=" * 50)
     
     # 初始化全局CR缓存（后台线程异步初始化，不阻塞启动）
