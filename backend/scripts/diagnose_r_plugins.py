@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import argparse
+import requests
 
 # 添加项目根目录到路径
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +22,47 @@ from infrastructure.logging.logger import get_logger
 from domain.services.r_point_plugin_service import RPointPluginService
 
 logger = get_logger(__name__)
+
+# API基础URL
+API_BASE_URL = "http://localhost:5000"
+
+
+def get_cr_points_from_api(stock_code: str, table_name: str, start_date: str = None, end_date: str = None) -> Optional[Dict]:
+    """
+    通过API获取CR点分析数据（包含MA、MACD等完整数据）
+    """
+    try:
+        payload = {
+            'stockCode': stock_code,
+            'tableName': table_name
+        }
+        if start_date:
+            payload['startDate'] = start_date
+        if end_date:
+            payload['endDate'] = end_date
+            
+        response = requests.post(
+            f"{API_BASE_URL}/api/cr_points/analyze",
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            print(f"❌ API请求失败: HTTP {response.status_code}")
+            return None
+        
+        result = response.json()
+        if result.get('code') != 200:
+            print(f"❌ API返回错误: {result.get('message')}")
+            return None
+        
+        return result.get('data')
+    except requests.exceptions.ConnectionError:
+        print(f"❌ 无法连接到API服务器 ({API_BASE_URL})，请确保后端服务已启动")
+        return None
+    except Exception as e:
+        print(f"❌ 获取CR点数据失败: {e}")
+        return None
 
 
 def search_stock(keyword: str) -> Optional[Dict]:
@@ -453,19 +495,19 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     threshold = thresholds.get(stock_nature, 10.0)
     
     # 前一日赔率得分
-    day_win_ratio_score = prev_chance.get('day_win_ratio_score', 0) or 0
+    day_win_ratio_score = float(prev_chance.get('day_win_ratio_score') or 0)
     print(f"  前一日赔率得分: {day_win_ratio_score:.2f} (需要: 0 < 赔率 < {threshold})")
     
     is_near_pressure = 0 < day_win_ratio_score < threshold
     print(f"  是否满足赔率条件: {'✅' if is_near_pressure else '❌'}")
     
     # 压力位距离
-    pressure_price_raw = prev_chance.get('pressure_price', 0) or 0
+    pressure_price_raw = float(prev_chance.get('pressure_price') or 0)
     if pressure_price_raw > 0:
         pressure_price = pressure_price_raw / 100.0
         current_close = current_data['close']
         distance_pct = (pressure_price - current_close) / current_close * 100
-        print(f"  压力位: {pressure_price:.2f}元 (数据库原值: {pressure_price_raw})")
+        print(f"  压力位: {pressure_price:.2f}元 (数据库原值: {pressure_price_raw:.0f})")
         print(f"  当前收盘价: {current_close:.2f}元")
         print(f"  距离压力位: {distance_pct:.2f}% (需要: 0% < 距离 < 10%)")
         
@@ -547,7 +589,7 @@ def diagnose_weak_breakout(stock_code: str, date_str: str, current_data: Dict,
         thresholds = {"短线": 15.0, "波段": 12.0, "中长线": 10.0}
         threshold = thresholds.get(stock_nature, 12.0)
         
-        day_win_ratio_score = prev_chance.get('day_win_ratio_score', 0) or 0
+        day_win_ratio_score = float(prev_chance.get('day_win_ratio_score') or 0)
         print(f"  前一日赔率: {day_win_ratio_score:.2f} (需要: 0 < 赔率 < {threshold})")
     
     # 检查前日涨幅
@@ -571,12 +613,12 @@ def diagnose_break_support(stock_code: str, date_str: str, current_data: Dict,
         return
     
     # 支撑位
-    support_price_raw = prev_chance.get('support_price', 0) or 0
+    support_price_raw = float(prev_chance.get('support_price') or 0)
     if support_price_raw > 0:
         support_price = support_price_raw / 100.0
         current_close = current_data['close']
         
-        print(f"  前日支撑位: {support_price:.2f}元 (数据库原值: {support_price_raw})")
+        print(f"  前日支撑位: {support_price:.2f}元 (数据库原值: {support_price_raw:.0f})")
         print(f"  当前收盘价: {current_close:.2f}元")
         
         is_break = current_close < support_price
@@ -591,6 +633,255 @@ def diagnose_break_support(stock_code: str, date_str: str, current_data: Dict,
         print(f"  是否放量(XYZ): {'✅' if is_volume_xyz else '❌'} (此插件需要放量)")
     else:
         print("  ❌ 无支撑位数据")
+
+
+def diagnose_high_position_r(stock_code: str, date_str: str, current_data: Dict,
+                              prev_chance: Dict, ma_data: Dict, macd_data: Dict,
+                              kline_list: List, target_index: int):
+    """诊断高位发R插件（插件6）"""
+    print("\n" + "=" * 80)
+    print("📊 插件6: 高位发R")
+    print("=" * 80)
+    
+    if not ma_data or not macd_data:
+        print("  ❌ 缺少MA或MACD数据，无法诊断")
+        return
+    
+    if target_index < 0:
+        print("  ❌ 未找到目标日期的K线索引")
+        return
+    
+    current_price = current_data['close']
+    
+    # 条件1: 均线多头排列
+    print("\n  --- 条件1: 均线多头排列 ---")
+    ma5 = ma_data.get('ma5', [])[target_index] if target_index < len(ma_data.get('ma5', [])) else None
+    ma10 = ma_data.get('ma10', [])[target_index] if target_index < len(ma_data.get('ma10', [])) else None
+    ma20 = ma_data.get('ma20', [])[target_index] if target_index < len(ma_data.get('ma20', [])) else None
+    ma30 = ma_data.get('ma30', [])[target_index] if target_index < len(ma_data.get('ma30', [])) else None
+    ma60 = ma_data.get('ma60', [])[target_index] if target_index < len(ma_data.get('ma60', [])) else None
+    
+    if None in [ma5, ma10, ma20, ma30, ma60]:
+        print(f"  均线数据不完整: MA5={ma5}, MA10={ma10}, MA20={ma20}, MA30={ma30}, MA60={ma60}")
+    else:
+        is_bullish_alignment = ma5 > ma10 > ma20 > ma30 > ma60
+        print(f"  MA5={ma5:.2f} > MA10={ma10:.2f} > MA20={ma20:.2f} > MA30={ma30:.2f} > MA60={ma60:.2f}")
+        print(f"  当前多头排列: {'✅' if is_bullish_alignment else '❌'}")
+        
+        # 检查前3日是否有多头排列
+        for i in range(1, 4):
+            check_idx = target_index - i
+            if check_idx >= 0:
+                m5 = ma_data.get('ma5', [])[check_idx] if check_idx < len(ma_data.get('ma5', [])) else None
+                m10 = ma_data.get('ma10', [])[check_idx] if check_idx < len(ma_data.get('ma10', [])) else None
+                m20 = ma_data.get('ma20', [])[check_idx] if check_idx < len(ma_data.get('ma20', [])) else None
+                m30 = ma_data.get('ma30', [])[check_idx] if check_idx < len(ma_data.get('ma30', [])) else None
+                m60 = ma_data.get('ma60', [])[check_idx] if check_idx < len(ma_data.get('ma60', [])) else None
+                if None not in [m5, m10, m20, m30, m60]:
+                    was_bullish = m5 > m10 > m20 > m30 > m60
+                    print(f"  前{i}日多头排列: {'✅' if was_bullish else '❌'}")
+    
+    # 条件2: 20日最低价涨幅>18%
+    print("\n  --- 条件2: 20日涨幅 ---")
+    if target_index >= 20 and len(kline_list) > target_index:
+        lowest_price = min(k.get('low', float('inf')) for k in kline_list[target_index-20:target_index])
+        gain_from_lowest = (current_price - lowest_price) / lowest_price * 100 if lowest_price > 0 else 0
+        print(f"  20日最低价: {lowest_price:.2f}, 当前价: {current_price:.2f}")
+        print(f"  涨幅: {gain_from_lowest:.2f}% (需要>18%): {'✅' if gain_from_lowest > 18 else '❌'}")
+    else:
+        print("  ❌ 数据不足20天")
+    
+    # 条件3: 股价>MA10
+    print("\n  --- 条件3: 股价>MA10 ---")
+    if ma10:
+        print(f"  股价{current_price:.2f} > MA10({ma10:.2f}): {'✅' if current_price > ma10 else '❌'}")
+    
+    # 条件4: 跌破支撑位
+    print("\n  --- 条件4: 跌破支撑位 ---")
+    if prev_chance:
+        support_raw = float(prev_chance.get('support_price') or 0)
+        if support_raw > 0:
+            support_price = support_raw / 100.0
+            is_break = current_price < support_price
+            print(f"  支撑位: {support_price:.2f}, 当前价: {current_price:.2f}")
+            print(f"  是否跌破: {'✅' if is_break else '❌'}")
+        else:
+            print("  ❌ 无支撑位数据")
+    else:
+        print("  ❌ 无前一日数据")
+    
+    # 条件5: MACD死叉
+    print("\n  --- 条件5: MACD死叉 ---")
+    dif_list = macd_data.get('dif', [])
+    dea_list = macd_data.get('dea', [])
+    if dif_list and dea_list and target_index < len(dif_list):
+        curr_dif = dif_list[target_index]
+        curr_dea = dea_list[target_index]
+        print(f"  当前 DIF={curr_dif:.4f}, DEA={curr_dea:.4f}")
+        print(f"  DIF < DEA (死叉状态): {'✅' if curr_dif < curr_dea else '❌'}")
+        
+        # 检查前5日是否有死叉转换
+        for i in range(1, 6):
+            check_idx = target_index - i
+            if check_idx >= 1:
+                prev_dif = dif_list[check_idx - 1]
+                prev_dea = dea_list[check_idx - 1]
+                curr_d = dif_list[check_idx]
+                curr_e = dea_list[check_idx]
+                if prev_dif > prev_dea and curr_d < curr_e:
+                    print(f"  前{i}日出现死叉转换点 ✅")
+                    break
+    else:
+        print("  ❌ MACD数据不足")
+
+
+def diagnose_box_breakdown(stock_code: str, date_str: str, current_data: Dict,
+                           prev_chance: Dict, macd_data: Dict, kline_list: List, target_index: int):
+    """诊断箱体回踩被跌破插件（插件7）"""
+    print("\n" + "=" * 80)
+    print("📊 插件7: 箱体回踩被跌破")
+    print("=" * 80)
+    
+    if target_index < 42:
+        print(f"  ❌ 数据不足42天（当前索引: {target_index}）")
+        return
+    
+    current_price = current_data['close']
+    
+    # 步骤1: 找X日（今天往前20天的最高价所在日）
+    print("\n  --- 步骤1: 找X日（前20天最高价）---")
+    x_day_high = 0
+    x_day_index = -1
+    for i in range(target_index - 19, target_index + 1):
+        if i >= 0 and i < len(kline_list):
+            if kline_list[i].get('high', 0) > x_day_high:
+                x_day_high = kline_list[i].get('high', 0)
+                x_day_index = i
+    
+    if x_day_index >= 0:
+        x_date = kline_list[x_day_index].get('date', '')
+        print(f"  X日: {x_date}, 最高价: {x_day_high:.2f}")
+        
+        # 检查回落幅度
+        drop_ratio = (x_day_high - current_price) / x_day_high * 100 if x_day_high > 0 else 0
+        print(f"  当前价{current_price:.2f}较X日回落: {drop_ratio:.2f}% (需要>20%): {'✅' if drop_ratio > 20 else '❌'}")
+    else:
+        print("  ❌ 无法找到X日")
+        return
+    
+    # 步骤2: 从X日往前22天找Y日和Z日
+    print("\n  --- 步骤2: 找Y日和Z日 ---")
+    if x_day_index >= 22:
+        box_start = x_day_index - 22
+        box_end = x_day_index - 1
+        
+        # 找Y日
+        y_day_high = None
+        for i in range(box_start, box_end + 1):
+            if kline_list[i].get('high', 0) > x_day_high:
+                if y_day_high is None or kline_list[i].get('high', 0) > y_day_high:
+                    y_day_high = kline_list[i].get('high', 0)
+        
+        # 找Z日
+        z_day_low = float('inf')
+        for i in range(box_start, box_end + 1):
+            if kline_list[i].get('low', float('inf')) < z_day_low:
+                z_day_low = kline_list[i].get('low', float('inf'))
+        
+        if y_day_high:
+            print(f"  Y日最高价: {y_day_high:.2f} (比X日更高)")
+            box_gain = (y_day_high - z_day_low) / z_day_low * 100 if z_day_low > 0 else 0
+            print(f"  Z日最低价: {z_day_low:.2f}")
+            print(f"  Y-Z涨幅: {box_gain:.2f}% (需要>20%): {'✅' if box_gain > 20 else '❌'}")
+        else:
+            print(f"  无Y日（X日前22天没有更高价）")
+            box_gain = (x_day_high - z_day_low) / z_day_low * 100 if z_day_low > 0 else 0
+            print(f"  Z日最低价: {z_day_low:.2f}")
+            print(f"  X-Z涨幅: {box_gain:.2f}% (需要>20%): {'✅' if box_gain > 20 else '❌'}")
+    
+    # 步骤3: 跌破支撑位
+    print("\n  --- 步骤3: 跌破支撑位 ---")
+    if prev_chance:
+        support_raw = float(prev_chance.get('support_price') or 0)
+        if support_raw > 0:
+            support_price = support_raw / 100.0
+            is_break = current_price < support_price
+            print(f"  支撑位: {support_price:.2f}, 当前价: {current_price:.2f}")
+            print(f"  是否跌破: {'✅' if is_break else '❌'}")
+    
+    # 步骤4: MACD死叉
+    print("\n  --- 步骤4: MACD死叉 ---")
+    dif_list = macd_data.get('dif', [])
+    dea_list = macd_data.get('dea', [])
+    if dif_list and dea_list and target_index < len(dif_list):
+        for i in range(max(1, target_index - 5), target_index + 1):
+            if i > 0:
+                prev_dif = dif_list[i - 1]
+                prev_dea = dea_list[i - 1]
+                curr_dif = dif_list[i]
+                curr_dea = dea_list[i]
+                if prev_dif > prev_dea and curr_dif < curr_dea:
+                    print(f"  索引{i}出现死叉转换 ✅")
+                    break
+        else:
+            print("  前5日未发现死叉转换 ❌")
+
+
+def diagnose_downtrend_break(stock_code: str, date_str: str, current_data: Dict,
+                              prev_chance: Dict, ma_data: Dict, macd_data: Dict, target_index: int):
+    """诊断趋势向下+跌破支撑+MACD死叉插件（插件8）"""
+    print("\n" + "=" * 80)
+    print("📊 插件8: 趋势向下+未放量跌破支撑+MACD死叉")
+    print("=" * 80)
+    
+    current_price = current_data['close']
+    
+    # 条件1: 股价在60日均线下方
+    print("\n  --- 条件1: 股价<MA60 ---")
+    ma60_list = ma_data.get('ma60', [])
+    if ma60_list and target_index < len(ma60_list):
+        ma60 = ma60_list[target_index]
+        if ma60:
+            is_below_ma60 = current_price < ma60
+            print(f"  股价{current_price:.2f} < MA60({ma60:.2f}): {'✅' if is_below_ma60 else '❌'}")
+        else:
+            print("  ❌ MA60数据为空")
+    else:
+        print("  ❌ MA60数据不足")
+    
+    # 条件2: 跌破支撑位
+    print("\n  --- 条件2: 跌破支撑位 ---")
+    if prev_chance:
+        support_raw = float(prev_chance.get('support_price') or 0)
+        if support_raw > 0:
+            support_price = support_raw / 100.0
+            is_break = current_price < support_price
+            print(f"  支撑位: {support_price:.2f}, 当前价: {current_price:.2f}")
+            print(f"  是否跌破: {'✅' if is_break else '❌'}")
+        else:
+            print("  ❌ 无支撑位数据")
+    
+    # 条件3: MACD死叉
+    print("\n  --- 条件3: MACD死叉 ---")
+    dif_list = macd_data.get('dif', [])
+    dea_list = macd_data.get('dea', [])
+    if dif_list and dea_list and target_index < len(dif_list):
+        curr_dif = dif_list[target_index]
+        curr_dea = dea_list[target_index]
+        print(f"  当前 DIF={curr_dif:.4f}, DEA={curr_dea:.4f}")
+        
+        # 检查当前及前3日是否有死叉
+        for i in range(max(1, target_index - 3), target_index + 1):
+            if i > 0:
+                prev_dif = dif_list[i - 1]
+                prev_dea = dea_list[i - 1]
+                curr_d = dif_list[i]
+                curr_e = dea_list[i]
+                if prev_dif > prev_dea and curr_d < curr_e:
+                    print(f"  索引{i}出现死叉转换 ✅")
+                    break
+        else:
+            print("  当前及前3日未发现死叉转换 ❌")
 
 
 def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
@@ -684,7 +975,7 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
     except Exception as e:
         print(f"   ⚠️ 检查过程出错: {e}")
     
-    # 逐个插件详细诊断
+    # 逐个插件详细诊断（插件1-5）
     diagnose_deviation(stock_code, date_str, current_data, current_chance, historical_data)
     diagnose_pressure_stagnation(stock_code, date_str, current_data, current_chance, prev_chance)
     diagnose_fundamental_negative(stock_code, date_str, current_data)
@@ -692,13 +983,57 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
                            historical_data, c_point_date)
     diagnose_break_support(stock_code, date_str, current_data, current_chance, prev_chance)
     
+    # 通过API获取完整数据（MA、MACD、K线序列）用于诊断插件6-8
+    print("\n" + "=" * 80)
+    print("📡 从API获取MA/MACD数据（用于插件6-8诊断）")
+    print("=" * 80)
+    
+    table_name = stock_info.get('table_name', f"basic_data_{stock_code.lower()}")
+    # 获取足够长的历史数据（60天）
+    api_start_date = (datetime.strptime(date_str, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
+    api_data = get_cr_points_from_api(stock_code, table_name, api_start_date, date_str)
+    
+    if api_data:
+        ma_data = api_data.get('ma', {})
+        macd_data = api_data.get('macd', {})
+        kline_list = api_data.get('klineData', [])
+        
+        print(f"   ✅ 获取到 {len(kline_list)} 条K线数据")
+        print(f"   MA数据: MA5={len(ma_data.get('ma5', []))}条, MA60={len(ma_data.get('ma60', []))}条")
+        print(f"   MACD数据: DIF={len(macd_data.get('dif', []))}条, DEA={len(macd_data.get('dea', []))}条")
+        
+        # 找到目标日期的索引
+        target_index = -1
+        for i, kline in enumerate(kline_list):
+            kline_date = kline.get('date', '')
+            if isinstance(kline_date, str) and kline_date.startswith(date_str):
+                target_index = i
+                break
+            elif hasattr(kline_date, 'strftime') and kline_date.strftime('%Y-%m-%d') == date_str:
+                target_index = i
+                break
+        
+        if target_index >= 0:
+            print(f"   目标日期索引: {target_index}")
+            
+            # 诊断插件6-8
+            diagnose_high_position_r(stock_code, date_str, current_data, prev_chance, 
+                                     ma_data, macd_data, kline_list, target_index)
+            diagnose_box_breakdown(stock_code, date_str, current_data, prev_chance,
+                                   macd_data, kline_list, target_index)
+            diagnose_downtrend_break(stock_code, date_str, current_data, prev_chance,
+                                     ma_data, macd_data, target_index)
+        else:
+            print(f"   ❌ 在K线数据中未找到目标日期 {date_str}")
+    else:
+        print("   ❌ 无法从API获取数据，跳过插件6-8诊断")
+        print("   请确保后端服务已启动: python app.py")
+    
     print("\n" + "=" * 80)
     print("📝 诊断结论")
     print("=" * 80)
-    print("   以上是各个R点插件的详细条件检查。")
+    print("   以上是所有8个R点插件的详细条件检查。")
     print("   要触发R点，需要满足任意一个插件的全部条件。")
-    print("   注意: 插件6(高位发R)、插件7(箱体回踩)、插件8(趋势向下)需要完整K线序列和MA/MACD数据，")
-    print("   此简化诊断未包含这些插件的检查。如需完整检查，请通过API接口查询。")
 
 
 def main():
