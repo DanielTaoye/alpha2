@@ -166,7 +166,7 @@ class RPointPluginService:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
             # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
             
             # 获取当日数据
             current_data = self._daily_cache.get(date_str)
@@ -388,7 +388,7 @@ class RPointPluginService:
             c_data = None  # 初始化C点日数据
             
             # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
             
             # 获取当日数据
             current_data = self._daily_cache.get(date_str)
@@ -560,7 +560,7 @@ class RPointPluginService:
                 return RPointPluginResult("基本面突发利空", False, "")
             
             # 判断是否跌停
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
             limit_threshold = -9.9 if is_main_board else -19.8
             
             if current_data.pre_close and current_data.pre_close > 0:
@@ -607,7 +607,7 @@ class RPointPluginService:
             c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else c_point_date
             
             # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
             
             # 获取C点日期的数据
             c_data = self._daily_cache.get(c_date_str)
@@ -1403,9 +1403,11 @@ class RPointPluginService:
         matched_patterns = []
         
         # 判断主板还是非主板
+        # 主板：SH60x（沪市主板）、SZ000/SZ001/SZ002/SZ003（深市主板）
+        # 非主板：SZ300（创业板）、SH688（科创板）、SZ北交所
         is_main_board = True
         if stock_code:
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
         
         # 计算ABC
         O = daily_data.open
@@ -1413,27 +1415,48 @@ class RPointPluginService:
         H = daily_data.high
         L = daily_data.low
         
-        # 获取前收价：优先使用pre_close，如果无效则查询前一天数据
-        prev_close = daily_data.pre_close
+        # 获取前收价：优先使用pre_close，如果无效则查询前一交易日的收盘价
+        prev_close = daily_data.pre_close if hasattr(daily_data, 'pre_close') else 0
         if not prev_close or prev_close == 0:
             if stock_code:
                 try:
+                    # 方法1：从缓存获取
                     prev_dates = self._get_previous_trading_dates_from_cache(daily_data.date, stock_code)
                     if prev_dates:
                         prev_date = prev_dates[0]
-                        prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
+                        # 先从缓存查
+                        prev_data = self._daily_cache.get(prev_date)
+                        if not prev_data:
+                            prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
                         if prev_data and prev_data.close > 0:
                             prev_close = prev_data.close
-                        else:
-                            return []  # 无法获取前收价，无法判断
-                    else:
-                        return []
-                except:
+                            logger.debug(f"[K线形态] 从前一交易日({prev_date})获取收盘价: {prev_close}")
+                    
+                    # 方法2：如果缓存没有，直接查数据库前一个交易日
+                    if not prev_close or prev_close == 0:
+                        table_name = f"basic_data_{stock_code.lower()}"
+                        from infrastructure.persistence.database import DatabaseConnection
+                        date_str = daily_data.date.strftime('%Y-%m-%d') if hasattr(daily_data.date, 'strftime') else str(daily_data.date)[:10]
+                        with DatabaseConnection.get_connection_context() as conn:
+                            cursor = conn.cursor()
+                            sql = f"""
+                                SELECT shou_pan_jia FROM `{table_name}`
+                                WHERE DATE(shi_jian) < %s AND peroid_type = '1day'
+                                ORDER BY shi_jian DESC LIMIT 1
+                            """
+                            cursor.execute(sql, (date_str,))
+                            row = cursor.fetchone()
+                            if row and row[0]:
+                                prev_close = float(row[0])
+                                logger.debug(f"[K线形态] 从数据库查询前一交易日收盘价: {prev_close}")
+                except Exception as e:
+                    logger.warning(f"[K线形态] 获取前收价失败: {e}")
                     return []
             else:
                 return []  # 没有stock_code无法查询
         
         if prev_close == 0:
+            logger.warning(f"[K线形态] 无法获取有效的前收价，跳过K线形态检测")
             return []  # 前收价无效
         
         # A: 上影线 = 最高价 - max(开盘价, 收盘价)
