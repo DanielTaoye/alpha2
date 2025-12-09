@@ -113,8 +113,7 @@ class Strategy2Service:
                            close_price: float, index: int, details: List[str]) -> float:
         """
         计算均线得分：30分
-        条件：5日线上穿10日线 且 K线当前价格 > 20日均线价格
-        一旦触发，5个交易日（包括今天）内持续有效
+        条件：5日 > 10日 > 20日（多头排列）
         """
         score = 0
         
@@ -122,34 +121,12 @@ class Strategy2Service:
         ma10_current = ma_data['ma10'][index]
         ma20_current = ma_data['ma20'][index]
         
-        # 检查是否有前一日数据
-        if index < 1:
-            return score
+        # 判断多头排列：5日 > 10日 > 20日
+        bullish_alignment = ma5_current > ma10_current and ma10_current > ma20_current
         
-        ma5_prev = ma_data['ma5'][index - 1]
-        ma10_prev = ma_data['ma10'][index - 1]
-        
-        if ma5_prev is None or ma10_prev is None:
-            return score
-        
-        # 检查是否在5日有效期内
-        bonus_key = f"{stock_code}_ma_golden_cross"
-        if self._check_time_window_bonus(stock_code, date, bonus_key, 5):
+        if bullish_alignment:
             score = 30
-            details.append("均线30分(MA5金叉MA10+价格>MA20)")
-            return score
-        
-        # 判断5日线上穿10日线
-        golden_cross = ma5_prev <= ma10_prev and ma5_current > ma10_current
-        
-        # 判断当前价格 > 20日均线
-        price_above_ma20 = close_price > ma20_current
-        
-        if golden_cross and price_above_ma20:
-            score = 30
-            details.append("均线30分(MA5金叉MA10+价格>MA20)")
-            # 记录这个加分，5日内有效
-            self._record_bonus(stock_code, bonus_key, date, 5)
+            details.append("均线30分(MA5>MA10>MA20)")
         
         return score
     
@@ -244,6 +221,7 @@ class Strategy2Service:
         异常量（EF）任意一种：0分（优先级最高）
         温和放量（ABCD）任意一种：30分
         其他特殊型（H）：21分（70%权重）
+        XY型放量：21分（策略2专用）
         """
         score = 0
         
@@ -262,12 +240,20 @@ class Strategy2Service:
         # 特殊型（H）
         special_volume = 'H' in volume_types
         
+        # XY型放量（策略2专用）
+        xy_volume = 'X' in volume_types or 'Y' in volume_types
+        
         if moderate_volume:
             score = 30
             details.append("成交量30分(温和放量)")
-        elif special_volume:
+        elif special_volume or xy_volume:
             score = 21
-            details.append("成交量21分(H型放量)")
+            if special_volume and xy_volume:
+                details.append("成交量21分(H/XY型放量)")
+            elif special_volume:
+                details.append("成交量21分(H型放量)")
+            else:
+                details.append("成交量21分(XY型放量)")
         
         return score
     
