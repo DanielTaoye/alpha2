@@ -411,11 +411,12 @@ def diagnose_deviation(stock_code: str, date_str: str, current_data: Dict,
             matched_patterns.append("高振幅阴十字星")
             print(f"     ✅ 命中!")
         
-        # 8. 阴线跌幅>3%
+        # 8. 阴线跌幅>3%/5%（主板3%，非主板5%）
         if not is_bullish and O > 0:
             change_pct = ((C - O) / O) * 100
-            cond1 = change_pct < -3
-            print(f"  [阴线跌幅>3%] 阴线:True, 跌幅<-3%:{cond1}(实际{change_pct:.2f}%)")
+            bearish_threshold = -3 if is_main_board else -5
+            cond1 = change_pct < bearish_threshold
+            print(f"  [阴线跌幅>{abs(bearish_threshold)}%] 阴线:True, 跌幅<{bearish_threshold}%:{cond1}(实际{change_pct:.2f}%)")
             if cond1:
                 matched_patterns.append(f"阴线跌幅{change_pct:.2f}%")
                 print(f"     ✅ 命中!")

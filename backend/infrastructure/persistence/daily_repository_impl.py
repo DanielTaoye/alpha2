@@ -33,8 +33,10 @@ class DailyRepositoryImpl:
             
             with DatabaseConnection.get_connection_context() as conn:
                 cursor = conn.cursor()
+                
+                # 查询当日数据
                 sql = f"""
-                    SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang, shang_yu_bi
+                    SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang
                     FROM `{table_name}`
                     WHERE DATE(shi_jian) = %s
                       AND peroid_type = '1day'
@@ -45,13 +47,20 @@ class DailyRepositoryImpl:
                 
                 if row:
                     close_price = float(row[4]) if row[4] else 0  # shou_pan_jia
-                    change_pct = float(row[6]) if row[6] else 0  # shang_yu_bi (涨跌幅%)
                     
-                    # 从涨跌幅反推昨收价: pre_close = close / (1 + change_pct/100)
-                    if close_price > 0 and change_pct != 0:
-                        pre_close = close_price / (1 + change_pct / 100)
-                    else:
-                        pre_close = 0
+                    # 查询前一交易日的收盘价作为前收价
+                    pre_close = 0
+                    sql_prev = f"""
+                        SELECT shou_pan_jia
+                        FROM `{table_name}`
+                        WHERE DATE(shi_jian) < %s AND peroid_type = '1day'
+                        ORDER BY shi_jian DESC
+                        LIMIT 1
+                    """
+                    cursor.execute(sql_prev, (date_str,))
+                    prev_row = cursor.fetchone()
+                    if prev_row and prev_row[0]:
+                        pre_close = float(prev_row[0])
                     
                     return DailyData(
                         stock_code=stock_code,
@@ -61,7 +70,7 @@ class DailyRepositoryImpl:
                         low=float(row[3]) if row[3] else 0,  # zui_di_jia
                         close=close_price,  # shou_pan_jia
                         volume=int(row[5]) if row[5] else 0,  # cheng_jiao_liang
-                        pre_close=pre_close  # 从涨跌幅计算得出
+                        pre_close=pre_close  # 从前一交易日收盘价获取
                     )
                 
                 return None
@@ -78,7 +87,7 @@ class DailyRepositoryImpl:
             with DatabaseConnection.get_connection_context() as conn:
                 cursor = conn.cursor()
                 sql = f"""
-                    SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang, shang_yu_bi
+                    SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang
                     FROM `{table_name}`
                     WHERE DATE(shi_jian) BETWEEN %s AND %s
                       AND peroid_type = '1day'
@@ -90,22 +99,21 @@ class DailyRepositoryImpl:
                 result = []
                 prev_close = 0  # 前一日收盘价
                 
+                # 查询start_date之前一个交易日的收盘价，作为第一条数据的pre_close
+                sql_first_prev = f"""
+                    SELECT shou_pan_jia
+                    FROM `{table_name}`
+                    WHERE DATE(shi_jian) < %s AND peroid_type = '1day'
+                    ORDER BY shi_jian DESC
+                    LIMIT 1
+                """
+                cursor.execute(sql_first_prev, (start_date,))
+                first_prev_row = cursor.fetchone()
+                if first_prev_row and first_prev_row[0]:
+                    prev_close = float(first_prev_row[0])
+                
                 for i, row in enumerate(rows):
                     close_price = float(row[4]) if row[4] else 0
-                    change_pct = float(row[6]) if row[6] else 0
-                    
-                    # 计算pre_close的策略：
-                    # 1. 如果shang_yu_bi不为NULL且不为0，从涨跌幅反推
-                    # 2. 否则，使用前一日的收盘价（按时间顺序）
-                    if change_pct != 0 and close_price > 0:
-                        # 从涨跌幅反推昨收价
-                        pre_close = close_price / (1 + change_pct / 100)
-                    elif i > 0:
-                        # 使用前一日的收盘价
-                        pre_close = prev_close
-                    else:
-                        # 第一条数据，无前一日数据
-                        pre_close = 0
                     
                     result.append(DailyData(
                         stock_code=stock_code,
@@ -115,7 +123,7 @@ class DailyRepositoryImpl:
                         low=float(row[3]) if row[3] else 0,
                         close=close_price,
                         volume=int(row[5]) if row[5] else 0,
-                        pre_close=pre_close
+                        pre_close=prev_close  # 使用前一日收盘价
                     ))
                     
                     # 保存当前收盘价，作为下一条记录的pre_close
