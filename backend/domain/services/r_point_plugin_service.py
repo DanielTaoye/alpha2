@@ -1,6 +1,6 @@
 """R点插件服务 - 风险信号检测"""
 from typing import Tuple, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -178,7 +178,7 @@ class RPointPluginService:
                 return RPointPluginResult("乖离率偏离", False, "")
             
             # 获取历史数据
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if len(prev_dates) < 20:
                 logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足20天({len(prev_dates)}天)")
                 return RPointPluginResult("乖离率偏离", False, "")
@@ -211,14 +211,17 @@ class RPointPluginService:
             if len(prev_data_list) < 5:
                 return RPointPluginResult("乖离率偏离", False, "")
             
-            # 计算涨跌幅
+            # 计算涨跌幅：使用当前收盘价相对前一日收盘价（不依赖数据库涨跌幅字段）
             change_pcts = []
+            prev_close = None
             for data in prev_data_list:
-                if data.pre_close and data.pre_close > 0:
-                    pct = (data.close - data.pre_close) / data.pre_close * 100
+                if prev_close is not None and prev_close > 0:
+                    pct = (data.close - prev_close) / prev_close * 100
                     change_pcts.append(pct)
                 else:
+                    # 第一天或前一日收盘价无效，设为0
                     change_pcts.append(0)
+                prev_close = data.close
             
             # === 条件1: 连续2个以上涨停 ===
             limit_threshold = 9.9 if is_main_board else 19.8
@@ -235,85 +238,83 @@ class RPointPluginService:
                 if is_volume_xyh and is_bearish_kline:
                     pattern_desc = "、".join(matched_patterns)
                     # 计算振幅
-                    amplitude = 0
-                    if current_data.pre_close and current_data.pre_close > 0:
-                        amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                    amplitude = self._calculate_amplitude(current_data, stock_code)
                     return RPointPluginResult(
                         "乖离率偏离",
                         True,
                         f"条件1: 连续{consecutive_limits}个涨停+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                     )
             
-            # === 条件2: 前3日累计涨幅过大 ===
-            if len(change_pcts) >= 3:
-                cum_3days = sum(change_pcts[:3])
+            # === 条件2: 前3日涨幅过大 ===
+            if len(prev_data_list) >= 3:
+                # 前3日涨幅 = (当天收盘价 - 3天前收盘价) / 3天前收盘价
+                prev_3_day = prev_data_list[2]  # prev_data_list[0]是前1天，[2]是前3天
+                gain_3days = (current_data.close - prev_3_day.close) / prev_3_day.close * 100
                 threshold_3days = 15 if is_main_board else 20
-                if cum_3days > threshold_3days:
-                    logger.debug(f"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日涨幅{cum_3days:.2f}%>{threshold_3days}%, "
+                if gain_3days > threshold_3days:
+                    logger.debug(f"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日涨幅{gain_3days:.2f}%>{threshold_3days}%, "
                                 f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
                     if is_volume_xyh and is_bearish_kline:
                         pattern_desc = "、".join(matched_patterns)
                         # 计算振幅
-                        amplitude = 0
-                        if current_data.pre_close and current_data.pre_close > 0:
-                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                        amplitude = self._calculate_amplitude(current_data, stock_code)
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件2: 前3日涨幅{cum_3days:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                            f"条件2: 前3日涨幅{gain_3days:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                         )
             
-            # === 条件3: 前5日累计涨幅过大 ===
-            if len(change_pcts) >= 5:
-                cum_5days = sum(change_pcts[:5])
+            # === 条件3: 前5日涨幅过大 ===
+            if len(prev_data_list) >= 5:
+                # 前5日涨幅 = (当天收盘价 - 5天前收盘价) / 5天前收盘价
+                prev_5_day = prev_data_list[4]  # prev_data_list[0]是前1天，[4]是前5天
+                gain_5days = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
                 threshold_5days = 20 if is_main_board else 25
-                if cum_5days > threshold_5days:
-                    logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日涨幅{cum_5days:.2f}%>{threshold_5days}%, "
+                if gain_5days > threshold_5days:
+                    logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日涨幅{gain_5days:.2f}%>{threshold_5days}%, "
                                 f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
                     if is_volume_xyh and is_bearish_kline:
                         pattern_desc = "、".join(matched_patterns)
                         # 计算振幅
-                        amplitude = 0
-                        if current_data.pre_close and current_data.pre_close > 0:
-                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                        amplitude = self._calculate_amplitude(current_data, stock_code)
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件3: 前5日涨幅{cum_5days:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                            f"条件3: 前5日涨幅{gain_5days:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                         )
             
             # === 条件4: 连续5连阳+涨幅过大 ===
             if len(prev_data_list) >= 5:
                 all_bullish = all(prev_data_list[i].close >= prev_data_list[i].open for i in range(5))
-                cum_5days_yang = sum(change_pcts[:5])
+                # 前5日涨幅 = (当天收盘价 - 5天前收盘价) / 5天前收盘价
+                prev_5_day = prev_data_list[4]  # prev_data_list[0]是前1天，[4]是前5天
+                gain_5days_yang = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
                 threshold_yang = 20 if is_main_board else 25
-                if all_bullish and cum_5days_yang > threshold_yang:
-                    logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳+涨幅{cum_5days_yang:.2f}%>{threshold_yang}%, "
+                if all_bullish and gain_5days_yang > threshold_yang:
+                    logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳+涨幅{gain_5days_yang:.2f}%>{threshold_yang}%, "
                                 f"is_volume_xyh={is_volume_xyh}, is_bearish_kline={is_bearish_kline}, matched_patterns={matched_patterns}")
                     if is_volume_xyh and is_bearish_kline:
                         pattern_desc = "、".join(matched_patterns)
                         # 计算振幅
-                        amplitude = 0
-                        if current_data.pre_close and current_data.pre_close > 0:
-                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                        amplitude = self._calculate_amplitude(current_data, stock_code)
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件4: 连续5连阳+涨幅{cum_5days_yang:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                            f"条件4: 连续5连阳+涨幅{gain_5days_yang:.2f}%+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                         )
             
-            # === 条件5: 前15日累计涨幅>50% ===
-            if len(change_pcts) >= 15:
-                cum_15days = sum(change_pcts[:15])
-                if cum_15days > 50:
-                    logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日涨幅{cum_15days:.2f}%>50%, "
+            # === 条件5: 前15日涨幅>50% ===
+            if len(prev_data_list) >= 15:
+                # 前15日涨幅 = (当天收盘价 - 15天前收盘价) / 15天前收盘价
+                prev_15_day = prev_data_list[14]  # prev_data_list[0]是前1天，[14]是前15天
+                gain_15days = (current_data.close - prev_15_day.close) / prev_15_day.close * 100
+                if gain_15days > 50:
+                    logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日涨幅{gain_15days:.2f}%>50%, "
                                 f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline={is_bearish_kline}, has_bearish_pattern={has_bearish_pattern}")
                     if is_volume_xyzh and (is_bearish_kline or has_bearish_pattern):
                         # 计算振幅
-                        amplitude = 0
-                        if current_data.pre_close and current_data.pre_close > 0:
-                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
-                        
+                        amplitude = self._calculate_amplitude(current_data, stock_code)
+
                         # 组合描述
                         signal_desc = ""
                         if is_bearish_kline:
@@ -322,25 +323,25 @@ class RPointPluginService:
                         elif has_bearish_pattern:
                             bearish_patterns = current_chance.bearish_pattern.strip()
                             signal_desc = f"空头组合({bearish_patterns})"
-                        
+
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件5: 前15日涨幅{cum_15days:.2f}%+放量+{signal_desc}"
+                            f"条件5: 前15日涨幅{gain_15days:.2f}%+放量+{signal_desc}"
                         )
             
-            # === 条件6: 前20日累计涨幅>50% ===
-            if len(change_pcts) >= 20:
-                cum_20days = sum(change_pcts[:20])
-                if cum_20days > 50:
-                    logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{cum_20days:.2f}%>50%, "
+            # === 条件6: 前20日涨幅>50% ===
+            if len(prev_data_list) >= 20:
+                # 前20日涨幅 = (当天收盘价 - 20天前收盘价) / 20天前收盘价
+                prev_20_day = prev_data_list[19]  # prev_data_list[0]是前1天，[19]是前20天
+                gain_20days = (current_data.close - prev_20_day.close) / prev_20_day.close * 100
+                if gain_20days > 50:
+                    logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{gain_20days:.2f}%>50%, "
                                 f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline={is_bearish_kline}, has_bearish_pattern={has_bearish_pattern}")
                     if is_volume_xyzh and (is_bearish_kline or has_bearish_pattern):
                         # 计算振幅
-                        amplitude = 0
-                        if current_data.pre_close and current_data.pre_close > 0:
-                            amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
-                        
+                        amplitude = self._calculate_amplitude(current_data, stock_code)
+
                         # 组合描述
                         signal_desc = ""
                         if is_bearish_kline:
@@ -349,11 +350,11 @@ class RPointPluginService:
                         elif has_bearish_pattern:
                             bearish_patterns = current_chance.bearish_pattern.strip()
                             signal_desc = f"空头组合({bearish_patterns})"
-                        
+
                         return RPointPluginResult(
                             "乖离率偏离",
                             True,
-                            f"条件6: 前20日涨幅{cum_20days:.2f}%+放量+{signal_desc}"
+                            f"条件6: 前20日涨幅{gain_20days:.2f}%+放量+{signal_desc}"
                         )
             
             return RPointPluginResult("乖离率偏离", False, "")
@@ -399,7 +400,7 @@ class RPointPluginService:
             stock_nature = current_chance.stock_nature or "波段"  # 默认波段
             
             # 获取前一交易日的数据，使用前一交易日的赔率得分来判断是否临近压力位
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if not prev_dates or len(prev_dates) < 1:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
@@ -472,9 +473,7 @@ class RPointPluginService:
                 if matched_patterns:
                     pattern_desc = "、".join(matched_patterns)
                     # 计算振幅
-                    amplitude = 0
-                    if current_data.pre_close and current_data.pre_close > 0:
-                        amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                    amplitude = self._calculate_amplitude(current_data, stock_code)
                     
                     # 计算压力线距离
                     close_price = current_data.close
@@ -497,7 +496,7 @@ class RPointPluginService:
             
             # 条件2仅在熊市生效
             if market_type == 'bear':
-                prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+                prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
                 if len(prev_dates) >= 3:
                     has_good_volume = False
                     for prev_date in prev_dates[:3]:
@@ -633,7 +632,7 @@ class RPointPluginService:
             stock_nature = current_chance.stock_nature or "波段"  # 默认波段
             
             # 获取前一交易日数据，使用前一交易日的赔率得分
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if len(prev_dates) < 1:
                 return RPointPluginResult("上冲乏力", False, "")
             
@@ -694,9 +693,7 @@ class RPointPluginService:
             if matched_patterns:
                 pattern_desc = "、".join(matched_patterns)
                 # 计算振幅
-                amplitude = 0
-                if current_data.pre_close and current_data.pre_close > 0:
-                    amplitude = ((current_data.high - current_data.low) / current_data.pre_close) * 100
+                amplitude = self._calculate_amplitude(current_data, stock_code)
                 
                 # 计算压力线距离
                 close_price = current_data.close
@@ -717,17 +714,62 @@ class RPointPluginService:
     
     # ========== 辅助方法 ==========
     
-    def _get_previous_trading_dates_from_cache(self, current_date_str: str) -> List[str]:
-        """从缓存中获取前N个交易日的日期列表"""
+    def _get_previous_trading_dates_from_cache(self, current_date_str, stock_code: str = None) -> List[str]:
+        """
+        获取前N个交易日的日期列表
+        
+        Args:
+            current_date_str: 当前日期（字符串或datetime对象）
+            stock_code: 股票代码，如果提供则从数据库查询真实交易日
+        
+        Returns:
+            前N个交易日的日期列表（字符串格式）
+        """
         try:
+            # 确保 current_date_str 是字符串格式
+            if isinstance(current_date_str, datetime):
+                current_date_str = current_date_str.strftime('%Y-%m-%d')
+            elif isinstance(current_date_str, date):
+                current_date_str = current_date_str.strftime('%Y-%m-%d')
+            
+            # 首先尝试从缓存获取
             all_dates = sorted(self._daily_cache.keys(), reverse=True)
             result = []
             for date_str in all_dates:
                 if date_str < current_date_str:
                     result.append(date_str)
+
+            # 如果缓存中没有足够数据，从数据库查询真实交易日
+            if len(result) < 20 and stock_code:
+                try:
+                    # 从数据库查询前N个交易日
+                    table_name = f"basic_data_{stock_code.lower()}"
+                    from infrastructure.persistence.database import DatabaseConnection
+                    
+                    with DatabaseConnection.get_connection_context() as conn:
+                        cursor = conn.cursor()
+                        sql = f"""
+                            SELECT DISTINCT DATE(shi_jian) as trade_date
+                            FROM `{table_name}`
+                            WHERE DATE(shi_jian) < %s
+                              AND peroid_type = '1day'
+                            ORDER BY trade_date DESC
+                            LIMIT 20
+                        """
+                        cursor.execute(sql, (current_date_str,))
+                        rows = cursor.fetchall()
+                        
+                        result = []
+                        for row in rows:
+                            if row[0]:
+                                date_obj = row[0] if isinstance(row[0], date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
+                                result.append(date_obj.strftime('%Y-%m-%d'))
+                except Exception as e:
+                    logger.warning(f"从数据库查询交易日失败: {e}")
+
             return result
         except Exception as e:
-            logger.error(f"从缓存获取前N个交易日失败: {e}")
+            logger.error(f"获取前N个交易日失败: {e}")
             return []
     
     def _check_high_position_r(self, stock_code: str, date: datetime, ma_data: dict, 
@@ -815,7 +857,7 @@ class RPointPluginService:
             gain_threshold = self.config_service.get_high_position_gain_threshold()
             
             # 获取前20个交易日的数据
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if len(prev_dates) < 20:
                 return RPointPluginResult("高位发R", False, "")
             
@@ -850,7 +892,7 @@ class RPointPluginService:
             
             # === 条件4: 跌破前一日支撑位 ===
             # 获取前一交易日
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if not prev_dates or len(prev_dates) < 1:
                 return RPointPluginResult("高位发R", False, "")
             
@@ -1031,7 +1073,7 @@ class RPointPluginService:
             
             # === 条件4: 跌破前一日支撑位 ===
             # 获取前一交易日
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if not prev_dates or len(prev_dates) < 1:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
@@ -1131,6 +1173,38 @@ class RPointPluginService:
         if not daily_chance or not daily_chance.bearish_pattern:
             return False
         return len(daily_chance.bearish_pattern.strip()) > 0
+
+    def _calculate_amplitude(self, current_data, stock_code: str) -> float:
+        """
+        正确计算振幅：如果pre_close无效，从前一天数据获取收盘价作为基准
+
+        Args:
+            current_data: 当前日K线数据
+            stock_code: 股票代码
+
+        Returns:
+            振幅百分比
+        """
+        # 首先尝试使用pre_close
+        if current_data.pre_close and current_data.pre_close > 0:
+            return ((current_data.high - current_data.low) / current_data.pre_close) * 100
+
+        # 如果pre_close无效，查询前一天的收盘价
+        try:
+            prev_dates = self._get_previous_trading_dates_from_cache(current_data.date, stock_code)
+            if prev_dates:
+                prev_date = prev_dates[0]  # 前一个交易日
+                prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
+                if prev_data and prev_data.close > 0:
+                    return ((current_data.high - current_data.low) / prev_data.close) * 100
+        except Exception as e:
+            logger.warning(f"查询前一日数据失败 ({stock_code}): {e}")
+
+        # 如果都失败了，使用开盘价作为基准（最后的后备方案）
+        if current_data.open and current_data.open > 0:
+            return ((current_data.high - current_data.low) / current_data.open) * 100
+
+        return 0.0
     
     def _get_pressure_threshold(self, stock_nature: str) -> float:
         """
@@ -1177,7 +1251,7 @@ class RPointPluginService:
         Returns:
             命中的K线形态列表，如 ["冲高回落阳线", "高开低走"]
         """
-        if not daily_data or not daily_data.pre_close or daily_data.pre_close == 0:
+        if not daily_data:
             return []
         
         matched_patterns = []
@@ -1192,7 +1266,29 @@ class RPointPluginService:
         C = daily_data.close
         H = daily_data.high
         L = daily_data.low
+        
+        # 获取前收价：优先使用pre_close，如果无效则查询前一天数据
         prev_close = daily_data.pre_close
+        if not prev_close or prev_close == 0:
+            if stock_code:
+                try:
+                    prev_dates = self._get_previous_trading_dates_from_cache(daily_data.date, stock_code)
+                    if prev_dates:
+                        prev_date = prev_dates[0]
+                        prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
+                        if prev_data and prev_data.close > 0:
+                            prev_close = prev_data.close
+                        else:
+                            return []  # 无法获取前收价，无法判断
+                    else:
+                        return []
+                except:
+                    return []
+            else:
+                return []  # 没有stock_code无法查询
+        
+        if prev_close == 0:
+            return []  # 前收价无效
         
         # A: 上影线 = 最高价 - max(开盘价, 收盘价)
         A = H - max(O, C)
@@ -1357,12 +1453,19 @@ class RPointPluginService:
     
     def _check_bearish_line_3pct_new(self, O: float, close: float, prev_close: float) -> bool:
         """
-        阴线跌幅>3%（相对昨收）
+        阴线跌幅>3%（相对开盘价）
+        开盘价 > 收盘价（阴线）
+        跌幅 = (收盘价 - 开盘价) / 开盘价 * 100
         """
-        if prev_close == 0:
+        if O == 0:
             return False
         
-        change_pct = ((close - prev_close) / prev_close) * 100
+        # 判断是否为阴线
+        if O <= close:
+            return False
+        
+        # 计算相对开盘价的跌幅
+        change_pct = ((close - O) / O) * 100
         
         return change_pct < -3
     
@@ -1390,7 +1493,7 @@ class RPointPluginService:
                 return RPointPluginResult("跌破支撑位", False, "")
             
             # 获取前一交易日
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if not prev_dates or len(prev_dates) < 1:
                 return RPointPluginResult("跌破支撑位", False, "")
             

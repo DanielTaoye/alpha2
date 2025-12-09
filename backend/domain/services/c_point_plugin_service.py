@@ -376,14 +376,17 @@ class CPointPluginService:
             if len(daily_data_list) < 2:
                 return CPointPluginResult("不追涨", False, 0, "")
             
-            # 计算涨幅列表
+            # 计算涨幅列表：使用当前收盘价相对前一日收盘价（不依赖数据库涨跌幅字段）
             change_pcts = []
+            prev_close = None
             for data in daily_data_list:
-                if data.pre_close and data.pre_close > 0:
-                    pct = (data.close - data.pre_close) / data.pre_close * 100
+                if prev_close is not None and prev_close > 0:
+                    pct = (data.close - prev_close) / prev_close * 100
                     change_pcts.append(pct)
                 else:
+                    # 第一天或前一日收盘价无效，设为0
                     change_pcts.append(0)
+                prev_close = data.close
             
             # 情况1: 连续2个涨停
             limit_threshold = 10 if is_main_board else 20
@@ -550,14 +553,18 @@ class CPointPluginService:
             if len(prev_data_list) < 4:
                 return CPointPluginResult("急跌抢反弹", False, 0, "")
             
-            # 计算涨跌幅列表（注意：prev_data_list[0]是最近的一天）
+            # 计算涨跌幅列表：使用当前收盘价相对前一日收盘价（不依赖数据库涨跌幅字段）
+            # 注意：prev_data_list[0]是最近的一天
             change_pcts = []
+            prev_close = None
             for data in prev_data_list:
-                if data.pre_close and data.pre_close > 0:
-                    pct = (data.close - data.pre_close) / data.pre_close * 100
+                if prev_close is not None and prev_close > 0:
+                    pct = (data.close - prev_close) / prev_close * 100
                     change_pcts.append(pct)
                 else:
+                    # 第一天或前一日收盘价无效，设为0
                     change_pcts.append(0)
+                prev_close = data.close
             
             # === 检查主要条件 ===
             main_condition_met = False
