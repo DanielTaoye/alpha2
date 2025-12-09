@@ -426,8 +426,8 @@ class RPointPluginService:
         插件2: 临近压力位滞涨
         
         前提条件（共同条件）：
-        - 前一交易日日线赔率得分：短线<12分、波段<10分、中长线<8分，且不等于0
-        - 当前股价距离压力线：0% < (压力线-股价)/股价 < 10%
+        - 前一交易日日线赔率得分：大于0
+        - 当前股价距离压力线：0% < (压力线-股价)/股价 < 配置阈值%（默认10%）
         - 压力线价格从数据库读取后需除以100（数据库存储格式：1660代表16.60元）
         
         条件1: 前提条件 + 放量(XYZH) + 特定K线 + C点日开盘价<当日收盘价
@@ -472,12 +472,13 @@ class RPointPluginService:
             # 使用前一交易日的日线赔率得分（距离压力位的空间）
             day_win_ratio_score = prev_chance.day_win_ratio_score or 0
             
-            # 根据股性判断是否临近压力位
-            # 要求：0 < 赔率得分 < 阈值（短线<12分、波段<10分、中长线<8分）
+            # 根据股性获取压力位阈值（仅用于日志显示）
             pressure_threshold = self._get_pressure_threshold(stock_nature)
-            is_near_pressure_by_score = 0 < day_win_ratio_score < pressure_threshold
             
-            logger.info(f"[临近压力位滞涨-赔率检查] {stock_code} {date_str} 股性:{stock_nature}, 前日赔率:{day_win_ratio_score:.1f}, 阈值:{pressure_threshold}, 是否满足0<赔率<{pressure_threshold}: {is_near_pressure_by_score}")
+            # 只检查赔率得分大于0（取消上限检查）
+            is_near_pressure_by_score = day_win_ratio_score > 0
+            
+            logger.info(f"[临近压力位滞涨-赔率检查] {stock_code} {date_str} 股性:{stock_nature}, 前日赔率:{day_win_ratio_score:.1f}, 是否满足赔率>0: {is_near_pressure_by_score}")
             
             if not is_near_pressure_by_score:
                 return RPointPluginResult("临近压力位滞涨", False, "")
@@ -546,7 +547,7 @@ class RPointPluginService:
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold},股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%){c_info}"
+                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}>0,股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%){c_info}"
                     )
             
             # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
@@ -584,7 +585,7 @@ class RPointPluginService:
                             return RPointPluginResult(
                                 "临近压力位滞涨",
                                 True,
-                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}<{pressure_threshold},股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+前3日无AXYZ放量+空头组合({bearish_patterns}){c_info}"
+                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}>0,股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+前3日无AXYZ放量+空头组合({bearish_patterns}){c_info}"
                             )
             
             return RPointPluginResult("临近压力位滞涨", False, "")

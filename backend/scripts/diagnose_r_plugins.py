@@ -491,15 +491,11 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     stock_nature = current_chance.get('stock_nature', '波段') if current_chance else '波段'
     print(f"  股性: {stock_nature}")
     
-    # 赔率阈值
-    thresholds = {"短线": 12.0, "波段": 10.0, "中长线": 8.0}
-    threshold = thresholds.get(stock_nature, 10.0)
-    
     # 前一日赔率得分
     day_win_ratio_score = float(prev_chance.get('day_win_ratio_score') or 0)
-    print(f"  前一日赔率得分: {day_win_ratio_score:.2f} (需要: 0 < 赔率 < {threshold})")
+    print(f"  前一日赔率得分: {day_win_ratio_score:.2f} (需要: 赔率 > 0)")
     
-    is_near_pressure = 0 < day_win_ratio_score < threshold
+    is_near_pressure = day_win_ratio_score > 0
     print(f"  是否满足赔率条件: {'✅' if is_near_pressure else '❌'}")
     
     # 压力位距离
