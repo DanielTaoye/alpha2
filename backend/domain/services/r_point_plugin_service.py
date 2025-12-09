@@ -140,6 +140,14 @@ class RPointPluginService:
                 logger.info(f"[R点插件-箱体回踩被跌破] {stock_code} {date}: {plugin7.reason}")
                 return True, triggered_plugins
         
+        # 插件8: 趋势向下+未放量跌破支撑+MACD死叉
+        if ma_data and macd_data and current_index is not None:
+            plugin8 = self._check_downtrend_break_support(stock_code, date, ma_data, macd_data, current_index)
+            if plugin8.triggered:
+                triggered_plugins.append(plugin8)
+                logger.info(f"[R点插件-趋势向下+未放量跌破支撑+MACD死叉] {stock_code} {date}: {plugin8.reason}")
+                return True, triggered_plugins
+        
         return False, triggered_plugins
     
     def _check_deviation(self, stock_code: str, date: datetime) -> RPointPluginResult:
@@ -983,12 +991,16 @@ class RPointPluginService:
         """
         插件7: 箱体回踩被跌破
         
-        条件:
-        1. 从当前往前20个交易日找到最高价日X日，X日最高价距离当前价格 > 18%
-        2. X日往前推22个交易日，X日应该是这23天的前30%高位区域（相对高点）
-        3. X-22日到X日这23天，最低价到最高价的涨幅 >= 18%
+        新逻辑:
+        1. 从今天往前推20个交易日，找到最高价日X日，X日最高价距离今日当前价格 > 20%
+        2. 从X日往前推22个交易日，查找是否有比X日更高的价格：
+           - 如果有，确定该日为Y日
+           - 找到这22天内的最低价日Z日
+        3. 箱体确认：
+           - 有Y日：Y日最高价 - Z日最低价 > 20%
+           - 无Y日：X日最高价 - Z日最低价 > 20%
         4. 当前股价跌破前一日支撑位
-        5. MACD出现死叉（前5个交易日内）或已形成死叉且当前未出现金叉
+        5. MACD出现死叉（前5个交易日内）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -1006,7 +1018,7 @@ class RPointPluginService:
             
             current_price = current_data.close
             
-            # === 条件1: 找X日（当前往前20天的最高价所在日）===
+            # === 步骤1: 找X日（今天往前20天的最高价所在日）===
             x_day_high = 0
             x_day_index = -1
             
@@ -1018,61 +1030,68 @@ class RPointPluginService:
             if x_day_index < 0:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # 检查X日最高价距离当前价格 > 18%
+            # 检查X日最高价距离当前价格 > 20%
             drop_ratio = (x_day_high - current_price) / x_day_high
-            if drop_ratio <= 0.18:
+            if drop_ratio <= 0.20:
+                logger.debug(f"[箱体回踩] {stock_code} X日最高价{x_day_high:.2f}距当前{current_price:.2f}回落{drop_ratio*100:.2f}%不满足>20%")
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # === 条件2: X-22日到X日这23天，最低价到最高价的涨幅 >= 18% ===
+            # === 步骤2: 从X日往前推22个交易日，找Y日和Z日 ===
             if x_day_index < 22:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # 计算X-22到X日这23天的最低价和最高价
+            # 搜索范围：X-22 到 X-1（注意：不包括X日本身）
             box_start_index = x_day_index - 22
-            box_lowest_price = None
-            box_highest_price = None
-            box_lowest_date = None
-            box_highest_date = None
+            box_end_index = x_day_index - 1
             
-            for i in range(box_start_index, x_day_index + 1):
-                # 找最低价
-                if box_lowest_price is None or kline_data[i].low < box_lowest_price:
-                    box_lowest_price = kline_data[i].low
-                    box_lowest_date = kline_data[i].time.strftime('%Y-%m-%d')
-                
-                # 找最高价
-                if box_highest_price is None or kline_data[i].high > box_highest_price:
-                    box_highest_price = kline_data[i].high
-                    box_highest_date = kline_data[i].time.strftime('%Y-%m-%d')
+            # 找Y日：是否有比X日更高的价格
+            y_day_high = None
+            y_day_index = None
+            y_day_date = None
+            
+            for i in range(box_start_index, box_end_index + 1):
+                if kline_data[i].high > x_day_high:
+                    if y_day_high is None or kline_data[i].high > y_day_high:
+                        y_day_high = kline_data[i].high
+                        y_day_index = i
+                        y_day_date = kline_data[i].time.strftime('%Y-%m-%d')
+            
+            # 找Z日：这22天内的最低价
+            z_day_low = None
+            z_day_index = None
+            z_day_date = None
+            
+            for i in range(box_start_index, box_end_index + 1):
+                if z_day_low is None or kline_data[i].low < z_day_low:
+                    z_day_low = kline_data[i].low
+                    z_day_index = i
+                    z_day_date = kline_data[i].time.strftime('%Y-%m-%d')
             
             # 检查数据有效性
-            if box_lowest_price is None or box_highest_price is None or box_lowest_price <= 0:
+            if z_day_low is None or z_day_low <= 0:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # 计算涨幅
-            box_gain_ratio = (box_highest_price - box_lowest_price) / box_lowest_price
+            # === 步骤3: 箱体确认 ===
+            if y_day_high is not None:
+                # 有Y日：Y日最高价 - Z日最低价 > 20%
+                box_gain_ratio = (y_day_high - z_day_low) / z_day_low
+                if box_gain_ratio <= 0.20:
+                    logger.debug(f"[箱体回踩] {stock_code} Y日{y_day_high:.2f}-Z日{z_day_low:.2f}涨幅{box_gain_ratio*100:.2f}%不满足>20%")
+                    return RPointPluginResult("箱体回踩被跌破", False, "")
+                box_high_price = y_day_high
+                box_high_date = y_day_date
+                has_y_day = True
+            else:
+                # 无Y日：X日最高价 - Z日最低价 > 20%
+                box_gain_ratio = (x_day_high - z_day_low) / z_day_low
+                if box_gain_ratio <= 0.20:
+                    logger.debug(f"[箱体回踩] {stock_code} X日{x_day_high:.2f}-Z日{z_day_low:.2f}涨幅{box_gain_ratio*100:.2f}%不满足>20%")
+                    return RPointPluginResult("箱体回踩被跌破", False, "")
+                box_high_price = x_day_high
+                box_high_date = kline_data[x_day_index].time.strftime('%Y-%m-%d')
+                has_y_day = False
             
-            # 涨幅必须 >= 18%
-            if box_gain_ratio < 0.18:
-                logger.debug(f"[箱体回踩] {stock_code} X-22至X日涨幅{box_gain_ratio*100:.2f}%不满足>=18%条件")
-                return RPointPluginResult("箱体回踩被跌破", False, "")
-            
-            # === 条件2补充: X日应该是这23天的前30%高位区域（相对高点）===
-            # 计算X-22到X日这23天的所有最高价
-            box_highs = [kline_data[i].high for i in range(box_start_index, x_day_index + 1)]
-            
-            # 排序找前30%分界线
-            sorted_highs = sorted(box_highs, reverse=True)
-            top_30_percent_count = max(1, int(len(sorted_highs) * 0.3))
-            top_30_threshold = sorted_highs[top_30_percent_count - 1]
-            
-            # X日最高价应该在前30%高位区域
-            if x_day_high < top_30_threshold:
-                logger.debug(f"[箱体回踩] {stock_code} X日最高价{x_day_high:.2f}不在前30%高位区域(阈值{top_30_threshold:.2f})")
-                return RPointPluginResult("箱体回踩被跌破", False, "")
-            
-            # === 条件4: 跌破前一日支撑位 ===
-            # 获取前一交易日
+            # === 步骤4: 跌破前一日支撑位 ===
             prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if not prev_dates or len(prev_dates) < 1:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
@@ -1098,23 +1117,15 @@ class RPointPluginService:
             if not is_break_support:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # === 条件5: MACD死叉（前5个交易日内出现死叉）或（已形成死叉且当前未出现金叉）===
+            # === 步骤5: MACD死叉（前5个交易日内出现）===
             dif_list = macd_data.get('dif', [])
             dea_list = macd_data.get('dea', [])
             
             if not dif_list or not dea_list or current_index >= len(dif_list) or current_index < 1:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            curr_dif = dif_list[current_index]
-            curr_dea = dea_list[current_index]
-            prev_dif = dif_list[current_index - 1]
-            prev_dea = dea_list[current_index - 1]
-            
-            if None in [curr_dif, curr_dea, prev_dif, prev_dea]:
-                return RPointPluginResult("箱体回踩被跌破", False, "")
-            
-            # 条件A：前5个交易日内出现死叉（从金叉转为死叉）
-            death_cross_in_recent_5_days = False
+            # 检查前5个交易日内是否出现死叉（从金叉转为死叉）
+            death_cross_found = False
             start_check_index = max(1, current_index - 5)
             
             for check_index in range(start_check_index, current_index + 1):
@@ -1131,35 +1142,170 @@ class RPointPluginService:
                 
                 # 死叉：前一天DIF>DEA，当天DIF<DEA（转换点）
                 if check_prev_dif > check_prev_dea and check_dif < check_dea:
-                    death_cross_in_recent_5_days = True
+                    death_cross_found = True
                     logger.debug(f"[箱体回踩] 在索引{check_index}发现死叉转换点")
                     break
             
-            # 条件B：已形成死叉且当天未出现金叉
-            is_currently_death_cross = curr_dif < curr_dea  # 当前处于死叉状态
-            is_today_golden_cross = prev_dif < prev_dea and curr_dif > curr_dea  # 今天出现金叉
-            already_death_cross_no_golden = is_currently_death_cross and not is_today_golden_cross
-            
-            # 条件A 或 条件B
-            if not (death_cross_in_recent_5_days or already_death_cross_no_golden):
+            if not death_cross_found:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
             # === 全部条件满足，触发箱体回踩被跌破 ===
             x_day_date = kline_data[x_day_index].time.strftime('%Y-%m-%d')
-            reason = (f"X日({x_day_date})最高价{x_day_high:.2f}在23天前30%高位, "
-                     f"X-22至X日最低价{box_lowest_price:.2f}({box_lowest_date})至最高价{box_highest_price:.2f}({box_highest_date})涨幅{box_gain_ratio*100:.1f}%, "
-                     f"当前({current_price:.2f})较X日跌破{drop_ratio*100:.1f}%, "
-                     f"跌破支撑({support_price_actual:.2f}), "
-                     f"MACD死叉")
             
-            logger.info(f"[箱体回踩被跌破触发] {stock_code} {date_str}: X日={x_day_date}, "
-                       f"X日高{x_day_high:.2f}在前30%高位(阈值{top_30_threshold:.2f}), 当前{current_price:.2f}, 跌幅{drop_ratio*100:.1f}%, "
-                       f"箱体涨幅{box_gain_ratio*100:.1f}%")
+            # 构建原因描述
+            if has_y_day:
+                reason = (f"X日({x_day_date})最高{x_day_high:.2f}, "
+                         f"X-22日内找到更高Y日({y_day_date})最高{y_day_high:.2f}, "
+                         f"Z日({z_day_date})最低{z_day_low:.2f}, "
+                         f"Y-Z涨幅{box_gain_ratio*100:.1f}%, "
+                         f"当前({current_price:.2f})较X日回落{drop_ratio*100:.1f}%, "
+                         f"跌破支撑({support_price_actual:.2f}), "
+                         f"MACD死叉")
+            else:
+                reason = (f"X日({x_day_date})最高{x_day_high:.2f}, "
+                         f"Z日({z_day_date})最低{z_day_low:.2f}, "
+                         f"X-Z涨幅{box_gain_ratio*100:.1f}%, "
+                         f"当前({current_price:.2f})较X日回落{drop_ratio*100:.1f}%, "
+                         f"跌破支撑({support_price_actual:.2f}), "
+                         f"MACD死叉")
+            
+            logger.info(f"[箱体回踩被跌破触发] {stock_code} {date_str}: {reason}")
             return RPointPluginResult("箱体回踩被跌破", True, reason)
             
         except Exception as e:
             logger.error(f"插件7-箱体回踩被跌破检查异常: {e}")
             return RPointPluginResult("箱体回踩被跌破", False, "")
+    
+    def _check_downtrend_break_support(self, stock_code: str, date: datetime, ma_data: dict,
+                                       macd_data: dict, current_index: int) -> RPointPluginResult:
+        """
+        插件8: 趋势向下+未放量跌破支撑+MACD死叉
+        
+        条件:
+        1. 股价在60天均线下方
+        2. 股票跌破支撑位，或前三交易日已发生过跌破支撑位
+        3. MACD当天已出现死叉，或前三交易日发生过出现死叉
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 获取当日数据
+            current_data = self._daily_cache.get(date_str)
+            if not current_data:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            current_price = current_data.close
+            
+            # === 条件1: 股价在60天均线下方 ===
+            ma60_list = ma_data.get('ma60', [])
+            if not ma60_list or current_index >= len(ma60_list):
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            ma60_current = ma60_list[current_index]
+            if ma60_current is None or ma60_current <= 0:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            # 股价必须在60日均线下方
+            if current_price >= ma60_current:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            # === 条件2: 当前或前三交易日发生过跌破支撑位 ===
+            # 获取当前日期及前3个交易日
+            all_prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            check_dates = [date_str] + all_prev_dates[:3]  # 当前日期 + 前3个交易日
+            
+            break_support_found = False
+            break_support_date = None
+            break_support_detail = None
+            
+            for check_date_str in check_dates:
+                # 获取该日数据
+                check_data = self._daily_cache.get(check_date_str)
+                if not check_data:
+                    check_data = self.daily_repo.find_by_date(stock_code, check_date_str)
+                if not check_data:
+                    continue
+                
+                check_close = check_data.close
+                
+                # 获取该日的前一交易日
+                prev_dates = self._get_previous_trading_dates_from_cache(check_date_str, stock_code)
+                if not prev_dates or len(prev_dates) < 1:
+                    continue
+                
+                prev_date_str = prev_dates[0]  # 取第一个，即前一个交易日
+                
+                # 获取前一日的daily_chance（支撑位）
+                prev_chance = self._daily_chance_cache.get(prev_date_str)
+                if not prev_chance:
+                    prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+                if not prev_chance:
+                    continue
+                
+                # 检查前一日是否有支撑位
+                if not prev_chance.support_price or prev_chance.support_price <= 0:
+                    continue
+                
+                # 支撑位需要除以100
+                support_price_actual = prev_chance.support_price / 100.0
+                
+                # 检查是否跌破支撑位
+                if check_close < support_price_actual:
+                    break_support_found = True
+                    break_support_date = check_date_str
+                    break_support_detail = f"跌破支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
+                    break
+            
+            if not break_support_found:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            # === 条件3: MACD当天或前三交易日出现死叉 ===
+            dif_list = macd_data.get('dif', [])
+            dea_list = macd_data.get('dea', [])
+            
+            if not dif_list or not dea_list or current_index >= len(dif_list) or current_index < 1:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            # 检查当前及前3个交易日内是否出现死叉
+            death_cross_found = False
+            death_cross_date = None
+            start_check_index = max(1, current_index - 3)
+            
+            for check_index in range(start_check_index, current_index + 1):
+                if check_index <= 0:
+                    continue
+                
+                check_dif = dif_list[check_index]
+                check_dea = dea_list[check_index]
+                check_prev_dif = dif_list[check_index - 1]
+                check_prev_dea = dea_list[check_index - 1]
+                
+                if None in [check_dif, check_dea, check_prev_dif, check_prev_dea]:
+                    continue
+                
+                # 死叉：前一天DIF>DEA，当天DIF<DEA（转换点）
+                if check_prev_dif > check_prev_dea and check_dif < check_dea:
+                    death_cross_found = True
+                    death_cross_date = f"索引{check_index}"
+                    logger.debug(f"[趋势向下+未放量跌破支撑+MACD死叉] 在索引{check_index}发现死叉转换点")
+                    break
+            
+            if not death_cross_found:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+            
+            # === 全部条件满足，触发R点 ===
+            reason = (f"股价{current_price:.2f}<MA60({ma60_current:.2f}), "
+                     f"{break_support_detail}, "
+                     f"MACD死叉({death_cross_date})")
+            
+            logger.info(f"[趋势向下+未放量跌破支撑+MACD死叉触发] {stock_code} {date_str}: {reason}")
+            return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", True, reason)
+            
+        except Exception as e:
+            logger.error(f"插件8-趋势向下+未放量跌破支撑+MACD死叉检查异常: {e}")
+            return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
     
     def _check_volume_type(self, daily_chance, target_types: List[str]) -> bool:
         """检查成交量类型是否在目标类型中"""
@@ -1317,7 +1463,15 @@ class RPointPluginService:
         if self._check_high_open_low_close_new(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
             matched_patterns.append("高开低走")
         
-        # 6. 阴线跌幅>3%（相对昨收）- 不需要振幅条件
+        # 6. 高振幅阳十字星（需要振幅>8%/10%）
+        if self._check_high_amplitude_bullish_doji(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("高振幅阳十字星")
+        
+        # 7. 高振幅阴十字星（需要振幅>8%/10%）
+        if self._check_high_amplitude_bearish_doji(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
+            matched_patterns.append("高振幅阴十字星")
+        
+        # 8. 阴线跌幅>3%（相对昨收）- 不需要振幅条件
         if self._check_bearish_line_3pct_new(O, C, prev_close):
             matched_patterns.append("阴线跌幅>3%")
         
@@ -1468,6 +1622,56 @@ class RPointPluginService:
         change_pct = ((close - O) / O) * 100
         
         return change_pct < -3
+    
+    def _check_high_amplitude_bullish_doji(self, A: float, B: float, C: float, O: float, close: float,
+                                           H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        高振幅阳十字星
+        振幅 > 8%（主板）或 10%（非主板）
+        A > C（上影线 > 下影线）
+        A > 3B（上影线 > 3倍实体）
+        C > 2B（下影线 > 2倍实体）
+        开盘价 < 收盘价（阳线）
+        """
+        if O >= close:  # 不是阳线
+            return False
+        if prev_close == 0:
+            return False
+        
+        # 检查振幅（高振幅阈值：主板8%，非主板10%）
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 8 if is_main_board else 10
+        if amplitude <= amplitude_threshold:
+            return False
+        
+        return (A > C and 
+                A > 3 * B and 
+                C > 2 * B)
+    
+    def _check_high_amplitude_bearish_doji(self, A: float, B: float, C: float, O: float, close: float,
+                                           H: float, L: float, prev_close: float, is_main_board: bool) -> bool:
+        """
+        高振幅阴十字星
+        振幅 > 8%（主板）或 10%（非主板）
+        A > C（上影线 > 下影线）
+        A > 3B（上影线 > 3倍实体）
+        C > 2B（下影线 > 2倍实体）
+        开盘价 > 收盘价（阴线）
+        """
+        if O <= close:  # 不是阴线
+            return False
+        if prev_close == 0:
+            return False
+        
+        # 检查振幅（高振幅阈值：主板8%，非主板10%）
+        amplitude = ((H - L) / prev_close) * 100
+        amplitude_threshold = 8 if is_main_board else 10
+        if amplitude <= amplitude_threshold:
+            return False
+        
+        return (A > C and 
+                A > 3 * B and 
+                C > 2 * B)
     
     def _check_break_support(self, stock_code: str, date: datetime) -> RPointPluginResult:
         """

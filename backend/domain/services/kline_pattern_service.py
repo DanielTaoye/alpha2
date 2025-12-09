@@ -130,7 +130,8 @@ class KLinePatternService:
         open_price: float,
         close_price: float,
         high_price: float,
-        low_price: float
+        low_price: float,
+        prev_close: Optional[float] = None
     ) -> Optional[str]:
         """
         识别K线形态
@@ -141,6 +142,7 @@ class KLinePatternService:
             close_price: 收盘价
             high_price: 最高价
             low_price: 最低价
+            prev_close: 前一日收盘价（用于计算振幅，可选）
             
         Returns:
             K线形态名称，如 "小阴线"、"大阳线"、"十字星" 等
@@ -167,7 +169,15 @@ class KLinePatternService:
         if pattern:
             return pattern
         
-        # 分歧K线
+        # 分歧K线（带振幅检查的优先）
+        if prev_close is not None:
+            pattern = KLinePatternService._check_high_amplitude_divergence_patterns(
+                abc, is_main, low_price, high_price, prev_close, stock_code
+            )
+            if pattern:
+                return pattern
+        
+        # 分歧K线（不需要振幅的）
         pattern = KLinePatternService._check_divergence_patterns(abc, is_main, low_price)
         if pattern:
             return pattern
@@ -209,6 +219,47 @@ class KLinePatternService:
         if change_pct <= -limit_down_pct and abc.b == 0 and abc.c == 0:
             if low_price > 0 and abc.a > 0:
                 return "T字型跌停"
+        
+        return None
+    
+    @staticmethod
+    def _check_high_amplitude_divergence_patterns(
+        abc: KLineABC,
+        is_main: bool,
+        low_price: float,
+        high_price: float,
+        prev_close: float,
+        stock_code: str
+    ) -> Optional[str]:
+        """检查高振幅分歧K线形态（需要振幅判断）"""
+        if low_price == 0 or prev_close == 0:
+            return None
+        
+        # 计算振幅
+        amplitude = KLinePatternService.calculate_amplitude(high_price, low_price, prev_close)
+        
+        # 振幅阈值：主板8%，非主板10%
+        amplitude_threshold = 8.0 if is_main else 10.0
+        
+        # 必须满足振幅要求
+        if amplitude <= amplitude_threshold:
+            return None
+        
+        # 高振幅阳十字星
+        # 条件：振幅>8%/10%, A>C, A>3B, C>2B, 开盘价<收盘价
+        if abc.open < abc.close:
+            if (abc.a > abc.c and 
+                abc.a > 3 * abc.b and 
+                abc.c > 2 * abc.b):
+                return "高振幅阳十字星"
+        
+        # 高振幅阴十字星
+        # 条件：振幅>8%/10%, A>C, A>3B, C>2B, 开盘价>收盘价
+        if abc.open > abc.close:
+            if (abc.a > abc.c and 
+                abc.a > 3 * abc.b and 
+                abc.c > 2 * abc.b):
+                return "高振幅阴十字星"
         
         return None
     

@@ -183,7 +183,8 @@ class BearishPatternService:
         
         # 前一日为十字星
         prev_pattern = KLinePatternService.identify_pattern(
-            stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low']
+            stock_code, prev_day['open'], prev_day['close'], prev_day['high'], prev_day['low'],
+            prev_day.get('prev_close')
         )
         
         if prev_pattern != "十字星":
@@ -343,12 +344,15 @@ class BearishPatternService:
                 day['high'], day['low'],
                 daily_data[i-1]['close'] if i > 0 else day['close']
             )
+            prev_close_for_pattern = daily_data[i-1]['close'] if i > 0 else day['close']
             pattern = KLinePatternService.identify_pattern(
-                stock_code, day['open'], day['close'], day['high'], day['low']
+                stock_code, day['open'], day['close'], day['high'], day['low'], prev_close_for_pattern
             )
             
+            # 包含新增的高振幅十字星
             if amplitude > 6.0 and pattern in ["冲高回落阳线", "冲高回落阴线", "十字星",
-                                                "冲高回落阳十字星", "冲高回落阴十字星"]:
+                                                "冲高回落阳十字星", "冲高回落阴十字星",
+                                                "高振幅阳十字星", "高振幅阴十字星"]:
                 prev_patterns.append(pattern)
                 prev_highs.append(day['high'])
         
@@ -357,18 +361,21 @@ class BearishPatternService:
         
         # 当日再次出现带上影线的K线
         today = daily_data[target_idx]
+        today_prev_close = daily_data[target_idx - 1]['close']
         today_amplitude = BearishPatternService._calculate_amplitude(
-            today['high'], today['low'], daily_data[target_idx - 1]['close']
+            today['high'], today['low'], today_prev_close
         )
         today_pattern = KLinePatternService.identify_pattern(
-            stock_code, today['open'], today['close'], today['high'], today['low']
+            stock_code, today['open'], today['close'], today['high'], today['low'], today_prev_close
         )
         
         if today_amplitude <= 6.0:
             return None
         
+        # 包含新增的高振幅十字星
         if today_pattern not in ["冲高回落阳线", "冲高回落阴线", "十字星",
-                                 "冲高回落阳十字星", "冲高回落阴十字星"]:
+                                 "冲高回落阳十字星", "冲高回落阴十字星",
+                                 "高振幅阳十字星", "高振幅阴十字星"]:
             return None
         
         # 且两者最高价价格相差<1.5%
