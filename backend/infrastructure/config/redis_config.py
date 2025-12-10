@@ -2,10 +2,10 @@
 
 # 默认本地Redis，后续可改为缓存服务器地址
 REDIS_CONFIG = {
-    "host": "127.0.0.1",
-    "port": 6379,
+    "host": "sh-crs-gqaomntf.sql.tencentcdb.com",
+    "port": 25305,
     "db": 0,
-    "password": None,
+    "password": "6ax6US$p2v8e",
     # 是否在字符串上保留原样（便于中文字段）
     "decode_responses": True,
     # 连接超时秒

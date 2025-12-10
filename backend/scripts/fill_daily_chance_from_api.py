@@ -67,7 +67,7 @@ logger = logging.getLogger("fill_daily_chance_from_api")
 
 
 # ========= 工具函数 =========
-def load_stocks_from_db(conn, limit: Optional[int], codes: Optional[List[str]]) -> List[Dict]:
+def load_stocks_from_db(conn, limit: Optional[int], codes: Optional[List[str]], offset: int = 0) -> List[Dict]:
     """
     从 all_stock 读取股票与 nature
     """
@@ -90,6 +90,12 @@ def load_stocks_from_db(conn, limit: Optional[int], codes: Optional[List[str]]) 
     if limit and limit > 0:
         sql += " LIMIT %s"
         params.append(limit)
+        if offset > 0:
+            sql += " OFFSET %s"
+            params.append(offset)
+    elif offset > 0:
+        sql += " LIMIT 18446744073709551615 OFFSET %s"
+        params.append(offset)
 
     cursor.execute(sql, params)
     rows = cursor.fetchall()
@@ -250,37 +256,20 @@ def process_stock(conn, stock: Dict, start_date: date, end_date: date) -> int:
 
 
 # ========= 主流程 =========
-def main():
-    parser = argparse.ArgumentParser(description="批量回填 b_daily_chance（赔率+支撑/压力）")
-    parser.add_argument("--start", type=str, default=DEFAULT_START, help="开始日期 YYYY-MM-DD，默认 2025-09-25")
-    parser.add_argument("--end", type=str, default=DEFAULT_END, help=f"结束日期 YYYY-MM-DD，默认今天 {DEFAULT_END}")
-    parser.add_argument("--limit", type=int, default=0, help="限制股票数量（测试用）")
-    parser.add_argument("--codes", type=str, help="指定股票代码，逗号分隔，如 SZ301565,SH688701")
-    args = parser.parse_args()
-
-    try:
-        start_dt = datetime.strptime(args.start, "%Y-%m-%d").date()
-        end_dt = datetime.strptime(args.end, "%Y-%m-%d").date()
-    except Exception:
-        logger.error("❌ 日期格式错误，应为 YYYY-MM-DD")
-        sys.exit(1)
-
-    codes = None
-    if args.codes:
-        codes = [c.strip().upper() for c in args.codes.split(",") if c.strip()]
-
+def run_once(start_dt: date, end_dt: date, limit: int, offset: int, codes: Optional[List[str]]):
+    """执行一次回填"""
     try:
         conn = get_master_connection()
         logger.info(f"✅ 已连接主库 {MASTER_DB_CONFIG['host']}:{MASTER_DB_CONFIG['port']}")
     except Exception as e:
         logger.error(f"❌ 连接主库失败: {e}")
-        sys.exit(1)
+        return
 
-    stocks = load_stocks_from_db(conn, limit=args.limit, codes=codes)
+    stocks = load_stocks_from_db(conn, limit=limit, codes=codes, offset=offset)
     if not stocks:
         logger.error("❌ 未加载到任何股票")
         conn.close()
-        sys.exit(1)
+        return
 
     total_rows = 0
     try:
@@ -293,6 +282,56 @@ def main():
 
     logger.info("📊 完成")
     logger.info(f"总写入/更新: {total_rows} 条")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="批量回填 b_daily_chance（赔率+支撑/压力）")
+    parser.add_argument("--start", type=str, default=DEFAULT_START, help="开始日期 YYYY-MM-DD，默认 2025-11-25")
+    parser.add_argument("--end", type=str, default=DEFAULT_END, help=f"结束日期 YYYY-MM-DD，默认今天 {DEFAULT_END}")
+    parser.add_argument("--today", action="store_true", help="仅跑今天（start=end=今天）")
+    parser.add_argument("--limit", type=int, default=0, help="限制股票数量（测试用）")
+    parser.add_argument("--offset", type=int, default=0, help="从第 offset 条开始（用于断点续跑）")
+    parser.add_argument("--codes", type=str, help="指定股票代码，逗号分隔，如 SZ301565,SH688701")
+    parser.add_argument("--scheduler", action="store_true", help="启动定时任务（每日16:00跑当日数据）")
+    args = parser.parse_args()
+
+    try:
+        start_dt = datetime.strptime(args.start, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(args.end, "%Y-%m-%d").date()
+    except Exception:
+        logger.error("❌ 日期格式错误，应为 YYYY-MM-DD")
+        sys.exit(1)
+
+    if args.today:
+        start_dt = end_dt = date.today()
+
+    codes = None
+    if args.codes:
+        codes = [c.strip().upper() for c in args.codes.split(",") if c.strip()]
+
+    if args.scheduler:
+        try:
+            from apscheduler.schedulers.blocking import BlockingScheduler
+            from apscheduler.triggers.cron import CronTrigger
+        except ImportError:
+            logger.error("❌ APScheduler 未安装，请运行: pip install APScheduler")
+            sys.exit(1)
+
+        scheduler = BlockingScheduler()
+
+        def job():
+            today = date.today()
+            logger.info("🌟 定时任务：跑当日数据")
+            run_once(today, today, limit=args.limit, offset=args.offset, codes=codes)
+
+        scheduler.add_job(job, CronTrigger(hour=16, minute=0), id="fill_daily_chance", replace_existing=True)
+        logger.info("✅ 定时任务已启动：每日 16:00 跑当日数据")
+        try:
+            scheduler.start()
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("⛔ 定时任务已停止")
+    else:
+        run_once(start_dt, end_dt, limit=args.limit, offset=args.offset, codes=codes)
 
 
 if __name__ == "__main__":
