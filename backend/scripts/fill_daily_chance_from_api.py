@@ -329,7 +329,7 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="限制股票数量（测试用）")
     parser.add_argument("--offset", type=int, default=0, help="从第 offset 条开始（用于断点续跑）")
     parser.add_argument("--codes", type=str, help="指定股票代码，逗号分隔，如 SZ301565,SH688701")
-    parser.add_argument("--scheduler", action="store_true", help="启动定时任务（每日16:00跑当日数据）")
+    parser.add_argument("--scheduler", action="store_true", help="启动定时任务（每日17:15跑当日数据）")
     args = parser.parse_args()
 
     try:
@@ -361,8 +361,8 @@ def main():
             logger.info("🌟 定时任务：跑当日数据")
             run_once(today, today, limit=args.limit, offset=args.offset, codes=codes)
 
-        scheduler.add_job(job, CronTrigger(hour=16, minute=0), id="fill_daily_chance", replace_existing=True)
-        logger.info("✅ 定时任务已启动：每日 16:00 跑当日数据")
+        scheduler.add_job(job, CronTrigger(hour=17, minute=40), id="fill_daily_chance", replace_existing=True)
+        logger.info("✅ 定时任务已启动：每日 17:15 跑当日数据")
         try:
             scheduler.start()
         except (KeyboardInterrupt, SystemExit):

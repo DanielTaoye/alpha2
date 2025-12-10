@@ -304,12 +304,13 @@ if __name__ == '__main__':
     
     try:
         # 启动高分定时任务（避免debug模式重复启动）
-        try:
-            if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not SERVER_CONFIG.get('debug', False):
-                scheduler = get_high_score_scheduler()
-                scheduler.start()
-        except Exception as e:
-            logger.error(f"❌ 启动高分定时任务失败: {e}", exc_info=True)
+        # 临时关闭：如需恢复，将下方注释去掉
+        # try:
+        #     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not SERVER_CONFIG.get('debug', False):
+        #         scheduler = get_high_score_scheduler()
+        #         scheduler.start()
+        # except Exception as e:
+        #     logger.error(f"❌ 启动高分定时任务失败: {e}", exc_info=True)
 
         app.run(
             host=SERVER_CONFIG['host'],
