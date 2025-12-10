@@ -21,7 +21,9 @@ from interfaces.controllers.config_controller import ConfigController
 from interfaces.controllers.backtest_controller import BacktestController
 from interfaces.controllers.latest_cr_point_controller import LatestCRPointController
 from interfaces.controllers.cache_controller import CacheController
+from interfaces.controllers.high_score_controller import HighScoreController
 from infrastructure.config.app_config import SERVER_CONFIG
+from schedulers.high_score_scheduler import get_high_score_scheduler
 
 # 初始化日志
 logger = get_app_logger()
@@ -40,6 +42,7 @@ config_controller = ConfigController()
 backtest_controller = BacktestController()
 latest_cr_point_controller = LatestCRPointController()
 cache_controller = CacheController()
+high_score_controller = HighScoreController()
 
 
 # ============ 路由定义 ============
@@ -194,6 +197,18 @@ def get_latest_cr_points():
     return latest_cr_point_controller.get_latest_cr_points()
 
 
+@app.route('/api/streaming/high_score', methods=['POST'])
+def streaming_high_score():
+    """从Redis获取高分排行榜"""
+    return high_score_controller.get_high_score()
+
+
+@app.route('/api/streaming/high_score/refresh', methods=['POST'])
+def refresh_streaming_high_score():
+    """手动刷新高分排行榜（立即重算）"""
+    return high_score_controller.refresh_high_score()
+
+
 # ============= 缓存管理接口 =============
 @app.route('/api/cache/info', methods=['GET', 'POST'])
 def get_cache_info():
@@ -288,6 +303,14 @@ if __name__ == '__main__':
         logger.error(f"❌ 启动CR缓存初始化失败: {e}", exc_info=True)
     
     try:
+        # 启动高分定时任务（避免debug模式重复启动）
+        try:
+            if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not SERVER_CONFIG.get('debug', False):
+                scheduler = get_high_score_scheduler()
+                scheduler.start()
+        except Exception as e:
+            logger.error(f"❌ 启动高分定时任务失败: {e}", exc_info=True)
+
         app.run(
             host=SERVER_CONFIG['host'],
             port=SERVER_CONFIG['port'],

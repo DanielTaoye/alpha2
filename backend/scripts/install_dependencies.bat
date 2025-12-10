@@ -8,7 +8,7 @@ echo.
 cd C:\Users\lenovo\Desktop\alpha_strategy_v2
 
 echo 安装依赖包...
-pip install APScheduler
+pip install APScheduler redis
 
 echo.
 echo ==========================================

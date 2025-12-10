@@ -17,7 +17,7 @@ echo ""
 
 # 安装依赖
 echo "安装依赖包..."
-pip3 install pymysql APScheduler
+pip3 install pymysql APScheduler redis
 
 echo ""
 echo "=========================================="
