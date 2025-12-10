@@ -1043,13 +1043,13 @@ class RPointPluginService:
         插件7: 箱体回踩被跌破
         
         新逻辑:
-        1. 从今天往前推20个交易日，找到最高价日X日，X日最高价距离今日当前价格 > 18%
+        1. 从今天往前推20个交易日，找到最高价日X日，X日最高价距离今日当前价格 > 20%
         2. 从X日往前推22个交易日，查找是否有比X日更高的价格：
            - 如果有，确定该日为Y日
            - 找到这22天内的最低价日Z日
         3. 箱体确认：
-           - 有Y日：Y日最高价 - Z日最低价 > 18%
-           - 无Y日：X日最高价 - Z日最低价 > 18%
+           - 有Y日：Y日最高价 - Z日最低价 > 20%
+           - 无Y日：X日最高价 - Z日最低价 > 20%
         4. 当前股价跌破前一日支撑位
         5. MACD出现死叉（前5个交易日内）
         """
@@ -1081,10 +1081,10 @@ class RPointPluginService:
             if x_day_index < 0:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
-            # 检查X日最高价距离当前价格 > 18%
+            # 检查X日最高价距离当前价格 > 20%
             drop_ratio = (x_day_high - current_price) / x_day_high
-            if drop_ratio <= 0.18:
-                logger.debug(f"[箱体回踩] {stock_code} X日最高价{x_day_high:.2f}距当前{current_price:.2f}回落{drop_ratio*100:.2f}%不满足>18%")
+            if drop_ratio <= 0.20:
+                logger.debug(f"[箱体回踩] {stock_code} X日最高价{x_day_high:.2f}距当前{current_price:.2f}回落{drop_ratio*100:.2f}%不满足>20%")
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
             # === 步骤2: 从X日往前推22个交易日，找Y日和Z日 ===
@@ -1124,19 +1124,19 @@ class RPointPluginService:
             
             # === 步骤3: 箱体确认 ===
             if y_day_high is not None:
-                # 有Y日：Y日最高价 - Z日最低价 > 18%
+                # 有Y日：Y日最高价 - Z日最低价 > 20%
                 box_gain_ratio = (y_day_high - z_day_low) / z_day_low
-                if box_gain_ratio <= 0.18:
-                    logger.debug(f"[箱体回踩] {stock_code} Y日{y_day_high:.2f}-Z日{z_day_low:.2f}涨幅{box_gain_ratio*100:.2f}%不满足>18%")
+                if box_gain_ratio <= 0.20:
+                    logger.debug(f"[箱体回踩] {stock_code} Y日{y_day_high:.2f}-Z日{z_day_low:.2f}涨幅{box_gain_ratio*100:.2f}%不满足>20%")
                     return RPointPluginResult("箱体回踩被跌破", False, "")
                 box_high_price = y_day_high
                 box_high_date = y_day_date
                 has_y_day = True
             else:
-                # 无Y日：X日最高价 - Z日最低价 > 18%
+                # 无Y日：X日最高价 - Z日最低价 > 20%
                 box_gain_ratio = (x_day_high - z_day_low) / z_day_low
-                if box_gain_ratio <= 0.18:
-                    logger.debug(f"[箱体回踩] {stock_code} X日{x_day_high:.2f}-Z日{z_day_low:.2f}涨幅{box_gain_ratio*100:.2f}%不满足>18%")
+                if box_gain_ratio <= 0.20:
+                    logger.debug(f"[箱体回踩] {stock_code} X日{x_day_high:.2f}-Z日{z_day_low:.2f}涨幅{box_gain_ratio*100:.2f}%不满足>20%")
                     return RPointPluginResult("箱体回踩被跌破", False, "")
                 box_high_price = x_day_high
                 box_high_date = kline_data[x_day_index].time.strftime('%Y-%m-%d')

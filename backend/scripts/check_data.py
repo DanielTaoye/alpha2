@@ -71,7 +71,7 @@ with DatabaseConnection.get_connection_context() as conn:
     drop_ratio = (x_day_high - current_close) / x_day_high * 100
     print(f'X日: {x_day_date}, 最高价: {x_day_high:.2f}')
     print(f'回落幅度: ({x_day_high:.2f} - {current_close:.2f}) / {x_day_high:.2f} = {drop_ratio:.2f}%')
-    print(f'条件1 (回落>18%): {"✅ 满足" if drop_ratio > 18 else "❌ 不满足"}')
+    print(f'条件1 (回落>20%): {"✅ 满足" if drop_ratio > 20 else "❌ 不满足"}')
     
     # === 步骤2: 找Y日和Z日 ===
     print('\n' + '=' * 100)
@@ -119,7 +119,7 @@ with DatabaseConnection.get_connection_context() as conn:
     else:
         box_gain = (x_day_high - z_day_low) / z_day_low * 100
         print(f'计算: (X日{x_day_high:.2f} - Z日{z_day_low:.2f}) / Z日{z_day_low:.2f} = {box_gain:.2f}%')
-    print(f'条件2 (箱体涨幅>18%): {"✅ 满足" if box_gain > 18 else "❌ 不满足"}')
+    print(f'条件2 (箱体涨幅>20%): {"✅ 满足" if box_gain > 20 else "❌ 不满足"}')
     
     # === 步骤4: 跌破支撑位 ===
     print('\n' + '=' * 100)
@@ -140,12 +140,12 @@ with DatabaseConnection.get_connection_context() as conn:
     print('\n' + '=' * 100)
     print('总结:')
     print('-' * 100)
-    print(f'  条件1 回落>18%: {"✅" if drop_ratio > 18 else "❌"} ({drop_ratio:.2f}%)')
-    print(f'  条件2 箱体>18%: {"✅" if box_gain > 18 else "❌"} ({box_gain:.2f}%)')
+    print(f'  条件1 回落>20%: {"✅" if drop_ratio > 20 else "❌"} ({drop_ratio:.2f}%)')
+    print(f'  条件2 箱体>20%: {"✅" if box_gain > 20 else "❌"} ({box_gain:.2f}%)')
     print(f'  条件3 跌破支撑: {"✅" if is_break else "❌"} (收盘{current_close:.2f} vs 支撑{support:.2f})')
     print(f'  条件4 MACD死叉: 需要API数据')
     
-    all_pass = drop_ratio > 18 and box_gain > 18 and is_break
+    all_pass = drop_ratio > 20 and box_gain > 20 and is_break
     print(f'\n前3个条件是否全部满足: {"✅ 是" if all_pass else "❌ 否"}')
     
     # === 步骤5: MACD死叉检查 ===

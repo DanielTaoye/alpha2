@@ -761,7 +761,7 @@ def diagnose_box_breakdown(stock_code: str, date_str: str, current_data: Dict,
         
         # 检查回落幅度
         drop_ratio = (x_day_high - current_price) / x_day_high * 100 if x_day_high > 0 else 0
-        print(f"  当前价{current_price:.2f}较X日回落: {drop_ratio:.2f}% (需要>18%): {'✅' if drop_ratio > 18 else '❌'}")
+        print(f"  当前价{current_price:.2f}较X日回落: {drop_ratio:.2f}% (需要>20%): {'✅' if drop_ratio > 20 else '❌'}")
     else:
         print("  ❌ 无法找到X日")
         return
@@ -789,12 +789,12 @@ def diagnose_box_breakdown(stock_code: str, date_str: str, current_data: Dict,
             print(f"  Y日最高价: {y_day_high:.2f} (比X日更高)")
             box_gain = (y_day_high - z_day_low) / z_day_low * 100 if z_day_low > 0 else 0
             print(f"  Z日最低价: {z_day_low:.2f}")
-            print(f"  Y-Z涨幅: {box_gain:.2f}% (需要>18%): {'✅' if box_gain > 18 else '❌'}")
+            print(f"  Y-Z涨幅: {box_gain:.2f}% (需要>20%): {'✅' if box_gain > 20 else '❌'}")
         else:
             print(f"  无Y日（X日前22天没有更高价）")
             box_gain = (x_day_high - z_day_low) / z_day_low * 100 if z_day_low > 0 else 0
             print(f"  Z日最低价: {z_day_low:.2f}")
-            print(f"  X-Z涨幅: {box_gain:.2f}% (需要>18%): {'✅' if box_gain > 18 else '❌'}")
+            print(f"  X-Z涨幅: {box_gain:.2f}% (需要>20%): {'✅' if box_gain > 20 else '❌'}")
     
     # 步骤3: 跌破支撑位
     print("\n  --- 步骤3: 跌破支撑位 ---")
