@@ -31,13 +31,19 @@ from typing import List, Dict, Optional, Tuple
 import pymysql
 import requests
 
-# 路径
+# 路径（先插入，再导入 domain 服务）
 script_path = os.path.abspath(__file__)
 script_dir = os.path.dirname(script_path)
 backend_dir = os.path.dirname(script_dir)
 project_root = os.path.dirname(backend_dir)
 sys.path.insert(0, backend_dir)
 sys.path.insert(0, project_root)
+
+from domain.services.bullish_pattern_service import BullishPatternService
+from domain.services.bearish_pattern_service import BearishPatternService
+from domain.services.volume_type_service import VolumeTypeService
+
+SERVICES_AVAILABLE = True
 
 # ===== 数据库配置（生产主库，用于写入 b_daily_chance） =====
 MASTER_DB_CONFIG = {
@@ -53,8 +59,8 @@ MASTER_DB_CONFIG = {
 API_BASE_URL = "http://121.5.174.81:8005"
 API_PATH = "/stock/getDailyChanceWithBeauty"
 
-# 默认日期范围（仅跑 2025-11-25 之后）
-DEFAULT_START = "2025-11-25"
+# 默认日期范围：仅跑今天
+DEFAULT_START = date.today().strftime("%Y-%m-%d")
 DEFAULT_END = date.today().strftime("%Y-%m-%d")
 
 # 日志
@@ -106,6 +112,7 @@ def load_stocks_from_db(conn, limit: Optional[int], codes: Optional[List[str]], 
             "code": (row.get("code") or "").upper(),
             "name": row.get("name") or "",
             "nature": row.get("nature") or "",
+            "table_name": f"basic_data_{(row.get('code') or '').lower()}",
         })
 
     logger.info(f"📊 加载股票数: {len(stocks)}")
@@ -136,6 +143,22 @@ def parse_win_ratios(desc: str) -> Tuple[float, float, float]:
     return day, week, total
 
 
+def calculate_volume_and_patterns(stock_code: str, table_name: str, date_str: str) -> Tuple[str, str, str]:
+    """计算成交量类型、多头、空头组合"""
+    if not SERVICES_AVAILABLE:
+        return "", "", ""
+    try:
+        target_date = datetime.strptime(date_str, "%Y-%m-%d")
+        volume_type = VolumeTypeService.calculate_volume_type(table_name, target_date) or ""
+        bullish_patterns = BullishPatternService.identify_bullish_patterns(stock_code, table_name, target_date)
+        bearish_patterns = BearishPatternService.identify_bearish_patterns(stock_code, table_name, target_date)
+        bullish_pattern = ",".join(bullish_patterns) if bullish_patterns else ""
+        bearish_pattern = ",".join(bearish_patterns) if bearish_patterns else ""
+        return volume_type, bullish_pattern, bearish_pattern
+    except Exception:
+        return "", "", ""
+
+
 def fetch_api_data(stock_code: str) -> List[Dict]:
     """调用接口，返回列表数据（可能包含多天）"""
     url = f"{API_BASE_URL}{API_PATH}"
@@ -159,7 +182,7 @@ def fetch_api_data(stock_code: str) -> List[Dict]:
 
 
 def upsert_daily_chance(conn, rows: List[Dict]):
-    """批量 upsert 到 b_daily_chance（更新日线得分 + 支撑/压力）"""
+    """批量 upsert 到 b_daily_chance（更新日/周/总赔率 + 支撑/压力 + 量型/多头/空头）"""
     if not rows:
         return 0
     cursor = conn.cursor()
@@ -167,8 +190,8 @@ def upsert_daily_chance(conn, rows: List[Dict]):
         INSERT INTO b_daily_chance
         (stock_code, stock_name, stock_nature, date,
          day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
-         support_price, pressure_price, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+         support_price, pressure_price, volume_type, bullish_pattern, bearish_pattern, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         ON DUPLICATE KEY UPDATE
             stock_name = VALUES(stock_name),
             stock_nature = VALUES(stock_nature),
@@ -177,6 +200,9 @@ def upsert_daily_chance(conn, rows: List[Dict]):
             total_win_ratio_score = VALUES(total_win_ratio_score),
             support_price = VALUES(support_price),
             pressure_price = VALUES(pressure_price),
+            volume_type = VALUES(volume_type),
+            bullish_pattern = VALUES(bullish_pattern),
+            bearish_pattern = VALUES(bearish_pattern),
             updated_at = NOW()
     """
     params = []
@@ -191,6 +217,9 @@ def upsert_daily_chance(conn, rows: List[Dict]):
             r["total_win_ratio_score"],
             r["support_price"],
             r["pressure_price"],
+            r["volume_type"],
+            r["bullish_pattern"],
+            r["bearish_pattern"],
         ))
     cursor.executemany(sql, params)
     conn.commit()
@@ -202,6 +231,7 @@ def process_stock(conn, stock: Dict, start_date: date, end_date: date) -> int:
     code = stock["code"]
     name = stock["name"]
     nature = stock["nature"]
+    table_name = stock.get("table_name") or f"basic_data_{code.lower()}"
 
     data_list = fetch_api_data(code)
     if not data_list:
@@ -234,6 +264,10 @@ def process_stock(conn, stock: Dict, start_date: date, end_date: date) -> int:
         except Exception:
             pressure_price = None
 
+        volume_type, bullish_pattern, bearish_pattern = calculate_volume_and_patterns(
+            code, table_name, day_str
+        )
+
         rows.append({
             "stock_code": code,
             "stock_name": name,
@@ -244,6 +278,9 @@ def process_stock(conn, stock: Dict, start_date: date, end_date: date) -> int:
             "total_win_ratio_score": total_score,
             "support_price": support_price,
             "pressure_price": pressure_price,
+            "volume_type": volume_type,
+            "bullish_pattern": bullish_pattern,
+            "bearish_pattern": bearish_pattern,
         })
 
     if not rows:
@@ -285,10 +322,10 @@ def run_once(start_dt: date, end_dt: date, limit: int, offset: int, codes: Optio
 
 
 def main():
-    parser = argparse.ArgumentParser(description="批量回填 b_daily_chance（赔率+支撑/压力）")
-    parser.add_argument("--start", type=str, default=DEFAULT_START, help="开始日期 YYYY-MM-DD，默认 2025-11-25")
+    parser = argparse.ArgumentParser(description="批量回填 b_daily_chance（赔率+支撑/压力+量型/多空）")
+    parser.add_argument("--start", type=str, default=DEFAULT_START, help="开始日期 YYYY-MM-DD，默认今天")
     parser.add_argument("--end", type=str, default=DEFAULT_END, help=f"结束日期 YYYY-MM-DD，默认今天 {DEFAULT_END}")
-    parser.add_argument("--today", action="store_true", help="仅跑今天（start=end=今天）")
+    parser.add_argument("--today", action="store_true", help="仅跑今天（start=end=今天，默认行为）")
     parser.add_argument("--limit", type=int, default=0, help="限制股票数量（测试用）")
     parser.add_argument("--offset", type=int, default=0, help="从第 offset 条开始（用于断点续跑）")
     parser.add_argument("--codes", type=str, help="指定股票代码，逗号分隔，如 SZ301565,SH688701")
