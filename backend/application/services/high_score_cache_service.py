@@ -107,6 +107,11 @@ class HighScoreCacheService:
             except Exception:
                 continue
             data["total_score"] = round(score, 2)
+            # 补充驼峰命名，兼容前端
+            if "volume_type" in data and "volumeType" not in data:
+                data["volumeType"] = data.get("volume_type")
+            if "volume_type_source" in data and "volumeTypeSource" not in data:
+                data["volumeTypeSource"] = data.get("volume_type_source")
             stocks.append(data)
 
         meta = self.redis_client.get(meta_key)
@@ -152,6 +157,9 @@ class HighScoreCacheService:
                 "date": date_str,
                 "volume_type": volume_type,
                 "volume_type_source": volume_type_source,
+                # 兼容前端字段命名
+                "volumeType": volume_type,
+                "volumeTypeSource": volume_type_source,
             }
         except Exception as e:
             logger.error(f"计算 {stock.get('code')} 失败: {e}", exc_info=True)
@@ -167,6 +175,8 @@ class HighScoreCacheService:
                 "error": str(e),
                 "volume_type": None,
                 "volume_type_source": None,
+                "volumeType": None,
+                "volumeTypeSource": None,
             }
 
     def _write_to_redis(self, high_scores: List[Dict], stats: Dict):
