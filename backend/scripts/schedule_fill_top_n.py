@@ -13,14 +13,21 @@
 import os
 import sys
 import subprocess
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, time as dt_time
 from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:  # pragma: no cover
+    from backports.zoneinfo import ZoneInfo  # type: ignore
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "fill_top_n_to_redis.py"
+TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _run_once(top_n: str, max_workers: str):
@@ -54,21 +61,22 @@ def _run_loop_until_15():
     top_n = os.getenv("TOP_N", "999999")  # 全量
     max_workers = os.getenv("MAX_WORKERS", "100")
 
-    now = datetime.now()
-    end = now.replace(hour=15, minute=0, second=0, microsecond=0)
+    now = datetime.now(TZ)
+    end = datetime.combine(now.date(), dt_time(hour=15, minute=0, second=0), tzinfo=TZ)
     if now > end:
         print(f"[{now:%F %T}] 已过 15:00，跳过今日")
         return
 
-    while datetime.now() <= end:
+    while datetime.now(TZ) <= end:
         _run_once(top_n, max_workers)
         # 防止极短时间内过多循环，可按需小睡；这里不 sleep，确保一轮完立即下一轮
-        if datetime.now() > end:
+        if datetime.now(TZ) > end:
             break
+        # 若需要可放开下行：time.sleep(1)
 
 
 def main():
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(timezone=TZ)
     # 每天 9:30 触发（如需仅工作日可加 day_of_week="mon-fri"）
     scheduler.add_job(_run_loop_until_15, "cron", hour=9, minute=30, id="fill_top_n_daily")
     print("APScheduler started. Cron: 09:30 daily until 15:00 loop.")
