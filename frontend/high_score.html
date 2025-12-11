@@ -103,19 +103,6 @@
             flex-wrap: wrap;
         }
 
-        .threshold-info {
-            background: #f0f7ff;
-            padding: 10px 15px;
-            border-radius: 8px;
-            font-size: 14px;
-            color: #1976d2;
-            border: 1px solid #bbdefb;
-        }
-
-        .threshold-info strong {
-            color: #0d47a1;
-        }
-
         .refresh-btn {
             padding: 10px 20px;
             border: none;
@@ -194,6 +181,11 @@
         .ranking-table td {
             padding: 15px;
             border-bottom: 1px solid #f0f0f0;
+        }
+
+        .volume-type-cell,
+        .date-cell {
+            color: #000;
         }
 
         .ranking-table tbody tr:hover {
@@ -395,9 +387,6 @@
         <!-- 控制面板 -->
         <div class="control-panel">
             <div class="control-row">
-                <div class="threshold-info">
-                    📊 当前阈值: 策略1 ≥ <strong id="threshold1">-</strong>分 且 策略2 ≥ <strong id="threshold2">-</strong>分
-                </div>
                 <button class="refresh-btn" onclick="manualRefresh()" id="refresh-btn">
                     🔄 手动刷新
                 </button>
@@ -421,7 +410,7 @@
                 <div class="loading">
                     <div class="loading-spinner"></div>
                     <div>正在加载高分推荐...</div>
-                    <div style="font-size: 12px; color: #aaa; margin-top: 10px;">流式微批实时更新</div>
+                    <div style="font-size: 12px; color: #aaa; margin-top: 10px;">实时更新</div>
                 </div>
             </div>
         </div>
@@ -433,25 +422,6 @@
         let countdownInterval = null;
         let countdownValue = 60;
         let isScanning = false;
-        let currentThresholds = { strategy1: 70, strategy2: 85 };
-
-        // 加载阈值配置
-        async function loadThresholds() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/high_score/thresholds`);
-                const result = await response.json();
-                
-                if (result.code === 200 && result.data) {
-                    currentThresholds.strategy1 = result.data.strategy1_threshold;
-                    currentThresholds.strategy2 = result.data.strategy2_threshold;
-                    
-                    document.getElementById('threshold1').textContent = currentThresholds.strategy1;
-                    document.getElementById('threshold2').textContent = currentThresholds.strategy2;
-                }
-            } catch (error) {
-                console.error('加载阈值配置失败:', error);
-            }
-        }
 
         // 检查交易状态
         async function checkTradingStatus() {
@@ -474,7 +444,7 @@
             }
         }
 
-        // 扫描高分股票（使用流式微批接口，毫秒级）
+        // 扫描高分股票（使用快速查询接口，毫秒级）
         async function scanHighScoreStocks(useCache = true) {
             if (isScanning) {
                 console.log('正在查询中，跳过...');
@@ -485,7 +455,7 @@
             updateScanningStatus(true);
 
             try {
-                // 使用新的流式微批接口（直接查数据库，毫秒级）
+                // 使用快速接口（直接查数据库，毫秒级）
                 const response = await fetch(`${API_BASE_URL}/streaming/high_score`, {
                     method: 'POST',
                     headers: {
@@ -556,9 +526,6 @@
                     `<div class="empty-state">
                         <div class="empty-state-icon">📊</div>
                         <div>暂无达到阈值的高分股票</div>
-                        <div style="font-size: 14px; color: #aaa; margin-top: 10px;">
-                            当前阈值: 策略1 ≥ ${currentThresholds.strategy1}分 且 策略2 ≥ ${currentThresholds.strategy2}分
-                        </div>
                     </div>`;
                 return;
             }
@@ -616,9 +583,9 @@
                             ${item.strategy2_triggered ? 
                                 '<span class="badge badge-triggered">✓</span>' : ''}
                         </td>
-                        <td>${item.volume_type || '-'}</td>
+                        <td class="volume-type-cell">${item.volume_type || '-'}</td>
                         <td><span class="nature-badge ${natureClass}">${item.nature || '波段'}</span></td>
-                        <td>${item.date || '-'}</td>
+                        <td class="date-cell">${item.date || '-'}</td>
                     </tr>
                 `;
             });
@@ -632,7 +599,6 @@
                     </div>
                     <div class="scan-stats">
                         <span>📊 总共: ${data.total || 0} 只</span>
-                        <span>🔄 流式微批</span>
                         <span>⚡ 实时更新</span>
                     </div>
                 </div>
@@ -657,7 +623,6 @@
         // 启动自动刷新
         function startAutoRefresh() {
             // 立即加载一次
-            loadThresholds();
             checkTradingStatus();
             scanHighScoreStocks();  // 直接查询数据库，毫秒级
             

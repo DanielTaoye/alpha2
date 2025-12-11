@@ -1272,41 +1272,15 @@ class RPointPluginService:
             break_support_detail = None
             
             for check_date_str in check_dates:
-                # 获取该日数据
-                check_data = self._daily_cache.get(check_date_str)
-                if not check_data:
-                    check_data = self.daily_repo.find_by_date(stock_code, check_date_str)
-                if not check_data:
-                    continue
-                
-                check_close = check_data.close
-                
-                # 获取该日的前一交易日
-                prev_dates = self._get_previous_trading_dates_from_cache(check_date_str, stock_code)
-                if not prev_dates or len(prev_dates) < 1:
-                    continue
-                
-                prev_date_str = prev_dates[0]  # 取第一个，即前一个交易日
-                
-                # 获取前一日的daily_chance（支撑位）
-                prev_chance = self._daily_chance_cache.get(prev_date_str)
-                if not prev_chance:
-                    prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
-                if not prev_chance:
-                    continue
-                
-                # 检查前一日是否有支撑位
-                if not prev_chance.support_price or prev_chance.support_price <= 0:
-                    continue
-                
-                # 支撑位需要除以100
-                support_price_actual = prev_chance.support_price / 100.0
-                
-                # 检查是否跌破支撑位
-                if check_close < support_price_actual:
+                is_break_support, support_price_actual, check_close, detail = self._is_close_break_prev_support(
+                    stock_code, check_date_str
+                )
+                if is_break_support:
                     break_support_found = True
                     break_support_date = check_date_str
-                    break_support_detail = f"跌破支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
+                    break_support_detail = detail or (
+                        f"跌破支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
+                    )
                     break
             
             if not break_support_found:
@@ -1357,6 +1331,44 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"插件8-趋势向下+未放量跌破支撑+MACD死叉检查异常: {e}")
             return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+    
+    def _is_close_break_prev_support(self, stock_code: str, check_date_str: str) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
+        """
+        判断某日是否以收盘价跌破前一日支撑线。
+        
+        Returns:
+            Tuple[bool, Optional[float], Optional[float], Optional[str]]:
+                (是否跌破, 前一日支撑价, 当日收盘价, 详情描述)
+        """
+        # 当日数据
+        check_data = self._daily_cache.get(check_date_str)
+        if not check_data:
+            check_data = self.daily_repo.find_by_date(stock_code, check_date_str)
+        if not check_data:
+            return False, None, None, None
+        
+        check_close = check_data.close
+        
+        # 前一交易日
+        prev_dates = self._get_previous_trading_dates_from_cache(check_date_str, stock_code)
+        if not prev_dates or len(prev_dates) < 1:
+            return False, None, check_close, None
+        
+        prev_date_str = prev_dates[0]
+        
+        # 前一日支撑
+        prev_chance = self._daily_chance_cache.get(prev_date_str)
+        if not prev_chance:
+            prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+        if not prev_chance or not prev_chance.support_price or prev_chance.support_price <= 0:
+            return False, None, check_close, None
+        
+        support_price_actual = prev_chance.support_price / 100.0
+        if check_close < support_price_actual:
+            detail = f"跌破支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
+            return True, support_price_actual, check_close, detail
+        
+        return False, support_price_actual, check_close, None
     
     def _check_volume_type(self, daily_chance, target_types: List[str]) -> bool:
         """检查成交量类型是否在目标类型中"""
@@ -1776,31 +1788,12 @@ class RPointPluginService:
             if not current_chance:
                 return RPointPluginResult("跌破支撑位", False, "")
             
-            # 获取前一交易日
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            if not prev_dates or len(prev_dates) < 1:
-                return RPointPluginResult("跌破支撑位", False, "")
+            # 条件1: 当日收盘价 < 前一日支撑位（统一使用收盘价对比前日支撑线）
+            is_break_support, support_price_actual, current_close, _ = self._is_close_break_prev_support(
+                stock_code, date_str
+            )
             
-            prev_date_str = prev_dates[0]
-            
-            # 获取前一日的daily_chance（支撑位）
-            prev_chance = self._daily_chance_cache.get(prev_date_str)
-            if not prev_chance:
-                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
-            if not prev_chance:
-                return RPointPluginResult("跌破支撑位", False, "")
-            
-            # 检查前一日是否有支撑位
-            if not prev_chance.support_price or prev_chance.support_price <= 0:
-                return RPointPluginResult("跌破支撑位", False, "")
-            
-            # 支撑位需要除以100（数据库存储的是整数形式，如1463代表14.63元）
-            support_price_actual = prev_chance.support_price / 100.0
-            
-            # 条件1: 当日收盘价 < 前一日支撑位
-            is_break_support = current_data.close < support_price_actual
-            
-            if not is_break_support:
+            if not is_break_support or support_price_actual is None or current_close is None:
                 return RPointPluginResult("跌破支撑位", False, "")
             
             # 条件2: 当日成交量是XYZ（放量）
@@ -1810,12 +1803,12 @@ class RPointPluginService:
                 return RPointPluginResult("跌破支撑位", False, "")
             
             # 计算跌幅
-            break_ratio = ((current_data.close - support_price_actual) / support_price_actual) * 100
+            break_ratio = ((current_close - support_price_actual) / support_price_actual) * 100
             
             return RPointPluginResult(
                 "跌破支撑位",
                 True,
-                f"收盘价{current_data.close:.2f}<前日支撑位{support_price_actual:.2f}(跌破{abs(break_ratio):.2f}%)+放量({current_chance.volume_type})"
+                f"收盘价{current_close:.2f}<前日支撑位{support_price_actual:.2f}(跌破{abs(break_ratio):.2f}%)+放量({current_chance.volume_type})"
             )
             
         except Exception as e:

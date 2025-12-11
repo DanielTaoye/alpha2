@@ -29,39 +29,32 @@ API_BASE_URL = "http://localhost:5000"
 
 def get_cr_points_from_api(stock_code: str, table_name: str, start_date: str = None, end_date: str = None) -> Optional[Dict]:
     """
-    通过API获取CR点分析数据（包含MA、MACD等完整数据）
+    通过API获取K线+MA+MACD数据（从 /api/kline_data 获取）
     """
     try:
         payload = {
-            'stockCode': stock_code,
-            'tableName': table_name
+            "table_name": table_name,
+            "period_type": "day"
         }
-        if start_date:
-            payload['startDate'] = start_date
-        if end_date:
-            payload['endDate'] = end_date
-            
-        response = requests.post(
-            f"{API_BASE_URL}/api/cr_points/analyze",
-            json=payload,
-            timeout=60
-        )
+        # start_date / end_date 在 /api/kline_data 中无效，保留参数以兼容调用签名
+        
+        response = requests.post(f"{API_BASE_URL}/api/kline_data", json=payload, timeout=60)
         
         if response.status_code != 200:
             print(f"❌ API请求失败: HTTP {response.status_code}")
             return None
         
         result = response.json()
-        if result.get('code') != 200:
+        if result.get("code") != 200:
             print(f"❌ API返回错误: {result.get('message')}")
             return None
         
-        return result.get('data')
+        return result.get("data")
     except requests.exceptions.ConnectionError:
         print(f"❌ 无法连接到API服务器 ({API_BASE_URL})，请确保后端服务已启动")
         return None
     except Exception as e:
-        print(f"❌ 获取CR点数据失败: {e}")
+        print(f"❌ 获取K线数据失败: {e}")
         return None
 
 
