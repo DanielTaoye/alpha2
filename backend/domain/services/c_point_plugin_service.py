@@ -1,6 +1,7 @@
 """C点插件服务 - 优先级高于基础分数"""
 from typing import Tuple, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from types import SimpleNamespace
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,6 +75,52 @@ class CPointPluginService:
         self._daily_cache = {}
         self._daily_chance_cache = {}
         self._sorted_dates = []  # 🚀 性能优化：清空预排序列表
+
+    @staticmethod
+    def _parse_date(value):
+        """将多种格式的日期值转换为datetime，失败则返回None"""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, str):
+            # 兼容 "YYYY-MM-DD" / "YYYY-MM-DD HH:MM:SS" / 带T的ISO格式
+            candidate = value.replace("T", " ").split(".")[0]
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(candidate, fmt)
+                except ValueError:
+                    continue
+        return None
+
+    def _normalize_points(self, points: Optional[List]) -> Optional[List]:
+        """
+        将历史CR点列表统一为带属性的对象，兼容dict输入（triggerDate/trigger_date等）
+        """
+        if points is None:
+            return None
+
+        normalized = []
+        for p in points:
+            if hasattr(p, "trigger_date"):
+                normalized.append(p)
+                continue
+
+            if isinstance(p, dict):
+                trigger_raw = p.get("trigger_date") or p.get("triggerDate")
+                trigger_dt = self._parse_date(trigger_raw)
+                if not trigger_dt:
+                    continue
+
+                normalized.append(
+                    SimpleNamespace(
+                        trigger_date=trigger_dt,
+                        volume=p.get("volume"),
+                        high_price=p.get("high_price") or p.get("highPrice"),
+                        close_price=p.get("close_price") or p.get("closePrice"),
+                    )
+                )
+        return normalized
     
     def apply_plugins(self, stock_code: str, date: datetime, base_score: float, 
                      historical_r_points: Optional[List] = None, 
@@ -95,6 +142,10 @@ class CPointPluginService:
         triggered_plugins = []
         adjusted_score = base_score
         force_c_point = False  # 是否强制发C点
+
+        # 兼容历史CR点字典输入，统一为带属性的对象
+        normalized_r_points = self._normalize_points(historical_r_points)
+        normalized_c_points = self._normalize_points(historical_c_points)
         
         # 插件1: 阴线检查（一票否决）
         plugin1 = self._check_bearish_line(stock_code, date)
@@ -132,24 +183,24 @@ class CPointPluginService:
             return adjusted_score, triggered_plugins, True  # 强制发C，保持原分数
         
         # 插件6: R后回支撑位发C（直接发C）
-        if historical_r_points is not None:
-            plugin6 = self._check_r_back_to_support(stock_code, date, historical_r_points)
+        if normalized_r_points is not None:
+            plugin6 = self._check_r_back_to_support(stock_code, date, normalized_r_points)
             if plugin6.triggered:
                 triggered_plugins.append(plugin6)
                 logger.info(f"[插件-R后回支撑位] {stock_code} {date}: {plugin6.reason}, 强制发C")
                 return adjusted_score, triggered_plugins, True
         
         # 插件7: 阳包阴发C（直接发C）
-        if historical_r_points is not None:
-            plugin7 = self._check_yang_bao_yin(stock_code, date, historical_r_points, historical_c_points)
+        if normalized_r_points is not None:
+            plugin7 = self._check_yang_bao_yin(stock_code, date, normalized_r_points, normalized_c_points)
             if plugin7.triggered:
                 triggered_plugins.append(plugin7)
                 logger.info(f"[插件-阳包阴] {stock_code} {date}: {plugin7.reason}, 强制发C")
                 return adjusted_score, triggered_plugins, True
         
         # 插件8: 横盘修整后突破发C（直接发C）
-        if historical_r_points is not None and historical_c_points is not None:
-            plugin8 = self._check_consolidation_breakout(stock_code, date, historical_r_points, historical_c_points)
+        if normalized_r_points is not None and normalized_c_points is not None:
+            plugin8 = self._check_consolidation_breakout(stock_code, date, normalized_r_points, normalized_c_points)
             if plugin8.triggered:
                 triggered_plugins.append(plugin8)
                 logger.info(f"[插件-横盘修整后突破] {stock_code} {date}: {plugin8.reason}, 强制发C")

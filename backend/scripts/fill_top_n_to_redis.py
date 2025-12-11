@@ -22,9 +22,9 @@ from infrastructure.cache.redis_client import RedisClient
 def main():
     # 命令行参数：数量、线程数
     try:
-        top_n = int(sys.argv[1]) if len(sys.argv) > 1 else 30
+        top_n = int(sys.argv[1]) if len(sys.argv) > 1 else 59  # 默认刷新59只已配置股票
     except ValueError:
-        top_n = 30
+        top_n = 59
     try:
         max_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     except ValueError:
