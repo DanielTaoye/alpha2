@@ -24,14 +24,22 @@ def load_stocks_from_config():
     优先从配置文件加载 59 支股票列表（避免数据库只有少量记录导致榜单空）。
     文件：backend/infrastructure/config/stock_config.json
     """
-    config_path = Path(__file__).resolve().parent.parent / "infrastructure" / "config" / "stock_config.json"
+    # 允许通过环境变量覆盖路径
+    env_path = os.getenv("STOCK_CONFIG_PATH")
+    if env_path:
+        config_path = Path(env_path).expanduser().resolve()
+    else:
+        config_path = Path(__file__).resolve().parent.parent / "infrastructure" / "config" / "stock_config.json"
+
     if not config_path.exists():
+        print(f"⚠️ 未找到配置文件: {config_path}")
         return []
 
     try:
         with config_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
+        print(f"⚠️ 读取配置文件失败: {config_path}")
         return []
 
     stocks = []
