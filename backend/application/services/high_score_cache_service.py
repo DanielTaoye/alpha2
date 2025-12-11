@@ -127,7 +127,7 @@ class HighScoreCacheService:
 
     # --------- 内部方法 ---------
     def _calc_score_safe(self, stock: Dict, s1_threshold: float, s2_threshold: float) -> Optional[Dict]:
-        """包装异常，返回格式化结果"""
+        """包装异常，返回格式化结果；异常也返回占位"""
         try:
             result = self.latest_cr_service.calculate_latest_cr_points(
                 stock["code"],
@@ -150,8 +150,18 @@ class HighScoreCacheService:
                 "date": date_str,
             }
         except Exception as e:
-            logger.debug(f"计算 {stock.get('code')} 失败: {e}")
-            return None
+            logger.error(f"计算 {stock.get('code')} 失败: {e}", exc_info=True)
+            return {
+                "stock_code": stock.get("code"),
+                "stock_name": stock.get("name", ""),
+                "nature": stock.get("nature", "波段"),
+                "strategy1_score": 0,
+                "strategy2_score": 0,
+                "total_score": 0,
+                "is_high_score": 1,  # 占位也写入，便于排查
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "error": str(e),
+            }
 
     def _write_to_redis(self, high_scores: List[Dict], stats: Dict):
         zset_key = RedisClient.full_key("high_score:zset")
