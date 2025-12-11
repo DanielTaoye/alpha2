@@ -376,7 +376,7 @@ def main():
     """主入口"""
     parser = argparse.ArgumentParser(description='刷新 b_daily_chance 表的最新一天数据')
     parser.add_argument('--now', action='store_true', help='立即执行一次')
-    parser.add_argument('--scheduler', action='store_true', help='启动定时任务（每天17:00执行）')
+    parser.add_argument('--scheduler', action='store_true', help='启动定时任务（每天16:00执行）')
     parser.add_argument('--all', action='store_true', help='处理全部股票（覆盖配置）')
     parser.add_argument('--59', action='store_true', dest='use_59', help='只处理59支股票（覆盖配置）')
     args = parser.parse_args()
@@ -398,13 +398,13 @@ def main():
             sys.exit(1)
         
         logger.info("🌟 启动定时任务模式")
-        logger.info(f"执行时间: 每天 17:00")
+        logger.info(f"执行时间: 每天 16:00")
         logger.info(f"股票范围: {'59支' if USE_59_STOCKS else '全部'}")
         
         scheduler = BlockingScheduler()
         scheduler.add_job(
             refresh_job,
-            trigger=CronTrigger(hour=17, minute=0),
+            trigger=CronTrigger(hour=16, minute=0),
             id='refresh_daily_chance',
             name='刷新每日机会数据',
             replace_existing=True
