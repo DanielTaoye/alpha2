@@ -138,6 +138,8 @@ class HighScoreCacheService:
             s2_score = result.get("strategy2", {}).get("score", 0) if result else 0
             date_str = (result or {}).get("date") or datetime.now().strftime("%Y-%m-%d")
             total_score = max(s1_score or 0, s2_score or 0)
+            volume_type = (result or {}).get("volume_type") or (result or {}).get("realtime_volume_type")
+            volume_type_source = (result or {}).get("volume_type_source")
             # 忽略阈值，统一标记 is_high_score=1 表示已写入
             return {
                 "stock_code": stock["code"],
@@ -148,6 +150,8 @@ class HighScoreCacheService:
                 "total_score": round(total_score, 2),
                 "is_high_score": 1,
                 "date": date_str,
+                "volume_type": volume_type,
+                "volume_type_source": volume_type_source,
             }
         except Exception as e:
             logger.error(f"计算 {stock.get('code')} 失败: {e}", exc_info=True)
@@ -161,6 +165,8 @@ class HighScoreCacheService:
                 "is_high_score": 1,  # 占位也写入，便于排查
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "error": str(e),
+                "volume_type": None,
+                "volume_type_source": None,
             }
 
     def _write_to_redis(self, high_scores: List[Dict], stats: Dict):

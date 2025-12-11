@@ -1326,8 +1326,21 @@ function calculateStartPercent(totalDataPoints, period) {
     return Math.max(0, startPercent);
 }
 
+// 记录当前图表的视图状态（主要是dataZoom位置），用于刷新后保持用户视角
+function captureViewState(option) {
+    if (!option || !option.dataZoom || !Array.isArray(option.dataZoom)) return null;
+    return {
+        dataZoom: option.dataZoom.map(z => ({
+            start: z.start,
+            end: z.end,
+            startValue: z.startValue,
+            endValue: z.endValue
+        }))
+    };
+}
+
 // 渲染图表
-async function renderChart(klineData, analysisData, period) {
+async function renderChart(klineData, analysisData, period, viewState = null) {
     try {
         // 等待ECharts加载完成
         await waitForECharts();
@@ -2055,6 +2068,21 @@ async function renderChart(klineData, analysisData, period) {
                 },
                 symbol: 'none',
                 z: 10
+            });
+        }
+
+        // 如果有视图状态（dataZoom位置），刷新时保持用户当前视角
+        if (viewState && viewState.dataZoom && viewState.dataZoom.length > 0 && option.dataZoom && option.dataZoom.length > 0) {
+            option.dataZoom = option.dataZoom.map((dz, idx) => {
+                const saved = viewState.dataZoom[idx];
+                if (!saved) return dz;
+                return {
+                    ...dz,
+                    start: saved.start !== undefined ? saved.start : dz.start,
+                    end: saved.end !== undefined ? saved.end : dz.end,
+                    startValue: saved.startValue !== undefined ? saved.startValue : dz.startValue,
+                    endValue: saved.endValue !== undefined ? saved.endValue : dz.endValue
+                };
             });
         }
 
@@ -3149,6 +3177,9 @@ async function refreshLatestKline() {
             return;
         }
         
+        // 记录当前视图状态，用于刷新后保持用户的缩放/拖动位置
+        const viewState = captureViewState(currentOption);
+
         console.log('[刷新最新K线] 找到成交量series，数据长度:', volumeSeries.data.length);
         
         // 获取最新K线的日期
@@ -3296,7 +3327,7 @@ async function refreshLatestKline() {
             
             // 重新渲染图表，保留现有的CR点数据
             console.log('[刷新最新K线] 重新渲染图表...');
-            await renderChart(klineData, {}, 'day');
+            await renderChart(klineData, {}, 'day', viewState);
             
             // 更新CR点显示
             if (chart) {

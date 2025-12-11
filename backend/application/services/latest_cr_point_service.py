@@ -366,6 +366,8 @@ class LatestCRPointService:
             # 12. 不再需要清空缓存（全局缓存会自动管理）
             
             # 13. 组装返回结果
+            volume_type_source = "predicted" if predicted_volume else "historical"
+
             result = {
                 'success': True,
                 'date': current_kline['date'],
@@ -379,6 +381,8 @@ class LatestCRPointService:
                 },
                 'predicted_volume': predicted_volume,
                 'volume_type': volume_type,
+                'realtime_volume_type': volume_type,  # 兼容前端展示实时成交量类型
+                'volume_type_source': volume_type_source,
                 'previous_day_scores': {
                     'day': day_win_ratio_score,
                     'week': week_win_ratio_score,
