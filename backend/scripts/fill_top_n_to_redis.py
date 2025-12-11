@@ -3,11 +3,16 @@
 
 用法：
     cd backend
-    # 默认计算前30只，线程20
+    # 默认计算全部，线程20，自动优先CSV/配置再回退数据库
     PYTHONPATH=. python scripts/fill_top_n_to_redis.py
 
     # 指定数量和线程
     PYTHONPATH=. python scripts/fill_top_n_to_redis.py 50 30
+
+    # 强制使用数据库全量（绕过CSV/配置的60只）
+    PYTHONPATH=. STOCK_SOURCE=db python scripts/fill_top_n_to_redis.py 0 30
+    # 或命令行第三个参数指定来源：db / csv / config / auto
+    PYTHONPATH=. python scripts/fill_top_n_to_redis.py 0 30 db
 """
 
 import json
@@ -101,16 +106,41 @@ def load_stocks_from_csv():
     return stocks
 
 
+def choose_stocks(svc: HighScoreCacheService, source_arg: str = None):
+    """
+    根据来源选择股票列表。
+    source 取值：
+        db/database/all   -> all_stock 全量
+        csv               -> 仅CSV
+        config            -> 仅配置文件
+        auto/空           -> 先CSV，再配置，最后数据库
+    """
+    source = (source_arg or os.getenv("STOCK_SOURCE") or "auto").strip().lower()
+    print(f"📥 股票来源选择: {source or 'auto'}")
+
+    if source in {"db", "database", "all"}:
+        return svc._get_all_active_stocks()
+    if source == "csv":
+        return load_stocks_from_csv()
+    if source == "config":
+        return load_stocks_from_config()
+
+    # 默认自动：保持原有优先级
+    stocks = load_stocks_from_csv()
+    if stocks:
+        return stocks
+    stocks = load_stocks_from_config()
+    if stocks:
+        return stocks
+    return svc._get_all_active_stocks()
+
+
 def main():
     svc = HighScoreCacheService()
 
-    # 先用CSV（全量），失败再用配置，再失败用数据库
-    stocks = load_stocks_from_csv()
-    if not stocks:
-        stocks = load_stocks_from_config()
-    if not stocks:
-        print("⚠️ 配置/CSV未加载到股票，改用数据库 all_stock")
-        stocks = svc._get_all_active_stocks()
+    # 股票来源：命令行第三个参数或环境变量 STOCK_SOURCE
+    source_arg = sys.argv[3] if len(sys.argv) > 3 else None
+    stocks = choose_stocks(svc, source_arg)
 
     if not stocks:
         print("⚠️ 无股票数据")
