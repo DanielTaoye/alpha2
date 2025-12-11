@@ -8,10 +8,11 @@
 
     # 指定数量和线程
     PYTHONPATH=. python scripts/fill_top_n_to_redis.py 50 30
+    # 数量<=0表示全部
 
     # 强制使用数据库全量（绕过CSV/配置的60只）
     PYTHONPATH=. STOCK_SOURCE=db python scripts/fill_top_n_to_redis.py 0 30
-    # 或命令行第三个参数指定来源：db / csv / config / auto
+    # 或命令行第三个参数指定来源：db / csv / config / auto（数量<=0表示全部）
     PYTHONPATH=. python scripts/fill_top_n_to_redis.py 0 30 db
 """
 
@@ -146,7 +147,7 @@ def main():
         print("⚠️ 无股票数据")
         return
 
-    # 命令行参数：数量、线程数（数量默认=全部，线程默认=20）
+    # 命令行参数：数量、线程数（数量<=0或缺省=全部，线程默认=20）
     try:
         top_n = int(sys.argv[1]) if len(sys.argv) > 1 else len(stocks)
     except ValueError:
@@ -155,6 +156,8 @@ def main():
         max_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     except ValueError:
         max_workers = 20
+    if top_n <= 0 or top_n > len(stocks):
+        top_n = len(stocks)
 
     # 按 top_n 截取
     stocks = stocks[:top_n]

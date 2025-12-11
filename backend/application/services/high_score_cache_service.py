@@ -142,7 +142,8 @@ class HighScoreCacheService:
             s1_score = result.get("strategy1", {}).get("score", 0) if result else 0
             s2_score = result.get("strategy2", {}).get("score", 0) if result else 0
             date_str = (result or {}).get("date") or datetime.now().strftime("%Y-%m-%d")
-            total_score = max(s1_score or 0, s2_score or 0)
+            # 总分 = max(策略1, 策略2) * 1.2，封顶 99
+            total_score = min(max(s1_score or 0, s2_score or 0) * 1.2, 99)
             volume_type = (result or {}).get("volume_type") or (result or {}).get("realtime_volume_type")
             volume_type_source = (result or {}).get("volume_type_source")
             # 忽略阈值，统一标记 is_high_score=1 表示已写入

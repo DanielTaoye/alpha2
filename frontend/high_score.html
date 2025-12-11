@@ -326,13 +326,6 @@
             font-size: 14px;
         }
 
-        .clickable-row {
-            cursor: pointer;
-        }
-
-        .clickable-row:hover {
-            background: #f0f7ff !important;
-        }
 
         .scan-stats {
             display: flex;
@@ -391,7 +384,6 @@
                     🔄 手动刷新
                 </button>
                 <div class="status-info">
-                    <span>🔄 自动刷新: 每 <span class="countdown" id="countdown">60</span> 秒</span>
                     <span id="update-time" style="font-size: 12px; opacity: 0.8;"></span>
                 </div>
             </div>
@@ -418,9 +410,6 @@
 
     <script>
         const API_BASE_URL = '/api';
-        let refreshInterval = null;
-        let countdownInterval = null;
-        let countdownValue = 60;
         let isScanning = false;
 
         // 检查交易状态
@@ -568,7 +557,7 @@
                 const natureClass = item.nature || '';
                 
                 html += `
-                    <tr class="clickable-row" onclick="openStock('${item.stock_code}', '${item.stock_name}', '${tableName}')">
+                    <tr>
                         <td class="rank-cell ${rankClass}">${rankIcon}</td>
                         <td class="stock-code-cell">${item.stock_code}</td>
                         <td class="stock-name-cell">${item.stock_name}</td>
@@ -609,9 +598,8 @@
 
         // 手动刷新（不使用缓存）
         function manualRefresh() {
-            countdownValue = 60;
-            document.getElementById('countdown').textContent = countdownValue;
             scanHighScoreStocks(false);  // 不使用缓存
+            checkTradingStatus();
         }
 
         // 打开股票详情
@@ -620,45 +608,15 @@
             window.open(url, '_blank');
         }
 
-        // 启动自动刷新
-        function startAutoRefresh() {
-            // 立即加载一次
+        // 初始化加载（仅加载一次，不自动轮询）
+        function initPage() {
             checkTradingStatus();
-            scanHighScoreStocks();  // 直接查询数据库，毫秒级
-            
-            // 设置倒计时
-            countdownInterval = setInterval(() => {
-                countdownValue--;
-                document.getElementById('countdown').textContent = countdownValue;
-                
-                if (countdownValue <= 0) {
-                    countdownValue = 60;
-                    scanHighScoreStocks();  // 自动刷新，直接查数据库
-                    checkTradingStatus();
-                }
-            }, 1000);
-        }
-
-        // 停止自动刷新
-        function stopAutoRefresh() {
-            if (refreshInterval) {
-                clearInterval(refreshInterval);
-                refreshInterval = null;
-            }
-            if (countdownInterval) {
-                clearInterval(countdownInterval);
-                countdownInterval = null;
-            }
+            scanHighScoreStocks();  // 直接查询数据库
         }
 
         // 页面加载时启动
         window.onload = () => {
-            startAutoRefresh();
-        };
-
-        // 页面卸载时停止
-        window.onbeforeunload = () => {
-            stopAutoRefresh();
+            initPage();
         };
     </script>
 </body>

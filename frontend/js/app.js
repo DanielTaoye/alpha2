@@ -96,6 +96,8 @@ async function initApp() {
             allStockGroups = result.data;
             updateStatus(true, `系统运行正常 - 已加载 ${getTotalStockCount()} 支股票`);
             updateStockList();
+            // 如果有 URL 参数，尝试直接加载对应的股票
+            await initFromUrlParams();
         } else {
             throw new Error(result.message || '获取数据失败');
         }
@@ -163,6 +165,27 @@ function updateStockList() {
         option.dataset.name = stock.name;
         option.dataset.table = stock.table_name;
         stockSelect.appendChild(option);
+    });
+}
+
+// 根据股票代码推断所属策略/股性
+function findStrategyByStock(stockCode) {
+    for (const [strategy, stocks] of Object.entries(allStockGroups)) {
+        if (stocks.some(stock => stock.code === stockCode)) {
+            return strategy;
+        }
+    }
+    return null;
+}
+
+// 高亮对应的策略按钮
+function setStrategyButtonActive(strategy) {
+    if (!strategy) return;
+    document.querySelectorAll('.strategy-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.textContent.includes(strategy)) {
+            btn.classList.add('active');
+        }
     });
 }
 
@@ -3339,6 +3362,64 @@ async function refreshLatestKline() {
         
     } catch (error) {
         console.error('[刷新最新K线] 刷新失败:', error);
+    }
+}
+
+// 根据 URL 参数自动加载对应股票（用于从高分推荐页跳转）
+async function initFromUrlParams() {
+    try {
+        const params = new URLSearchParams(window.location.search || '');
+        const stockCode = params.get('stock');
+        const stockName = params.get('name');
+        const tableName = params.get('table');
+        const period = params.get('period');
+        const nature = params.get('nature') || params.get('strategy'); // 兼容可能的参数名
+
+        // 必须有股票代码和表名才继续
+        if (!stockCode || !tableName) return;
+
+        // 尝试推断股性/策略并同步 UI
+        const inferredStrategy = nature || findStrategyByStock(stockCode);
+        if (inferredStrategy) {
+            currentStrategy = inferredStrategy;
+            setStrategyButtonActive(inferredStrategy);
+            updateStockList();
+        }
+
+        // 确保下拉列表中有该股票
+        const stockSelect = document.getElementById('stockSelect');
+        if (stockSelect) {
+            let option = Array.from(stockSelect.options).find(opt => opt.value === stockCode);
+            if (!option) {
+                option = document.createElement('option');
+                option.value = stockCode;
+                option.textContent = stockName ? `${stockName} (${stockCode})` : stockCode;
+                option.dataset.name = stockName || stockCode;
+                option.dataset.table = tableName;
+                if (inferredStrategy) {
+                    option.dataset.nature = inferredStrategy;
+                }
+                // 插入在占位项之后，保持列表友好
+                stockSelect.insertBefore(option, stockSelect.options[1] || null);
+            }
+            stockSelect.value = stockCode;
+        }
+
+        currentStockCode = stockCode;
+        currentTableName = tableName;
+        const displayName = stockName || stockCode;
+        const displayNature = inferredStrategy || currentStrategy;
+
+        // 检查可用周期后加载数据
+        await checkAvailablePeriods(tableName);
+        const allowedPeriods = ['30min', 'day', 'week', 'month'];
+        const targetPeriod = (period && allowedPeriods.includes(period)) ? period : selectDefaultPeriod();
+        const finalPeriod = targetPeriod || 'day';
+
+        renderStockView(stockCode, displayName, tableName, displayNature);
+        await loadStockData(stockCode, tableName, finalPeriod);
+    } catch (error) {
+        console.warn('解析URL参数加载股票失败:', error);
     }
 }
 
