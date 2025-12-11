@@ -1,0 +1,68 @@
+# 检查调度器进程和任务状态的命令
+
+## Windows PowerShell 命令
+
+### 1. 查看 Python 进程（查找 refresh_daily_chance）
+Get-Process python* | Where-Object {$_.CommandLine -like "*refresh_daily_chance*"} | Format-Table Id,ProcessName,StartTime,@{Label="CommandLine";Expression={$_.CommandLine}}
+
+### 2. 查看所有 Python 进程
+Get-Process python* | Format-Table Id,ProcessName,StartTime
+
+### 3. 使用 Python 脚本检查（推荐）
+cd backend
+python scripts/check_scheduler_status.py
+python scripts/check_scheduler_status.py --script refresh_daily_chance.py
+
+### 4. 查看日志文件（实时）
+Get-Content scripts\logs\refresh_daily_chance.log -Wait -Tail 50
+
+## Linux/WSL 命令
+
+### 1. 查看进程是否在运行
+ps aux | grep refresh_daily_chance
+ps aux | grep "python.*refresh_daily_chance.*scheduler"
+
+### 2. 查看进程详细信息
+ps -ef | grep refresh_daily_chance
+pgrep -f refresh_daily_chance
+
+### 3. 查看进程树
+pstree -p | grep python
+
+### 4. 使用 Python 脚本检查（推荐）
+cd backend
+python3 scripts/check_scheduler_status.py
+python3 scripts/check_scheduler_status.py --script refresh_daily_chance.py
+
+### 5. 查看日志文件（实时）
+tail -f scripts/logs/refresh_daily_chance.log
+tail -f nohup.out
+
+### 6. 查看 nohup 后台任务
+jobs -l  # 查看当前会话的后台任务
+ps aux | grep nohup  # 查看所有 nohup 进程
+
+## APScheduler Job 检查
+
+APScheduler 的 job 是 Python 进程内部的，无法直接通过系统命令查看。
+
+检查方法：
+1. 确认进程在运行（使用上面的命令）
+2. 查看日志文件，确认最近有任务执行记录
+3. 如果进程在运行且使用 BlockingScheduler，调度器应该也在运行
+
+## 后台运行命令（Linux）
+
+### 启动后台任务
+cd backend
+source ../.venv/bin/activate  # 或 source .venv/bin/activate
+nohup env PYTHONPATH=. PYTHONUTF8=1 python3 scripts/refresh_daily_chance.py --scheduler > refresh_daily_chance.log 2>&1 &
+
+### 查看后台任务 PID
+echo $!  # 启动后立即执行，获取 PID
+ps aux | grep refresh_daily_chance  # 查找进程
+
+### 停止后台任务
+kill <PID>  # 使用上面获取的 PID
+pkill -f "refresh_daily_chance.*scheduler"  # 按名称停止
+
