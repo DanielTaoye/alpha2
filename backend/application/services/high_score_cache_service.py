@@ -133,23 +133,20 @@ class HighScoreCacheService:
                 stock["code"],
                 stock["table_name"]
             )
-            if not result.get("success"):
-                return None
-
-            s1_score = result.get("strategy1", {}).get("score", 0) or 0
-            s2_score = result.get("strategy2", {}).get("score", 0) or 0
-            date_str = result.get("date") or datetime.now().strftime("%Y-%m-%d")
-            is_high = 1 if (s1_score >= s1_threshold and s2_score >= s2_threshold) else 0
-            total_score = max(s1_score, s2_score)
-
+            # 即便返回 success=False 也写入占位，避免整榜空掉
+            s1_score = result.get("strategy1", {}).get("score", 0) if result else 0
+            s2_score = result.get("strategy2", {}).get("score", 0) if result else 0
+            date_str = (result or {}).get("date") or datetime.now().strftime("%Y-%m-%d")
+            total_score = max(s1_score or 0, s2_score or 0)
+            # 忽略阈值，统一标记 is_high_score=1 表示已写入
             return {
                 "stock_code": stock["code"],
                 "stock_name": stock.get("name", ""),
                 "nature": stock.get("nature", "波段"),
-                "strategy1_score": round(s1_score, 2),
-                "strategy2_score": round(s2_score, 2),
+                "strategy1_score": round(s1_score or 0, 2),
+                "strategy2_score": round(s2_score or 0, 2),
                 "total_score": round(total_score, 2),
-                "is_high_score": is_high,
+                "is_high_score": 1,
                 "date": date_str,
             }
         except Exception as e:

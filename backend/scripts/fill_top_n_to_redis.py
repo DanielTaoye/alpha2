@@ -60,19 +60,17 @@ def main():
             except Exception as e:
                 print(f"❌ {st['code']} 计算失败: {e}")
 
-    # 排序并写入Redis
-    high_sorted = sorted(results, key=lambda x: x.get("total_score", 0), reverse=True)
-
+    # 流式写入Redis：算完一条写一条（先清空旧榜）
     zkey = RedisClient.full_key("high_score:zset")
     mkey = RedisClient.full_key("high_score:meta")
     rds = RedisClient.instance().client
     rds.delete(zkey)
     rds.delete(mkey)
 
-    pipe = rds.pipeline()
-    for item in high_sorted:
+    for item in results:
         member = json.dumps(item, ensure_ascii=False)
-        pipe.zadd(zkey, {member: item.get("total_score", 0)})
+        rds.zadd(zkey, {member: item.get("total_score", 0)})
+
     meta = {
         "total_stocks": len(stocks),
         "calculated": len(results),
@@ -81,8 +79,7 @@ def main():
         "strategy1_threshold": s1,
         "strategy2_threshold": s2,
     }
-    pipe.set(mkey, json.dumps(meta, ensure_ascii=False))
-    pipe.execute()
+    rds.set(mkey, json.dumps(meta, ensure_ascii=False))
 
     print("✅ 写入完成")
     print(f"📊 总计算 {len(results)} 条，高分 {meta['high_score_count']} 条")
