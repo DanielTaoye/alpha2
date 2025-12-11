@@ -13,6 +13,7 @@
 import json
 import sys
 import os
+import csv
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -61,30 +62,69 @@ def load_stocks_from_config():
 
 
 
-def main():
-    # 命令行参数：数量、线程数
-    try:
-        top_n = int(sys.argv[1]) if len(sys.argv) > 1 else 59  # 默认刷新59只已配置股票
-    except ValueError:
-        top_n = 59
-    try:
-        max_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 20
-    except ValueError:
-        max_workers = 20
-
-    svc = HighScoreCacheService(max_workers=max_workers)
-
-    # 先用配置文件的59支列表，避免数据库只有少量记录
-    stocks = load_stocks_from_config()
-    if stocks:
-        print(f"✅ 从配置文件加载到 {len(stocks)} 只股票")
+def load_stocks_from_csv():
+    """
+    从CSV加载股票列表，要求列包含：code,name，可选nature。
+    表名自动拼：basic_data_{code.lower()}
+    """
+    csv_path = os.getenv("STOCK_CSV_PATH")
+    if csv_path:
+        csv_path = Path(csv_path).expanduser().resolve()
     else:
-        print("⚠️ 配置文件未加载到股票，改用数据库 all_stock")
+        csv_path = Path(__file__).resolve().parent / "stock_list.csv"
+
+    if not csv_path.exists():
+        print(f"⚠️ 未找到CSV文件: {csv_path}")
+        return []
+
+    stocks = []
+    try:
+        with csv_path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                code = (row.get("code") or "").strip()
+                name = (row.get("name") or "").strip()
+                if not code:
+                    continue
+                table_name = f"basic_data_{code.lower()}"
+                stocks.append({
+                    "code": code,
+                    "name": name,
+                    "nature": row.get("nature", "") or "波段",
+                    "table_name": table_name,
+                })
+    except Exception as e:
+        print(f"⚠️ 读取CSV失败: {csv_path}, {e}")
+        return []
+
+    print(f"✅ 从CSV加载到 {len(stocks)} 只股票")
+    return stocks
+
+
+def main():
+    svc = HighScoreCacheService()
+
+    # 先用CSV（全量），失败再用配置，再失败用数据库
+    stocks = load_stocks_from_csv()
+    if not stocks:
+        stocks = load_stocks_from_config()
+    if not stocks:
+        print("⚠️ 配置/CSV未加载到股票，改用数据库 all_stock")
         stocks = svc._get_all_active_stocks()
 
     if not stocks:
         print("⚠️ 无股票数据")
         return
+
+    # 命令行参数：数量、线程数（数量默认=全部，线程默认=20）
+    try:
+        top_n = int(sys.argv[1]) if len(sys.argv) > 1 else len(stocks)
+    except ValueError:
+        top_n = len(stocks)
+    try:
+        max_workers = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+    except ValueError:
+        max_workers = 20
 
     # 按 top_n 截取
     stocks = stocks[:top_n]
@@ -99,9 +139,11 @@ def main():
     # 流式写入：先清空，随后每完成一只就写入Redis
     zkey = RedisClient.full_key("high_score:zset")
     mkey = RedisClient.full_key("high_score:meta")
+    ikey = RedisClient.full_key("high_score:member_by_code")
     rds = RedisClient.instance().client
     rds.delete(zkey)
     rds.delete(mkey)
+    rds.delete(ikey)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {
@@ -116,7 +158,13 @@ def main():
                     if r.get("is_high_score"):
                         high.append(r)
                     # 每算完一只立即写入
-                    member = json.dumps(r, ensure_ascii=False)
+                    member = json.dumps(r, ensure_ascii=False, sort_keys=True)
+                    stock_code = r.get("stock_code")
+                    if stock_code:
+                        old_member = rds.hget(ikey, stock_code)
+                        if old_member:
+                            rds.zrem(zkey, old_member)
+                        rds.hset(ikey, stock_code, member)
                     rds.zadd(zkey, {member: r.get("total_score", 0)})
             except Exception as e:
                 print(f"❌ {st['code']} 计算失败: {e}")
