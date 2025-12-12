@@ -441,34 +441,35 @@ def diagnose_deviation(stock_code: str, date_str: str, current_data: Dict,
                     break
         print(f"  连续涨停天数: {consecutive_limits} (条件1需>=2)")
         
-        # 条件2: 前3日涨幅
-        if len(historical_data) >= 3:
-            prev_3_close = historical_data[2]['close']
-            if prev_3_close > 0:
-                gain_3days = (current_close - prev_3_close) / prev_3_close * 100
-                threshold_3 = 15 if is_main_board else 20
-                print(f"  前3日涨幅: {gain_3days:.2f}% (阈值: >{threshold_3}%)")
+        def cum_gain_from_hist(hist: List[Dict], days: int, current_close: float) -> Optional[float]:
+            """历史数据为最近在前（hist[0]是前1日）；需 days+1 个收盘价"""
+            if len(hist) < days:
+                return None
+            chain = [h.get('close') for h in reversed(hist[:days])] + [current_close]
+            if any(c is None or c <= 0 for c in chain):
+                return None
+            return sum((chain[i+1] - chain[i]) / chain[i] * 100 for i in range(days))
         
-        # 条件3: 前5日涨幅
-        if len(historical_data) >= 5:
-            prev_5_close = historical_data[4]['close']
-            if prev_5_close > 0:
-                gain_5days = (current_close - prev_5_close) / prev_5_close * 100
-                threshold_5 = 20 if is_main_board else 25
-                print(f"  前5日涨幅: {gain_5days:.2f}% (阈值: >{threshold_5}%)")
+        # 条件2: 前3日涨幅（累加）
+        gain_3days = cum_gain_from_hist(historical_data, 3, current_close)
+        if gain_3days is not None:
+            threshold_3 = 15 if is_main_board else 20
+            print(f"  前3日累计涨幅: {gain_3days:.2f}% (阈值: >{threshold_3}%)")
         
-        # 条件5/6: 前15日/20日涨幅
-        if len(historical_data) >= 15:
-            prev_15_close = historical_data[14]['close']
-            if prev_15_close > 0:
-                gain_15days = (current_close - prev_15_close) / prev_15_close * 100
-                print(f"  前15日涨幅: {gain_15days:.2f}% (条件5需>50%)")
+        # 条件3: 前5日涨幅（累加）
+        gain_5days = cum_gain_from_hist(historical_data, 5, current_close)
+        if gain_5days is not None:
+            threshold_5 = 20 if is_main_board else 25
+            print(f"  前5日累计涨幅: {gain_5days:.2f}% (阈值: >{threshold_5}%)")
         
-        if len(historical_data) >= 20:
-            prev_20_close = historical_data[19]['close']
-            if prev_20_close > 0:
-                gain_20days = (current_close - prev_20_close) / prev_20_close * 100
-                print(f"  前20日涨幅: {gain_20days:.2f}% (条件6需>50%)")
+        # 条件5/6: 前15日/20日涨幅（累加）
+        gain_15days = cum_gain_from_hist(historical_data, 15, current_close)
+        if gain_15days is not None:
+            print(f"  前15日累计涨幅: {gain_15days:.2f}% (条件5需>50%)")
+        
+        gain_20days = cum_gain_from_hist(historical_data, 20, current_close)
+        if gain_20days is not None:
+            print(f"  前20日累计涨幅: {gain_20days:.2f}% (条件6需>50%)")
 
 
 def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: Dict,
