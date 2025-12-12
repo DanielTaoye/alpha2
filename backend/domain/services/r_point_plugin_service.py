@@ -272,41 +272,41 @@ class RPointPluginService:
                             f"条件1: 连续{consecutive_limits}个涨停+放量+{pattern_desc}"
                         )
             
-            # === 条件2: 前3日涨幅过大（逐日累加，需连续4个收盘价） ===
+            # === 条件2: 前3日涨幅过大（起止收盘比） ===
             if len(prev_data_list) >= 3:
-                closes_chain = [d.close for d in reversed(prev_data_list[:3])] + [current_data.close]
-                if all(c and c > 0 for c in closes_chain):
-                    gain_3days = sum((closes_chain[i+1] - closes_chain[i]) / closes_chain[i] * 100 for i in range(3))
+                prev_3_day = prev_data_list[2]
+                if prev_3_day.close and prev_3_day.close > 0:
+                    gain_3days = (current_data.close - prev_3_day.close) / prev_3_day.close * 100
                     threshold_3days = 15 if is_main_board else 20
                     if gain_3days > threshold_3days:
-                        logger.debug(f\"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日累计涨幅{gain_3days:.2f}%>{threshold_3days}%, \" 
-                                    f\"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, \" 
-                                    f\"is_bearish_3pct_line={is_bearish_3pct_line}\")
+                        logger.debug(f"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日涨幅{gain_3days:.2f}%>{threshold_3days}%, "
+                                    f"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
+                                    f"is_bearish_3pct_line={is_bearish_3pct_line}")
                         if is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line):
                             amplitude = self._calculate_amplitude(current_data, stock_code)
                             if is_bearish_kline_with_amplitude:
-                                pattern_desc = \"、\".join(bearish_patterns_with_amplitude)
+                                pattern_desc = "、".join(bearish_patterns_with_amplitude)
                                 return RPointPluginResult(
-                                    \"乖离率偏离\",
+                                    "乖离率偏离",
                                     True,
-                                    f\"条件2: 前3日累涨{gain_3days:.2f}%+放量+空头分歧K线({pattern_desc},振幅{amplitude:.2f}%)\"
+                                    f"条件2: 前3日涨幅{gain_3days:.2f}%+放量+空头分歧K线({pattern_desc},振幅{amplitude:.2f}%)"
                                 )
                             else:
-                                pattern_desc = \"、\".join(bearish_3pct_patterns)
+                                pattern_desc = "、".join(bearish_3pct_patterns)
                                 return RPointPluginResult(
-                                    \"乖离率偏离\",
+                                    "乖离率偏离",
                                     True,
-                                    f\"条件2: 前3日累涨{gain_3days:.2f}%+放量+{pattern_desc}\"
+                                    f"条件2: 前3日涨幅{gain_3days:.2f}%+放量+{pattern_desc}"
                                 )
             
-            # === 条件3: 前5日涨幅过大（逐日累加，需连续6个收盘价） ===
+            # === 条件3: 前5日涨幅过大（起止收盘比） ===
             if len(prev_data_list) >= 5:
-                closes_chain = [d.close for d in reversed(prev_data_list[:5])] + [current_data.close]
-                if all(c and c > 0 for c in closes_chain):
-                    gain_5days = sum((closes_chain[i+1] - closes_chain[i]) / closes_chain[i] * 100 for i in range(5))
+                prev_5_day = prev_data_list[4]
+                if prev_5_day.close and prev_5_day.close > 0:
+                    gain_5days = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
                     threshold_5days = 20 if is_main_board else 25
                     if gain_5days > threshold_5days:
-                        logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日累计涨幅{gain_5days:.2f}%>{threshold_5days}%, "
+                        logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日涨幅{gain_5days:.2f}%>{threshold_5days}%, "
                                     f"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
                                     f"is_bearish_3pct_line={is_bearish_3pct_line}")
                         if is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line):
@@ -316,25 +316,25 @@ class RPointPluginService:
                                 return RPointPluginResult(
                                     "乖离率偏离",
                                     True,
-                                    f"条件3: 前5日累涨{gain_5days:.2f}%+放量+空头分歧K线({pattern_desc},振幅{amplitude:.2f}%)"
+                                    f"条件3: 前5日涨幅{gain_5days:.2f}%+放量+空头分歧K线({pattern_desc},振幅{amplitude:.2f}%)"
                                 )
                             else:
                                 pattern_desc = "、".join(bearish_3pct_patterns)
                                 return RPointPluginResult(
                                     "乖离率偏离",
                                     True,
-                                    f"条件3: 前5日累涨{gain_5days:.2f}%+放量+{pattern_desc}"
+                                    f"条件3: 前5日涨幅{gain_5days:.2f}%+放量+{pattern_desc}"
                                 )
             
-            # === 条件4: 连续5连阳+涨幅过大（逐日累加） ===
+            # === 条件4: 连续5连阳+涨幅过大（起止收盘比） ===
             if len(prev_data_list) >= 5:
                 all_bullish = all(prev_data_list[i].close >= prev_data_list[i].open for i in range(5))
-                closes_chain_yang = [d.close for d in reversed(prev_data_list[:5])] + [current_data.close]
-                if all_bullish and all(c and c > 0 for c in closes_chain_yang):
-                    gain_5days_yang = sum((closes_chain_yang[i+1] - closes_chain_yang[i]) / closes_chain_yang[i] * 100 for i in range(5))
+                prev_5_day = prev_data_list[4]
+                if all_bullish and prev_5_day.close and prev_5_day.close > 0:
+                    gain_5days_yang = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
                     threshold_yang = 20 if is_main_board else 25
                     if gain_5days_yang > threshold_yang:
-                        logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳累涨{gain_5days_yang:.2f}%>{threshold_yang}%, "
+                        logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳涨幅{gain_5days_yang:.2f}%>{threshold_yang}%, "
                                     f"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
                                     f"is_bearish_3pct_line={is_bearish_3pct_line}")
                         if is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line):
@@ -344,23 +344,23 @@ class RPointPluginService:
                                 return RPointPluginResult(
                                     "乖离率偏离",
                                     True,
-                                    f"条件4: 5连阳累涨{gain_5days_yang:.2f}%+放量+空头分歧K线({pattern_desc},振幅{amplitude:.2f}%)"
+                                    f"条件4: 5连阳涨幅{gain_5days_yang:.2f}%+放量+空头分歧K线({pattern_desc},振幅{amplitude:.2f}%)"
                                 )
                             else:
                                 pattern_desc = "、".join(bearish_3pct_patterns)
                                 return RPointPluginResult(
                                     "乖离率偏离",
                                     True,
-                                    f"条件4: 5连阳累涨{gain_5days_yang:.2f}%+放量+{pattern_desc}"
+                                    f"条件4: 5连阳涨幅{gain_5days_yang:.2f}%+放量+{pattern_desc}"
                                 )
             
-            # === 条件5: 前15日涨幅>50%（逐日累加） ===
+            # === 条件5: 前15日涨幅>50%（起止收盘比） ===
             if len(prev_data_list) >= 15:
-                closes_chain_15 = [d.close for d in reversed(prev_data_list[:15])] + [current_data.close]
-                if all(c and c > 0 for c in closes_chain_15):
-                    gain_15days = sum((closes_chain_15[i+1] - closes_chain_15[i]) / closes_chain_15[i] * 100 for i in range(15))
+                prev_15_day = prev_data_list[14]
+                if prev_15_day.close and prev_15_day.close > 0:
+                    gain_15days = (current_data.close - prev_15_day.close) / prev_15_day.close * 100
                     if gain_15days > 50:
-                        logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日累计涨幅{gain_15days:.2f}%>50%, "
+                        logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日涨幅{gain_15days:.2f}%>50%, "
                                     f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
                                     f"has_bearish_pattern={has_bearish_pattern}")
                         if is_volume_xyzh and (is_bearish_kline_with_amplitude or has_bearish_pattern):
@@ -377,16 +377,16 @@ class RPointPluginService:
                             return RPointPluginResult(
                                 "乖离率偏离",
                                 True,
-                                f"条件5: 前15日累涨{gain_15days:.2f}%+放量+{signal_desc}"
+                                f"条件5: 前15日涨幅{gain_15days:.2f}%+放量+{signal_desc}"
                             )
             
-            # === 条件6: 前20日涨幅>50%（逐日累加） ===
+            # === 条件6: 前20日涨幅>50%（起止收盘比） ===
             if len(prev_data_list) >= 20:
-                closes_chain_20 = [d.close for d in reversed(prev_data_list[:20])] + [current_data.close]
-                if all(c and c > 0 for c in closes_chain_20):
-                    gain_20days = sum((closes_chain_20[i+1] - closes_chain_20[i]) / closes_chain_20[i] * 100 for i in range(20))
+                prev_20_day = prev_data_list[19]
+                if prev_20_day.close and prev_20_day.close > 0:
+                    gain_20days = (current_data.close - prev_20_day.close) / prev_20_day.close * 100
                     if gain_20days > 50:
-                        logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日累计涨幅{gain_20days:.2f}%>50%, "
+                        logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{gain_20days:.2f}%>50%, "
                                     f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
                                     f"has_bearish_pattern={has_bearish_pattern}")
                         if is_volume_xyzh and (is_bearish_kline_with_amplitude or has_bearish_pattern):
@@ -403,7 +403,7 @@ class RPointPluginService:
                             return RPointPluginResult(
                                 "乖离率偏离",
                                 True,
-                                f"条件6: 前20日累涨{gain_20days:.2f}%+放量+{signal_desc}"
+                                f"条件6: 前20日涨幅{gain_20days:.2f}%+放量+{signal_desc}"
                             )
             
             return RPointPluginResult("乖离率偏离", False, "")

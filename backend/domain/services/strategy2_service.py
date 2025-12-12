@@ -412,28 +412,15 @@ class Strategy2Service:
                 penalty = -42
                 reason = f"{local_reason}, 跌幅{decline_pct_open:.2f}%相对开盘"
         
-        # 条件3（情形2）：前5日累计涨幅过大
-        # 条件3（情形2）：前5日累计涨幅过大（需要至少6根，保证第一根有前收）
+        # 条件3（情形2）：前5日涨幅过大（起止收盘比，需6根收盘价确保间隔5日）
         if len(daily_data_30) >= 6:
-            window = daily_data_30[-6:]  # 用6根保证连续前收
-            last5 = window[1:]  # 取最近5根
+            window = daily_data_30[-6:]
+            first_close = window[0].get('close')
+            last_close = window[-1].get('close')
+            all_bullish_5 = all(d.get('close') is not None and d.get('open') is not None and d['close'] > d['open'] for d in window[1:])
             
-            # 逐日用“上一根close”计算涨幅，要求前一根close有效
-            pcts = []
-            valid_chain = True
-            for i in range(1, len(window)):
-                prev_close_i = window[i - 1].get('close')
-                cur_close_i = window[i].get('close')
-                if prev_close_i is None or prev_close_i <= 0 or cur_close_i is None:
-                    valid_chain = False
-                    break
-                pct = (cur_close_i - prev_close_i) / prev_close_i * 100
-                pcts.append(pct)
-            
-            if valid_chain and len(pcts) == 5:
-                cum5 = sum(pcts)
-                all_bullish_5 = all(d.get('close') is not None and d.get('open') is not None and d['close'] > d['open'] for d in last5)
-                
+            if first_close and first_close > 0 and last_close:
+                cum5 = (last_close - first_close) / first_close * 100
                 is_main = KLinePatternService.is_main_board(stock_code)
                 thresh_bull = 35 if is_main else 50  # 连阳且累涨阈值
                 thresh_cum = 25 if is_main else 35   # 纯累涨阈值
@@ -450,7 +437,6 @@ class Strategy2Service:
                 
                 if triggered_case2:
                     penalty = min(penalty, -50) if penalty else -50
-                    # 若已有原因（如情形1），合并说明
                     if reason:
                         reason = reason + "; " + case2_reason
                     else:
