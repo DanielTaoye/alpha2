@@ -101,6 +101,13 @@ class RPointPluginService:
             triggered_plugins.append(plugin2)
             logger.info(f"[R点插件-临近压力位滞涨] {stock_code} {date}: {plugin2.reason}")
             return True, triggered_plugins
+
+        # 插件2.1: 强转弱且未反转
+        plugin2_1 = self._check_strong_to_weak_not_reversed(stock_code, date)
+        if plugin2_1.triggered:
+            triggered_plugins.append(plugin2_1)
+            logger.info(f"[R点插件-强转弱未反转] {stock_code} {date}: {plugin2_1.reason}")
+            return True, triggered_plugins
         
         # 插件3: 基本面突发利空
         plugin3 = self._check_fundamental_negative(stock_code, date)
@@ -811,6 +818,50 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"获取前N个交易日失败: {e}")
             return []
+
+    def _check_strong_to_weak_not_reversed(self, stock_code: str, date: datetime) -> RPointPluginResult:
+        """
+        插件：强转弱且未反转
+        条件：
+        - 前一日空头组合包含“强转弱”
+        - 今日未修复：close < (前日收盘+前日开盘)/2
+        - 今日成交量类型包含 G
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            if len(prev_dates) < 1:
+                return RPointPluginResult("强转弱未反转", False, "")
+            
+            prev_date_str = prev_dates[0]
+            prev_chance = self._daily_chance_cache.get(prev_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            prev_data = self._daily_cache.get(prev_date_str) or self.daily_repo.find_by_date(stock_code, prev_date_str)
+            current_chance = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            current_data = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
+            
+            if not prev_chance or not prev_data or not current_chance or not current_data:
+                return RPointPluginResult("强转弱未反转", False, "")
+            
+            if not prev_chance.bearish_pattern or "强转弱" not in prev_chance.bearish_pattern:
+                return RPointPluginResult("强转弱未反转", False, "")
+            
+            mid_prev = (prev_data.close + prev_data.open) / 2
+            if current_data.close >= mid_prev:
+                return RPointPluginResult("强转弱未反转", False, "")
+            
+            vol_today = current_chance.volume_type or ""
+            vols = [v.strip() for v in vol_today.split(",") if v.strip()]
+            if "G" not in vols:
+                return RPointPluginResult("强转弱未反转", False, "")
+            
+            return RPointPluginResult(
+                "强转弱未反转",
+                True,
+                f"前一日强转弱未修复，今日收盘<{mid_prev:.2f}，且G型放量({vol_today})"
+            )
+        except Exception as e:
+            logger.error(f"R点插件-强转弱未反转检查失败: {e}")
+            return RPointPluginResult("强转弱未反转", False, "")
     
     def _check_high_position_r(self, stock_code: str, date: datetime, ma_data: dict, 
                                macd_data: dict, current_index: int) -> RPointPluginResult:
