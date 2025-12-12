@@ -26,7 +26,8 @@ class Strategy2Service:
                        volume_type: Optional[str],
                        bullish_pattern: Optional[str],
                        daily_data_30: List[Dict],  # 前30个交易日数据
-                       index: int) -> Tuple[bool, float, str]:
+                       index: int,
+                       prev_day_has_r: bool = False) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -77,6 +78,13 @@ class Strategy2Service:
         
         # 从配置读取触发阈值
         threshold = self.config_service.get_strategy2_threshold()
+        
+        # 情形3：前一日刚发R，且当日原始分数达到阈值，扣45分
+        # 先记录未扣前得分用于判断“符合发C条件”
+        pre_case3_score = total_score
+        if prev_day_has_r and pre_case3_score >= threshold:
+            total_score -= 45
+            details.append("策略2取消发C情形3扣45分(前一日有R)")
         
         # 判断是否触发
         is_triggered = total_score >= threshold
@@ -369,12 +377,12 @@ class Strategy2Service:
         decline_pct_open = (close_p - open_p) / open_p * 100 if open_p else None
         
         penalty = 0
+        reason = ""
         
         # 条件1：阴线且跌幅≥2%（相对开盘）
         if is_bearish and decline_pct_open is not None and decline_pct_open <= -2:
             penalty = -42
-            details.append(f"策略2取消发C情形1扣42分(阴线跌幅{decline_pct_open:.2f}%相对开盘)")
-            return penalty
+            reason = f"阴线跌幅{decline_pct_open:.2f}%相对开盘"
         
         # 计算ABC
         abc = KLinePatternService.calculate_abc(open_p, close_p, high_p, low_p)
@@ -388,22 +396,68 @@ class Strategy2Service:
             risky_patterns = ["高开低走", "冲高回落阳线", "冲高回落阴线", "冲高回落阴十字星", "冲高回落阳十字星"]
             
             trigger = False
-            reason = ""
+            local_reason = ""
             
             if pattern in risky_patterns:
                 trigger = True
-                reason = pattern
+                local_reason = pattern
             elif is_bearish and (3 * abc.a > abc.c) and (3 * abc.b > abc.c):
                 trigger = True
-                reason = "3A>C且3B>C"
+                local_reason = "3A>C且3B>C"
             elif is_bearish and (3 * abc.b > abc.a) and (3 * abc.b > abc.c):
                 trigger = True
-                reason = "3B>A且3B>C"
+                local_reason = "3B>A且3B>C"
             
             if trigger:
                 penalty = -42
-                details.append(f"策略2取消发C情形1扣42分({reason}, 跌幅{decline_pct_open:.2f}%相对开盘)")
-                return penalty
+                reason = f"{local_reason}, 跌幅{decline_pct_open:.2f}%相对开盘"
+        
+        # 条件3（情形2）：前5日累计涨幅过大
+        # 条件3（情形2）：前5日累计涨幅过大（需要至少6根，保证第一根有前收）
+        if len(daily_data_30) >= 6:
+            window = daily_data_30[-6:]  # 用6根保证连续前收
+            last5 = window[1:]  # 取最近5根
+            
+            # 逐日用“上一根close”计算涨幅，要求前一根close有效
+            pcts = []
+            valid_chain = True
+            for i in range(1, len(window)):
+                prev_close_i = window[i - 1].get('close')
+                cur_close_i = window[i].get('close')
+                if prev_close_i is None or prev_close_i <= 0 or cur_close_i is None:
+                    valid_chain = False
+                    break
+                pct = (cur_close_i - prev_close_i) / prev_close_i * 100
+                pcts.append(pct)
+            
+            if valid_chain and len(pcts) == 5:
+                cum5 = sum(pcts)
+                all_bullish_5 = all(d.get('close') is not None and d.get('open') is not None and d['close'] > d['open'] for d in last5)
+                
+                is_main = KLinePatternService.is_main_board(stock_code)
+                thresh_bull = 35 if is_main else 50  # 连阳且累涨阈值
+                thresh_cum = 25 if is_main else 35   # 纯累涨阈值
+                
+                triggered_case2 = False
+                case2_reason = ""
+                
+                if all_bullish_5 and cum5 >= thresh_bull:
+                    triggered_case2 = True
+                    case2_reason = f"前5日连阳累涨{cum5:.2f}%≥{thresh_bull}%"
+                elif cum5 > thresh_cum:
+                    triggered_case2 = True
+                    case2_reason = f"前5日累涨{cum5:.2f}%>{thresh_cum}%"
+                
+                if triggered_case2:
+                    penalty = min(penalty, -50) if penalty else -50
+                    # 若已有原因（如情形1），合并说明
+                    if reason:
+                        reason = reason + "; " + case2_reason
+                    else:
+                        reason = case2_reason
+        
+        if penalty != 0:
+            details.append(f"策略2取消发C情形扣分{abs(penalty)}分({reason})")
         
         return penalty
     

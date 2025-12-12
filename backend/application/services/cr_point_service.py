@@ -182,6 +182,11 @@ class CRPointService:
                         })
                 
                 # 检查策略2
+                # 是否前一日有有效R点
+                has_prev_valid_r = (last_valid_point_type == 'R' and
+                                    last_valid_point_date is not None and
+                                    (kline.time.date() - last_valid_point_date.date()).days == 1)
+                
                 is_strategy2_c, strategy2_score, strategy2_reason = self.strategy2_service.check_strategy2(
                     stock_code=stock_code,
                     date=kline.time,
@@ -191,7 +196,8 @@ class CRPointService:
                     volume_type=volume_type,
                     bullish_pattern=bullish_pattern,
                     daily_data_30=daily_data_30,
-                    index=index
+                    index=index,
+                    prev_day_has_r=has_prev_valid_r
                 )
                 
                 # 记录所有K线的策略2评分（用于前端显示）
