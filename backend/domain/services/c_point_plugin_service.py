@@ -922,7 +922,8 @@ class CPointPluginService:
         1. 往前数30个交易日，若发现R且R后无C
         2. R后的成交量均小于R日
         3. 今日成交量出现放量（AXYHZ任意一种）
-        4. 股价突破R日收盘价
+        4. 当日股价 > R日最高价
+        5. 今日距离R日 >= 5个交易日
         
         满足条件直接发C（返回999分标记）
         
@@ -993,6 +994,10 @@ class CPointPluginService:
             # 获取R点到当日之间的所有交易日
             dates_after_r = [d for d in prev_dates if d > r_date_str]
             
+            # 需至少5个交易日间隔
+            if len(dates_after_r) < 5:
+                return CPointPluginResult("横盘修整后突破", False, 0, "")
+            
             all_volume_less_than_r = True
             for check_date in dates_after_r:
                 check_data = self._daily_cache.get(check_date)
@@ -1006,8 +1011,8 @@ class CPointPluginService:
             if not all_volume_less_than_r:
                 return CPointPluginResult("横盘修整后突破", False, 0, "")
             
-            # 检查股价突破R日收盘价
-            is_breakout = current_data.close > target_r_point.close_price
+            # 检查股价突破R日最高价
+            is_breakout = current_data.close > target_r_point.high_price
             
             if not is_breakout:
                 return CPointPluginResult("横盘修整后突破", False, 0, "")
@@ -1018,7 +1023,7 @@ class CPointPluginService:
                 "横盘修整后突破",
                 True,
                 0,  # 不调整分数，通过 force_c_point 标志直接发C
-                f"R点({r_date_str})后{days_since_r}日横盘, R后无C, 今日放量({volume_type})突破R收盘价({target_r_point.close_price:.2f})"
+                f"R点({r_date_str})后{days_since_r}日横盘, R后无C, 今日放量({volume_type})突破R最高价({target_r_point.high_price:.2f})"
             )
             
         except Exception as e:

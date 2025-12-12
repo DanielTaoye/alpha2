@@ -113,7 +113,9 @@ class Strategy2Service:
                            close_price: float, index: int, details: List[str]) -> float:
         """
         计算均线得分：30分
-        条件：5日 > 10日 > 20日（多头排列）
+        条件：
+        - 5日 > 10日 > 20日（30分）
+        - 5日 > 20日 > 10日（20分）
         """
         score = 0
         
@@ -127,6 +129,12 @@ class Strategy2Service:
         if bullish_alignment:
             score = 30
             details.append("均线30分(MA5>MA10>MA20)")
+        else:
+            # 次优排列：5日 > 20日 > 10日
+            alt_alignment = ma5_current > ma20_current and ma20_current > ma10_current
+            if alt_alignment:
+                score = 20
+                details.append("均线20分(MA5>MA20>MA10)")
         
         return score
     
