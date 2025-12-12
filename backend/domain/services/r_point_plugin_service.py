@@ -414,170 +414,160 @@ class RPointPluginService:
     
     def _check_pressure_stagnation(self, stock_code: str, date: datetime, c_point_date: Optional[datetime] = None) -> RPointPluginResult:
         """
-        插件2: 临近压力位滞涨
+        插件2: 临近压力位滞涨（重写版）
         
-        前提条件（共同条件）：
-        - 前一交易日日线赔率得分：大于0
-        - 当前股价距离压力线：0% < (压力线-股价)/股价 < 配置阈值%（默认10%）
-        - 压力线价格从数据库读取后需除以100（数据库存储格式：1660代表16.60元）
+        新规则分两种：
+        1）临近压力位 + 放量 + 风险K线
+        2）临近压力位 + 前两日放量 + 风险K线
         
-        条件1: 前提条件 + 放量(XYZH) + 特定K线 + C点日开盘价<当日收盘价
-        条件2(熊市): 前提条件 + 前3日无AXYZ放量 + 空头组合 + C点日开盘价<当日收盘价
+        公共前置：
+        - 向前找到最近的有效C，且该C之前最近的是R（C前是R，C前无更近的C）；否则不触发
+        - 取“今日前一交易日”的压力线，与“发C日”的压力线比较，若发C日压力线 > 今日前一日压力线 => 不触发
+        - 若发C日压力线为空/0，则用“发C日前一日收盘”到“今日收盘”涨幅，需 >15%，否则不触发
+        - 前一交易日赔率 > 0
+        - 距离压力线：0% < (压力线-今日收盘)/今日收盘 < 8%（固定阈值，主/非主一致）
+        
+        情形1（放量当日）：
+        - 当日放量（XYZH）
+        - 当日风险K线任一：
+            振幅>6%/8%的 冲高回落阳/阴线、冲高回落阳/阴十字星、高开低走
+            或 跌幅>3%（主板）/5%（非主板）的阴线
+        
+        情形2（前两日放量，当日未放量）：
+        - 当日未放量（无XYZH），但满足风险K线集：冲高回落阴线、冲高回落阳线、高开低走、乌云盖顶（空头组合命中）
+        - 再往前看2个交易日（即最近两日均满足距离压力线 <8%）
+        - 前两日任意一日出现过放量（XYZH）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            c_data = None  # 初始化C点日数据
-            
-            # 判断主板还是非主板
             is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+            amplitude_threshold = 6 if is_main_board else 8
+            decline_threshold = 3 if is_main_board else 5
+            distance_threshold = 8.0  # 固定8%
             
-            # 获取当日数据
-            current_data = self._daily_cache.get(date_str)
-            if not current_data:
-                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+            # 当日数据
+            current_data = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
             if not current_data:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 获取当日daily_chance（用于获取股性和成交量类型）
-            current_chance = self._daily_chance_cache.get(date_str)
-            if not current_chance:
-                current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            # 当前 daily_chance
+            current_chance = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
             if not current_chance:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 获取股性
-            stock_nature = current_chance.stock_nature or "波段"  # 默认波段
-            
-            # 获取前一交易日的数据，使用前一交易日的赔率得分来判断是否临近压力位
+            # 前一交易日数据（赔率、压力线用）
             prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if not prev_dates or len(prev_dates) < 1:
                 return RPointPluginResult("临近压力位滞涨", False, "")
-            
             prev_date_str = prev_dates[0]
-            prev_chance = self._daily_chance_cache.get(prev_date_str)
-            if not prev_chance:
-                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
-            if not prev_chance:
+            prev_chance = self._daily_chance_cache.get(prev_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            prev_data = self._daily_cache.get(prev_date_str) or self.daily_repo.find_by_date(stock_code, prev_date_str)
+            if not prev_chance or not prev_data:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 使用前一交易日的日线赔率得分（距离压力位的空间）
-            day_win_ratio_score = prev_chance.day_win_ratio_score or 0
-            
-            # 根据股性获取压力位阈值（仅用于日志显示）
-            pressure_threshold = self._get_pressure_threshold(stock_nature)
-            
-            # 只检查赔率得分大于0（取消上限检查）
-            is_near_pressure_by_score = day_win_ratio_score > 0
-            
-            logger.info(f"[临近压力位滞涨-赔率检查] {stock_code} {date_str} 股性:{stock_nature}, 前日赔率:{day_win_ratio_score:.1f}, 是否满足赔率>0: {is_near_pressure_by_score}")
-            
-            if not is_near_pressure_by_score:
+            # 回溯最近C且其前是R
+            last_c_point = self._find_latest_c_before(date_str, stock_code)
+            if not last_c_point:
+                return RPointPluginResult("临近压力位滞涨", False, "")
+            c_date_str = last_c_point.trigger_date.strftime('%Y-%m-%d')
+            # C之前最近的点必须是R
+            if not self._is_previous_point_r(c_date_str, stock_code):
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 检查当前股价距离压力线的距离
-            # 从配置中获取距离阈值（默认10%）
-            distance_threshold = self.config_service.get_pressure_stagnation_distance_threshold()
+            # 发C日压力线 vs 今日前一日压力线
+            c_chance = self._daily_chance_cache.get(c_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, c_date_str)
+            c_prev_date = self._get_previous_trading_dates_from_cache(c_date_str, stock_code)
+            c_prev_close = None
+            if c_prev_date:
+                c_prev_data = self._daily_cache.get(c_prev_date[0]) or self.daily_repo.find_by_date(stock_code, c_prev_date[0])
+                if c_prev_data:
+                    c_prev_close = c_prev_data.close
             
-            if prev_chance.pressure_price and prev_chance.pressure_price > 0:
-                close_price = current_data.close
-                # 压力线价格需要除以100（数据库存储格式：1660代表16.60元）
-                pressure_price_actual = prev_chance.pressure_price / 100.0
-                distance_pct = (pressure_price_actual - close_price) / close_price * 100
-                
-                logger.info(f"[临近压力位滞涨-距离检查] {stock_code} {date_str} 股价{close_price:.2f}, 压力线{pressure_price_actual:.2f}, 距离{distance_pct:.2f}%, 赔率{day_win_ratio_score:.1f}, 距离阈值{distance_threshold}%")
-                
-                # 如果不在0%-阈值%的范围内，不触发插件
-                if not (0 < distance_pct < distance_threshold):
-                    logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-{distance_threshold}%范围内")
+            if not prev_chance.pressure_price:
+                return RPointPluginResult("临近压力位滞涨", False, "")
+            prev_pressure = prev_chance.pressure_price / 100.0
+            c_pressure = c_chance.pressure_price / 100.0 if c_chance and c_chance.pressure_price else 0
+            
+            if c_pressure > prev_pressure:
+                return RPointPluginResult("临近压力位滞涨", False, "")
+            
+            if c_pressure == 0:
+                if c_prev_close is None or c_prev_close <= 0:
                     return RPointPluginResult("临近压力位滞涨", False, "")
-            else:
-                # 没有压力线数据，不触发插件
-                logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} 前一交易日无压力线数据")
+                gain_from_c = (current_data.close - c_prev_close) / c_prev_close * 100
+                if gain_from_c <= 15:
+                    return RPointPluginResult("临近压力位滞涨", False, "")
+            
+            # 前一日赔率>0
+            day_win_ratio_score = prev_chance.day_win_ratio_score or 0
+            if day_win_ratio_score <= 0:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 检查上一个C点日的开盘价是否低于当日收盘价
-            if c_point_date:
-                c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else c_point_date
-                c_data = self._daily_cache.get(c_date_str)
-                if not c_data:
-                    c_data = self.daily_repo.find_by_date(stock_code, c_date_str)
-                
-                # 如果有C点数据，检查C点日开盘价是否低于当日收盘价
-                if c_data:
-                    # C点日开盘价必须低于当日收盘价，否则不发R
-                    if c_data.open >= current_data.close:
-                        logger.debug(f"[临近压力位滞涨] {stock_code} {date_str} C点日开盘价{c_data.open:.2f}>=当日收盘价{current_data.close:.2f}，不发R")
-                        return RPointPluginResult("临近压力位滞涨", False, "")
+            # 距离压力线固定阈值8%
+            distance_pct = (prev_pressure - current_data.close) / current_data.close * 100
+            if not (0 < distance_pct < distance_threshold):
+                return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # === 条件1: 放量 + 特定K线 ===
-            is_volume_xyzh = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
+            # 风险K线判定
+            def is_risk_kline(data) -> bool:
+                pattern = KLinePatternService.identify_pattern(stock_code, data.open, data.close, data.high, data.low, data.pre_close)
+                amplitude = self._calculate_amplitude(data, stock_code)
+                is_bearish = data.close < data.open
+                risky_set = ["冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", "冲高回落阴十字星", "高开低走"]
+                if pattern in risky_set and amplitude > amplitude_threshold:
+                    return True
+                if is_bearish:
+                    decline = (data.close - data.open) / data.open * 100
+                    if decline <= -decline_threshold:
+                        return True
+                return False
             
-            logger.info(f"[临近压力位滞涨-条件1] {stock_code} {date_str} 成交量类型:{current_chance.volume_type}, 是否放量XYZH:{is_volume_xyzh}")
+            # 情形1：当日放量+风险K线
+            is_volume_today = self._check_volume_type(current_chance, ['X', 'Y', 'Z', 'H'])
+            if is_volume_today and is_risk_kline(current_data):
+                return RPointPluginResult(
+                    "临近压力位滞涨",
+                    True,
+                    f"临近压力位+放量+风险K线(距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
+                )
             
-            if is_volume_xyzh:
-                # 检查K线形态，返回所有命中的形态
-                matched_patterns = self._check_bearish_kline_patterns(current_data, stock_code)
+            # 情形2：当日未放量，前两日任一天放量，前两日距离也在8%内，当日风险K线（含乌云盖顶空头组合）
+            if not is_volume_today and len(prev_dates) >= 2:
+                day1_str = prev_dates[0]
+                day2_str = prev_dates[1]
+                day1_data = self._daily_cache.get(day1_str) or self.daily_repo.find_by_date(stock_code, day1_str)
+                day2_data = self._daily_cache.get(day2_str) or self.daily_repo.find_by_date(stock_code, day2_str)
+                day1_chance = self._daily_chance_cache.get(day1_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, day1_str)
+                day2_chance = self._daily_chance_cache.get(day2_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, day2_str)
                 
-                logger.info(f"[临近压力位滞涨-条件1] {stock_code} {date_str} 命中K线形态:{matched_patterns}")
+                def dist_ok(data_day, chance_day):
+                    if not data_day or not chance_day or not chance_day.pressure_price:
+                        return False
+                    p = chance_day.pressure_price / 100.0
+                    d = (p - data_day.close) / data_day.close * 100
+                    return 0 < d < distance_threshold
                 
-                if matched_patterns:
-                    pattern_desc = "、".join(matched_patterns)
-                    # 计算振幅
-                    amplitude = self._calculate_amplitude(current_data, stock_code)
-                    
-                    # 计算压力线距离
-                    close_price = current_data.close
-                    pressure_price_actual = prev_chance.pressure_price / 100.0
-                    distance_pct = (pressure_price_actual - close_price) / close_price * 100
-                    
-                    # 如果有C点数据，在原因中说明C点开盘价
-                    c_info = ""
-                    if c_point_date and c_data:
-                        c_info = f"+C点日开盘{c_data.open:.2f}<当日收盘{current_data.close:.2f}"
-                    
+                day1_dist = dist_ok(day1_data, day1_chance)
+                day2_dist = dist_ok(day2_data, day2_chance)
+                has_volume_prev2 = (day1_chance and self._check_volume_type(day1_chance, ['X', 'Y', 'Z', 'H'])) or \
+                                   (day2_chance and self._check_volume_type(day2_chance, ['X', 'Y', 'Z', 'H']))
+                
+                pattern_today = KLinePatternService.identify_pattern(stock_code, current_data.open, current_data.close, current_data.high, current_data.low, current_data.pre_close)
+                amplitude_today = self._calculate_amplitude(current_data, stock_code)
+                is_risk2 = False
+                risk2_set = ["冲高回落阴线", "冲高回落阳线", "高开低走"]
+                if pattern_today in risk2_set and amplitude_today > amplitude_threshold:
+                    is_risk2 = True
+                # 乌云盖顶（空头组合）
+                if current_chance.bearish_pattern and "乌云盖顶" in current_chance.bearish_pattern:
+                    is_risk2 = True
+                
+                if day1_dist and day2_dist and has_volume_prev2 and is_risk2:
                     return RPointPluginResult(
                         "临近压力位滞涨",
                         True,
-                        f"条件1: 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}>0,股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+放量+空头K线({pattern_desc},振幅{amplitude:.2f}%){c_info}"
+                        f"临近压力位+前两日放量+风险K线(距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
                     )
-            
-            # === 条件2: 前3日无AXYZ放量 + 空头组合（仅熊市生效）===
-            market_type = self.config_service.get_market_type()
-            
-            # 条件2仅在熊市生效
-            if market_type == 'bear':
-                prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-                if len(prev_dates) >= 3:
-                    has_good_volume = False
-                    for prev_date in prev_dates[:3]:
-                        prev_chance = self._daily_chance_cache.get(prev_date)
-                        if not prev_chance:
-                            prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date)
-                        if prev_chance:
-                            if self._check_volume_type(prev_chance, ['A', 'X', 'Y', 'Z']):
-                                has_good_volume = True
-                                break
-                    
-                    if not has_good_volume:
-                        # 检查当日是否有空头组合，并获取具体组合名称
-                        if current_chance.bearish_pattern and len(current_chance.bearish_pattern.strip()) > 0:
-                            bearish_patterns = current_chance.bearish_pattern.strip()
-                            
-                            # 计算压力线距离
-                            close_price = current_data.close
-                            pressure_price_actual = prev_chance.pressure_price / 100.0
-                            distance_pct = (pressure_price_actual - close_price) / close_price * 100
-                            
-                            # 如果有C点数据，在原因中说明C点开盘价
-                            c_info = ""
-                            if c_point_date and c_data:
-                                c_info = f"+C点日开盘{c_data.open:.2f}<当日收盘{current_data.close:.2f}"
-                            
-                            return RPointPluginResult(
-                                "临近压力位滞涨",
-                                True,
-                                f"条件2(熊市): 距压力位近(股性:{stock_nature},前日赔率{day_win_ratio_score:.1f}>0,股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+前3日无AXYZ放量+空头组合({bearish_patterns}){c_info}"
-                            )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
             

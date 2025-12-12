@@ -67,3 +67,4 @@ kill <PID>  # 使用上面获取的 PID
 pkill -f "refresh_daily_chance.*scheduler"  # 按名称停止
 
 
+
