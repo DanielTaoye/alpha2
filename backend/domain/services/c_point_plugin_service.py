@@ -485,10 +485,10 @@ class CPointPluginService:
                         )
                 
                 # 情况5: 前两日连阳，且每日涨幅均大于5%
-                # 使用可计算的最近两日涨幅，避免首日因缺前收为0的情况
+                # 使用“最新的”两天涨幅（pct_records 按日期从新到旧），避免取到最老两天
                 if len(pct_records) >= 2:
-                    pct1, data1 = pct_records[-1]
-                    pct2, data2 = pct_records[-2]
+                    pct1, data1 = pct_records[0]  # 最近一天
+                    pct2, data2 = pct_records[1]  # 次最近一天
                     if (pct1 > 5 and pct2 > 5 and
                         data1.close >= data1.open and
                         data2.close >= data2.open):
