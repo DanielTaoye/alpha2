@@ -172,10 +172,13 @@ class CRPointService:
                 daily_data_30 = []
                 if index >= 29:
                     for i in range(index - 29, index + 1):
+                        prev_close = kline_data[i - 1].close if i - 1 >= 0 else None
                         daily_data_30.append({
+                            'open': kline_data[i].open,
                             'high': kline_data[i].high,
                             'low': kline_data[i].low,
-                            'close': kline_data[i].close
+                            'close': kline_data[i].close,
+                            'prev_close': prev_close
                         })
                 
                 # 检查策略2

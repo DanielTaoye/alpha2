@@ -3,6 +3,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime, timedelta
 from infrastructure.logging.logger import get_logger
 from domain.models.stock import StockGroups
+from domain.services.kline_pattern_service import KLinePatternService
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,10 @@ class Strategy2Service:
         # 3. 成交量总分：30分
         volume_score = self._calculate_volume_score(volume_type, details)
         total_score += volume_score
+
+        # 3.5 策略2取消发C 情形1（惩罚项）
+        cancel_penalty = self._calculate_cancel_c_penalty(stock_code, daily_data_30, details)
+        total_score += cancel_penalty
         
         # 4. K线组合：10分
         kline_score = self._calculate_kline_score(daily_data_30, bullish_pattern, details)
@@ -185,21 +190,10 @@ class Strategy2Service:
                     # 记录这个加分，5日内有效
                     self._record_bonus(stock_code, bonus_key_turn, date, 5)
         
-        # 2. 金叉（10分）- DIF>DEA，前一日蓝柱，今日红柱（5日内有效）
-        bonus_key_golden = f"{stock_code}_macd_golden"
-        if self._check_time_window_bonus(stock_code, date, bonus_key_golden, 5):
+        # 2. 金叉（10分）- 近5个交易日内出现：前一日蓝柱（MACD<0），当日红柱（MACD>0），且当日DIF>DEA
+        if self._has_recent_golden_cross(macd_data, index, lookback=5):
             score += 10
-            macd_details.append("金叉10分")
-        else:
-            # 前一日蓝柱（MACD<0），今日红柱（MACD>0），且今日DIF>DEA
-            golden_cross = (macd_prev < 0 and 
-                          macd_current > 0 and 
-                          dif_current > dea_current)
-            if golden_cross:
-                score += 10
-                macd_details.append("金叉10分")
-                # 记录这个加分，5日内有效
-                self._record_bonus(stock_code, bonus_key_golden, date, 5)
+            macd_details.append("金叉10分(近5日)")
         
         # 3. 多头排列1（10分）- DIF≥DEA>0 且 MACD>0
         bullish_alignment_1 = (dif_current >= dea_current and 
@@ -346,6 +340,72 @@ class Strategy2Service:
             details.append(f"偏离MA10超20%扣50分(偏离{deviation*100:.1f}%)")
         
         return penalty
+
+    def _calculate_cancel_c_penalty(self, stock_code: str, daily_data_30: List[Dict],
+                                    details: List[str]) -> float:
+        """
+        策略2取消发C 情形1：
+        - 当日跌幅≥2%的阴线，扣42分
+        - 若跌幅<2%但属于下列K线，同样扣42分：
+            高开低走、冲高回落阳线、冲高回落阴线、冲高回落阴十字星、冲高回落阳十字星
+        - 或当日为阴线 且 3A>C 且 3B>C
+        - 或当日为阴线 且 3B>A 且 3B>C
+        """
+        if not daily_data_30:
+            return 0
+        
+        today = daily_data_30[-1]
+        open_p = today.get('open')
+        high_p = today.get('high')
+        low_p = today.get('low')
+        close_p = today.get('close')
+        prev_close = today.get('prev_close')
+        
+        if None in (open_p, high_p, low_p, close_p) or open_p is None:
+            return 0
+        
+        is_bearish = close_p < open_p
+        # 跌幅相对开盘价
+        decline_pct_open = (close_p - open_p) / open_p * 100 if open_p else None
+        
+        penalty = 0
+        
+        # 条件1：阴线且跌幅≥2%（相对开盘）
+        if is_bearish and decline_pct_open is not None and decline_pct_open <= -2:
+            penalty = -42
+            details.append(f"策略2取消发C情形1扣42分(阴线跌幅{decline_pct_open:.2f}%相对开盘)")
+            return penalty
+        
+        # 计算ABC
+        abc = KLinePatternService.calculate_abc(open_p, close_p, high_p, low_p)
+        
+        # 条件2：跌幅<2% 且 满足以下任一
+        # - 特定K线形态（高开低走、冲高回落阳/阴线、冲高回落阴/阳十字星）
+        # - 阴线且 3A>C 且 3B>C
+        # - 阴线且 3B>A 且 3B>C
+        if decline_pct_open is not None and decline_pct_open > -2:
+            pattern = KLinePatternService.identify_pattern(stock_code, open_p, close_p, high_p, low_p, prev_close)
+            risky_patterns = ["高开低走", "冲高回落阳线", "冲高回落阴线", "冲高回落阴十字星", "冲高回落阳十字星"]
+            
+            trigger = False
+            reason = ""
+            
+            if pattern in risky_patterns:
+                trigger = True
+                reason = pattern
+            elif is_bearish and (3 * abc.a > abc.c) and (3 * abc.b > abc.c):
+                trigger = True
+                reason = "3A>C且3B>C"
+            elif is_bearish and (3 * abc.b > abc.a) and (3 * abc.b > abc.c):
+                trigger = True
+                reason = "3B>A且3B>C"
+            
+            if trigger:
+                penalty = -42
+                details.append(f"策略2取消发C情形1扣42分({reason}, 跌幅{decline_pct_open:.2f}%相对开盘)")
+                return penalty
+        
+        return penalty
     
     def _check_time_window_bonus(self, stock_code: str, date: datetime, bonus_key: str, 
                                  window_days: int) -> bool:
@@ -368,6 +428,29 @@ class Strategy2Service:
         end_date = trigger_date + timedelta(days=window_days)
         self._bonus_records[stock_code][bonus_key] = end_date
         logger.debug(f"记录加分: {bonus_key}, 有效期至 {end_date.strftime('%Y-%m-%d')}")
+    
+    def _has_recent_golden_cross(self, macd_data: Dict, index: int, lookback: int = 5) -> bool:
+        """
+        检查近N个交易日内是否出现金叉：
+        条件（保持原判定语义）：
+        - 前一日MACD<0（蓝柱）
+        - 当日MACD>0（红柱）
+        - 当日DIF>DEA
+        """
+        start = max(1, index - lookback + 1)
+        for i in range(start, index + 1):
+            macd_prev = macd_data['macd'][i - 1]
+            macd_curr = macd_data['macd'][i]
+            dif_curr = macd_data['dif'][i]
+            dea_curr = macd_data['dea'][i]
+            
+            if macd_prev is None or macd_curr is None or dif_curr is None or dea_curr is None:
+                continue
+            
+            golden = (macd_prev < 0 and macd_curr > 0 and dif_curr > dea_curr)
+            if golden:
+                return True
+        return False
     
     def clear_cache(self):
         """清空缓存"""
