@@ -169,6 +169,13 @@ class BearishPatternService:
             if pattern14:
                 matched_patterns.append(pattern14)
             
+            # 15. 强转弱
+            pattern15 = BearishPatternService._check_pattern15(
+                stock_code, prev_day, today
+            )
+            if pattern15:
+                matched_patterns.append(pattern15)
+            
             return matched_patterns
             
         except Exception as e:
@@ -494,8 +501,8 @@ class BearishPatternService:
             if A > 0:
                 return "T字板/一字板+带上影阴线/高开回落阴线"
             
-            # 高开低走：A=0（无上影线），C<2B
-            if A == 0 and C < 2 * B:
+            # 高开低走：A=0（无上影线）或 A<3B，且 C<2B
+            if (C < 2 * B) and (A == 0 or A < 3 * B):
                 return "T字板/一字板+带上影阴线/高开回落阴线"
         
         return None
@@ -788,6 +795,60 @@ class BearishPatternService:
                 return "吞没阴线（1-3根最终吞没一根阳线）"
         
         return None
+
+    @staticmethod
+    def _check_pattern15(stock_code: str, prev_day: Optional[Dict], today: Dict) -> Optional[str]:
+        """
+        15. 强转弱
+        
+        条件：
+        - 前一日为涨幅大于4%（主板）/6%（非主板）的阳线
+        - 今日为高开低走：开盘价>收盘价，C<2B，且(A==0或A<3B)
+        - 今日实体跌幅≥3%（相对开盘）
+        - 今日开盘价 > 前一日收盘价
+        - 今日收盘价 < (前一日开盘价 + 前一日收盘价) / 2
+        """
+        if not prev_day:
+            return None
+        
+        # 前一日涨幅判定（相对开盘）
+        prev_change = (prev_day['close'] - prev_day['open']) / prev_day['open'] if prev_day['open'] > 0 else 0
+        prev_change_pct = prev_change * 100
+        is_prev_positive = prev_day['close'] > prev_day['open']
+        if not is_prev_positive:
+            return None
+        
+        is_main = KLinePatternService.is_main_board(stock_code)
+        prev_change_threshold = 4.0 if is_main else 6.0
+        if prev_change_pct <= prev_change_threshold:
+            return None
+        
+        # 今日K线特征
+        is_today_negative = today['close'] < today['open']
+        if not is_today_negative:
+            return None
+        
+        today_abc = KLinePatternService.calculate_abc(
+            today['open'], today['close'], today['high'], today['low']
+        )
+        
+        # 高开低走形态约束
+        if not (today_abc.c < 2 * today_abc.b and (today_abc.a == 0 or today_abc.a < 3 * today_abc.b)):
+            return None
+        
+        # 实体跌幅（相对开盘）需 ≥ 3%
+        body_pct = ((today['open'] - today['close']) / today['open'] * 100) if today['open'] > 0 else 0
+        if body_pct < 3.0:
+            return None
+        
+        # 高开且收盘位于前一日实体下半部分
+        prev_mid = (prev_day['open'] + prev_day['close']) / 2
+        if today['open'] <= prev_day['close']:
+            return None
+        if today['close'] >= prev_mid:
+            return None
+        
+        return "强转弱"
     
     @staticmethod
     def _calculate_amplitude(high: float, low: float, prev_close: float) -> float:

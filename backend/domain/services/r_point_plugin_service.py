@@ -1676,8 +1676,9 @@ class RPointPluginService:
         高开低走
         振幅 > 6%（主板）或 8%（非主板）
         开盘价 > 收盘价
-        A = 0
-        C < 2B
+        满足以下任一：
+          - A = 0 且 C < 2B
+          - A < 3B 且 C < 2B
         """
         if O <= close:  # 不是阴线
             return False
@@ -1690,7 +1691,7 @@ class RPointPluginService:
         if amplitude <= amplitude_threshold:
             return False
         
-        return (A == 0 and C < 2 * B)
+        return (C < 2 * B and (A == 0 or A < 3 * B))
     
     def _check_bearish_line_3pct_new(self, O: float, close: float, prev_close: float, is_main_board: bool = True) -> bool:
         """

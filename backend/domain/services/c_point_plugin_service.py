@@ -395,22 +395,23 @@ class CPointPluginService:
             if not current_chance:
                 current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
             
+            allow_legacy_checks = True
             if current_chance and current_chance.stock_nature:
                 stock_nature = current_chance.stock_nature
+                # 新增条件需对所有股性生效，故仅对旧规则做豁免
                 if stock_nature == "短线":
-                    logger.debug(f"[不追涨] {stock_code} {date_str}: 股性为短线，不触发此插件")
-                    return CPointPluginResult("不追涨", False, 0, "")
+                    allow_legacy_checks = False
             
             # 判断主板还是非主板
             is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
             
-            # 获取前5个交易日数据（从缓存）
+            # 获取前6个交易日数据（多看一天，避免首日缺前收导致涨幅为0）
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
             if len(prev_dates) < 2:
                 return CPointPluginResult("不追涨", False, 0, "")
             
             daily_data_list = []
-            for prev_date in prev_dates[:5]:
+            for prev_date in prev_dates[:6]:
                 # 优先使用缓存
                 data = self._daily_cache.get(prev_date)
                 if not data:
@@ -423,74 +424,94 @@ class CPointPluginService:
             
             # 计算涨幅列表：使用当前收盘价相对前一日收盘价（不依赖数据库涨跌幅字段）
             change_pcts = []
+            pct_records = []  # 只记录可计算涨幅的 (pct, data)，用于近两日校验
             prev_close = None
             for data in daily_data_list:
-                if prev_close is not None and prev_close > 0:
-                    pct = (data.close - prev_close) / prev_close * 100
+                effective_prev = getattr(data, 'pre_close', None) or prev_close
+                if effective_prev is not None and effective_prev > 0:
+                    pct = (data.close - effective_prev) / effective_prev * 100
                     change_pcts.append(pct)
+                    pct_records.append((pct, data))
                 else:
-                    # 第一天或前一日收盘价无效，设为0
-                    change_pcts.append(0)
+                    change_pcts.append(0)  # 无法计算时置0用于累计逻辑
                 prev_close = data.close
             
-            # 情况1: 连续2个涨停
-            limit_threshold = 10 if is_main_board else 20
-            if len(change_pcts) >= 2:
-                if change_pcts[0] >= limit_threshold * 0.95 and change_pcts[1] >= limit_threshold * 0.95:
-                    return CPointPluginResult(
-                        "不追涨",
-                        True,
-                        -50,
-                        f"连续2个涨停 ({change_pcts[0]:.2f}%, {change_pcts[1]:.2f}%)"
-                    )
-            
-            # 情况2: 前2日累计涨幅过大
-            if len(change_pcts) >= 2:
-                cum_2days = sum(change_pcts[:2])
-                threshold_2days = 15 if is_main_board else 25
-                if cum_2days > threshold_2days:
-                    return CPointPluginResult(
-                        "不追涨",
-                        True,
-                        -50,
-                        f"前2日累计涨幅过大 (累计:{cum_2days:.2f}%, 阈值:{threshold_2days}%)"
-                    )
-            
-            # 情况3: 前3天累计涨幅过大
-            if len(change_pcts) >= 3:
-                cum_3days = sum(change_pcts[:3])
-                threshold_3days = 20 if is_main_board else 30
-                if cum_3days > threshold_3days:
-                    return CPointPluginResult(
-                        "不追涨",
-                        True,
-                        -50,
-                        f"前3日累计涨幅过大 (累计:{cum_3days:.2f}%, 阈值:{threshold_3days}%)"
-                    )
-            
-            # 情况4: 连续5天涨幅过大
-            if len(change_pcts) >= 5:
-                cum_5days = sum(change_pcts[:5])
-                threshold_5days = 30 if is_main_board else 40
-                if cum_5days > threshold_5days:
-                    return CPointPluginResult(
-                        "不追涨",
-                        True,
-                        -50,
-                        f"前5日累计涨幅过大 (累计:{cum_5days:.2f}%, 阈值:{threshold_5days}%)"
-                    )
-            
-            # 情况5: 前两日连阳，且每日涨幅均大于5%
-            if len(change_pcts) >= 2 and len(daily_data_list) >= 2:
-                if (change_pcts[0] > 5 and change_pcts[1] > 5 and
-                    daily_data_list[0].close >= daily_data_list[0].open and
-                    daily_data_list[1].close >= daily_data_list[1].open):
-                    return CPointPluginResult(
-                        "不追涨",
-                        True,
-                        -50,
-                        f"前两日连阳且每日涨幅>5% ({change_pcts[0]:.2f}%, {change_pcts[1]:.2f}%)"
-                    )
+            if allow_legacy_checks:
+                # 情况1: 连续2个涨停
+                limit_threshold = 10 if is_main_board else 20
+                if len(change_pcts) >= 2:
+                    if change_pcts[0] >= limit_threshold * 0.95 and change_pcts[1] >= limit_threshold * 0.95:
+                        return CPointPluginResult(
+                            "不追涨",
+                            True,
+                            -50,
+                            f"连续2个涨停 ({change_pcts[0]:.2f}%, {change_pcts[1]:.2f}%)"
+                        )
+                
+                # 情况2: 前2日累计涨幅过大
+                if len(change_pcts) >= 2:
+                    cum_2days = sum(change_pcts[:2])
+                    threshold_2days = 15 if is_main_board else 25
+                    if cum_2days > threshold_2days:
+                        return CPointPluginResult(
+                            "不追涨",
+                            True,
+                            -50,
+                            f"前2日累计涨幅过大 (累计:{cum_2days:.2f}%, 阈值:{threshold_2days}%)"
+                        )
+                
+                # 情况3: 前3天累计涨幅过大
+                if len(change_pcts) >= 3:
+                    cum_3days = sum(change_pcts[:3])
+                    threshold_3days = 20 if is_main_board else 30
+                    if cum_3days > threshold_3days:
+                        return CPointPluginResult(
+                            "不追涨",
+                            True,
+                            -50,
+                            f"前3日累计涨幅过大 (累计:{cum_3days:.2f}%, 阈值:{threshold_3days}%)"
+                        )
+                
+                # 情况4: 连续5天涨幅过大
+                if len(change_pcts) >= 5:
+                    cum_5days = sum(change_pcts[:5])
+                    threshold_5days = 30 if is_main_board else 40
+                    if cum_5days > threshold_5days:
+                        return CPointPluginResult(
+                            "不追涨",
+                            True,
+                            -50,
+                            f"前5日累计涨幅过大 (累计:{cum_5days:.2f}%, 阈值:{threshold_5days}%)"
+                        )
+                
+                # 情况5: 前两日连阳，且每日涨幅均大于5%
+                # 使用可计算的最近两日涨幅，避免首日因缺前收为0的情况
+                if len(pct_records) >= 2:
+                    pct1, data1 = pct_records[-1]
+                    pct2, data2 = pct_records[-2]
+                    if (pct1 > 5 and pct2 > 5 and
+                        data1.close >= data1.open and
+                        data2.close >= data2.open):
+                        return CPointPluginResult(
+                            "不追涨",
+                            True,
+                            -50,
+                            f"前两日连阳且每日涨幅>5% ({pct1:.2f}%, {pct2:.2f}%)"
+                        )
+
+            # 新增情况6: 前5日均为阳线，且前5日累计涨幅达35%/50%（主板/非主板），对所有股性生效
+            if len(change_pcts) >= 5 and len(daily_data_list) >= 5:
+                all_bullish = all(d.close > d.open for d in daily_data_list[:5])
+                if all_bullish:
+                    cum_5days_full = sum(change_pcts[:5])
+                    threshold_5days_full = 35 if is_main_board else 50
+                    if cum_5days_full >= threshold_5days_full:
+                        return CPointPluginResult(
+                            "不追涨",
+                            True,
+                            -50,
+                            f"前5日连阳且累计涨幅过大 (累计:{cum_5days_full:.2f}%, 阈值:{threshold_5days_full}%)"
+                        )
             
             return CPointPluginResult("不追涨", False, 0, "")
             

@@ -292,7 +292,10 @@ class KLinePatternService:
             return "冲高回落阴十字星"
         
         # 高开低走
-        if abc.open > abc.close and abc.a == 0 and abc.c < 2 * abc.b:
+        # 条件：阴线且下影线 < 2B，且 (A==0 或 A<3B)
+        if (abc.open > abc.close and
+            abc.c < 2 * abc.b and
+            (abc.a == 0 or abc.a < 3 * abc.b)):
             return "高开低走"
         
         # 触底反弹十字星

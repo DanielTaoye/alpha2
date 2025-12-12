@@ -3138,14 +3138,15 @@ function displayBacktestResult(data) {
     backtestResult.innerHTML = html;
 }
 
-// 启动自动刷新（每分钟更新一次最新K线）
+// 启动自动刷新（每5分钟更新一次最新数据）
 function startAutoRefresh() {
     // 清除已有的定时器
     stopAutoRefresh();
     
-    console.log('[自动刷新] 启动定时器，每60秒更新一次最新K线');
+    const refreshIntervalMs = 5 * 60 * 1000; // 5分钟
+    console.log(`[自动刷新] 启动定时器，每${refreshIntervalMs / 60000}分钟更新一次最新数据`);
     
-    // 设置定时器，每60秒更新一次
+    // 设置定时器，每5分钟更新一次
     autoRefreshInterval = setInterval(async () => {
         if (currentPeriod === 'day' && currentTableName && chart) {
             console.log('[自动刷新] 开始更新最新K线数据...');
@@ -3158,7 +3159,7 @@ function startAutoRefresh() {
             console.log('[自动刷新] 条件不满足，跳过更新');
             stopAutoRefresh();
         }
-    }, 60000); // 60秒
+    }, refreshIntervalMs);
 }
 
 // 停止自动刷新
@@ -3181,12 +3182,10 @@ async function refreshLatestKline() {
             return;
         }
         
-        // 获取当前图表配置
         const currentOption = chart.getOption();
         const currentDates = currentOption.xAxis[0].data;
         const currentValues = currentOption.series[0].data;
         
-        // 【修复】找到成交量series（通过name查找）
         let volumeSeries = null;
         for (let series of currentOption.series) {
             if (series.name === '成交量') {
@@ -3200,164 +3199,137 @@ async function refreshLatestKline() {
             return;
         }
         
-        // 记录当前视图状态，用于刷新后保持用户的缩放/拖动位置
         const viewState = captureViewState(currentOption);
 
         console.log('[刷新最新K线] 找到成交量series，数据长度:', volumeSeries.data.length);
         
-        // 获取最新K线的日期
-        const latestDate = latestKlineData.time.split(' ')[0];
-        
-        // 查找该日期在当前数据中的位置
-        const existingIndex = currentDates.findIndex(date => {
-            return date.split(' ')[0] === latestDate;
+        const baseKlineData = currentDates.map((date, index) => {
+            const value = currentValues[index];
+            const volumeData = volumeSeries.data[index];
+            return {
+                time: date,
+                open: value[0],
+                close: value[1],
+                low: value[2],
+                high: value[3],
+                volume: volumeData,
+                liangbi: 0,
+                weibi: 0
+            };
         });
         
+        const latestDate = latestKlineData.time.split(' ')[0];
+        const existingIndex = currentDates.findIndex(date => date.split(' ')[0] === latestDate);
+        
         let needUpdate = false;
-        let klineData = [];
+        let klineData = baseKlineData;
         
         if (existingIndex >= 0) {
-            // 如果已存在，检查数据是否有变化
             const existingValue = currentValues[existingIndex];
             const existingVolume = volumeSeries.data[existingIndex];
             
-            if (existingValue[0] !== latestKlineData.open || 
+            if (
+                existingValue[0] !== latestKlineData.open ||
                 existingValue[1] !== latestKlineData.close ||
                 existingValue[2] !== latestKlineData.low ||
                 existingValue[3] !== latestKlineData.high ||
-                existingVolume !== latestKlineData.volume) {  // 【新增】也检查成交量变化
-                
+                existingVolume !== latestKlineData.volume
+            ) {
                 console.log('[刷新最新K线] 数据有变化，更新图表');
                 needUpdate = true;
-                
-                // 重建完整的K线数据
-                klineData = currentDates.map((date, index) => {
-                    if (index === existingIndex) {
-                        return latestKlineData;
-                    } else {
-                        const value = currentValues[index];
-                        const volumeData = volumeSeries.data[index];  // 【修复】使用找到的成交量series
-                        return {
-                            time: date,
-                            open: value[0],
-                            close: value[1],
-                            low: value[2],
-                            high: value[3],
-                            volume: volumeData,
-                            liangbi: 0,  // 历史数据的liangbi和weibi不重要，设为0
-                            weibi: 0
-                        };
-                    }
-                });
-                
-                // 验证成交量数据
-                const volumeCount = klineData.filter(k => k.volume && k.volume > 0).length;
-                console.log('[刷新最新K线] 重建后K线数据量:', klineData.length, '有成交量的数据:', volumeCount);
+                klineData = baseKlineData.map((item, index) => index === existingIndex ? latestKlineData : item);
             } else {
                 console.log('[刷新最新K线] 数据未变化，跳过更新');
             }
         } else {
-            // 如果不存在，说明是新的交易日
             console.log('[刷新最新K线] 发现新交易日，追加数据');
             needUpdate = true;
-            
-            // 重建完整的K线数据并追加
-            klineData = currentDates.map((date, index) => {
-                const value = currentValues[index];
-                const volumeData = volumeSeries.data[index];  // 【修复】使用找到的成交量series
-                return {
-                    time: date,
-                    open: value[0],
-                    close: value[1],
-                    low: value[2],
-                    high: value[3],
-                    volume: volumeData,
-                    liangbi: 0,  // 历史数据的liangbi和weibi不重要，设为0
-                    weibi: 0
-                };
-            });
-            klineData.push(latestKlineData);
-            
-            // 验证成交量数据
-            const volumeCount = klineData.filter(k => k.volume && k.volume > 0).length;
-            console.log('[刷新最新K线] 重建后K线数据量:', klineData.length, '有成交量的数据:', volumeCount);
+            klineData = [...baseKlineData, latestKlineData];
         }
         
+        let macdData = window.currentMACDData;
+        let maData = window.currentMAData;
+        
         if (needUpdate) {
-            // 重新计算MA和MACD
             console.log('[刷新最新K线] 重新计算技术指标...');
             console.log('[刷新最新K线] K线数据长度:', klineData.length);
-            const macdData = calculateMACD(klineData);
-            const maData = calculateMA(klineData, [5, 10, 20]);
+            macdData = calculateMACD(klineData);
+            maData = calculateMA(klineData, [5, 10, 20]);
             console.log('[刷新最新K线] MA5长度:', maData.ma5?.length, 'MA10长度:', maData.ma10?.length, 'MA20长度:', maData.ma20?.length);
             
-            // 更新全局数据
             window.currentMACDData = macdData;
             window.currentMAData = maData;
-            
-            // 更新预测成交量
-            try {
-                const predicted = await fetchPredictedVolume(currentTableName);
-                predictedVolume = predicted;
-                console.log('[刷新最新K线] 预测成交量已更新:', predictedVolume);
-            } catch (error) {
-                console.error('[刷新最新K线] 更新预测成交量失败:', error);
+        } else {
+            console.log('[刷新最新K线] K线无变化，复用已有技术指标');
+        }
+        
+        let predictedVolumeChanged = false;
+        try {
+            const predicted = await fetchPredictedVolume(currentTableName);
+            if (predicted !== predictedVolume) {
+                predictedVolumeChanged = true;
             }
+            predictedVolume = predicted;
+            console.log('[刷新最新K线] 预测成交量已更新:', predictedVolume);
+        } catch (error) {
+            console.error('[刷新最新K线] 更新预测成交量失败:', error);
+        }
+        
+        let latestCRUpdated = false;
+        try {
+            const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    stockCode: currentStockCode,
+                    tableName: currentTableName
+                })
+            });
             
-            // 获取最新的CR点数据（仅获取当天的，不重新计算历史数据）
-            try {
-                const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        stockCode: currentStockCode,
-                        tableName: currentTableName
-                    })
-                });
+            const latestResult = await latestResponse.json();
+            console.log('[刷新最新K线] 获取最新CR点数据成功:', latestResult);
+            
+            if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
+                const latestData = latestResult.data;
                 
-                const latestResult = await latestResponse.json();
-                console.log('[刷新最新K线] 获取最新CR点数据成功:', latestResult);
-                
-                if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
-                    const latestData = latestResult.data;
+                if (latestData.date) {
+                    if (latestData.strategy1) {
+                        if (!crPointsData.strategy1_scores) {
+                            crPointsData.strategy1_scores = {};
+                        }
+                        crPointsData.strategy1_scores[latestData.date] = latestData.strategy1;
+                        latestCRUpdated = true;
+                        console.log(`[刷新最新K线] 更新策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
+                    }
                     
-                    // 更新策略评分（如果有）
-                    if (latestData.date) {
-                        // 更新策略1评分
-                        if (latestData.strategy1) {
-                            if (!crPointsData.strategy1_scores) {
-                                crPointsData.strategy1_scores = {};
-                            }
-                            crPointsData.strategy1_scores[latestData.date] = latestData.strategy1;
-                            console.log(`[刷新最新K线] 更新策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
+                    if (latestData.strategy2) {
+                        if (!crPointsData.strategy2_scores) {
+                            crPointsData.strategy2_scores = {};
                         }
-                        
-                        // 更新策略2评分
-                        if (latestData.strategy2) {
-                            if (!crPointsData.strategy2_scores) {
-                                crPointsData.strategy2_scores = {};
-                            }
-                            crPointsData.strategy2_scores[latestData.date] = latestData.strategy2;
-                            console.log(`[刷新最新K线] 更新策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
-                        }
+                        crPointsData.strategy2_scores[latestData.date] = latestData.strategy2;
+                        latestCRUpdated = true;
+                        console.log(`[刷新最新K线] 更新策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
                     }
                 }
-            } catch (latestError) {
-                console.warn('[刷新最新K线] 获取最新CR点失败:', latestError);
             }
-            
-            // 重新渲染图表，保留现有的CR点数据
+        } catch (latestError) {
+            console.warn('[刷新最新K线] 获取最新CR点失败:', latestError);
+        }
+        
+        const shouldRerender = needUpdate || predictedVolumeChanged || latestCRUpdated;
+        if (shouldRerender) {
             console.log('[刷新最新K线] 重新渲染图表...');
             await renderChart(klineData, {}, 'day', viewState);
             
-            // 更新CR点显示
             if (chart) {
                 updateChartWithCRPoints();
             }
             
             console.log('[刷新最新K线] ✅ 更新完成');
+        } else {
+            console.log('[刷新最新K线] 无需重渲染，保持当前视图');
         }
         
     } catch (error) {

@@ -788,7 +788,7 @@ def identify_bearish_patterns(stock_code: str, daily_data: List[Dict], target_id
                 A = today['high'] - today['open']
                 B = today['open'] - today['close']
                 C = today['close'] - today['low']
-                if A > 0 or (A == 0 and C < 2 * B):
+                if A > 0 or (C < 2 * B and (A == 0 or A < 3 * B)):
                     matched_patterns.append("T字板/一字板+带上影阴线/高开回落阴线")
     
     # 9. 乌云盖顶

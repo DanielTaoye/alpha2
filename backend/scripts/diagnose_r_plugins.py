@@ -375,9 +375,11 @@ def diagnose_deviation(stock_code: str, date_str: str, current_data: Dict,
         # 5. 高开低走
         cond1 = amplitude > amplitude_threshold
         cond2 = not is_bullish
-        cond3 = A == 0
+        cond3_a = A == 0
+        cond3_b = A < 3 * B
         cond4 = C_shadow < 2 * B
-        print(f"  [高开低走] 振幅>{amplitude_threshold}%:{cond1}, 阴线:{cond2}, A==0:{cond3}, C<2B:{cond4}")
+        cond3 = cond3_a or cond3_b
+        print(f"  [高开低走] 振幅>{amplitude_threshold}%:{cond1}, 阴线:{cond2}, A==0:{cond3_a}, A<3B:{cond3_b}, C<2B:{cond4}")
         if cond1 and cond2 and cond3 and cond4:
             matched_patterns.append("高开低走")
             print(f"     ✅ 命中!")
