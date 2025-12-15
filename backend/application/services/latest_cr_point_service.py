@@ -622,7 +622,8 @@ class LatestCRPointService:
                 ma_data,
                 macd_data,
                 current_index,
-                kline_data
+                kline_data,
+                last_valid_point_type=None  # 单日计算不维护序列，这里置None
             )
             
             return {

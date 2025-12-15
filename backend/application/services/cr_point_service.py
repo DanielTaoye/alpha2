@@ -126,7 +126,8 @@ class CRPointService:
                 ma_data,  # 传入MA数据（用于高位发R插件）
                 macd_data,  # 传入MACD数据（用于高位发R插件）
                 index,  # 传入当前K线索引（用于高位发R插件）
-                kline_data  # 传入完整K线数据（用于箱体回踩插件）
+                kline_data,  # 传入完整K线数据（用于箱体回踩插件）
+                last_valid_point_type=last_valid_point_type  # 传入最近有效点类型，供插件2使用
             )
             
             # 【重要】先判断R点能否真正添加（考虑CR关系规则）
