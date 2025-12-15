@@ -95,13 +95,6 @@ class RPointPluginService:
             triggered_plugins.append(plugin1)
             logger.info(f"[R点插件-乖离率偏离] {stock_code} {date}: {plugin1.reason}")
             return True, triggered_plugins
-        
-        # 插件2: 临近压力位滞涨
-        plugin2 = self._check_pressure_stagnation(stock_code, date, c_point_date)
-        if plugin2.triggered:
-            triggered_plugins.append(plugin2)
-            logger.info(f"[R点插件-临近压力位滞涨] {stock_code} {date}: {plugin2.reason}")
-            return True, triggered_plugins
 
         # 插件3: 强转弱且未反转
         plugin3_strong_to_weak = self._check_strong_to_weak_not_reversed(stock_code, date)
@@ -163,7 +156,14 @@ class RPointPluginService:
                 triggered_plugins.append(plugin10)
                 logger.info(f"[R点插件-高位滞涨+空头组合] {stock_code} {date}: {plugin10.reason}")
                 return True, triggered_plugins
-        
+
+        # 插件2: 临近压力位滞涨（放最后，避免缺C点影响其他插件）
+        plugin2 = self._check_pressure_stagnation(stock_code, date, c_point_date)
+        if plugin2.triggered:
+            triggered_plugins.append(plugin2)
+            logger.info(f"[R点插件-临近压力位滞涨] {stock_code} {date}: {plugin2.reason}")
+            return True, triggered_plugins
+
         return False, triggered_plugins
     
     def _check_deviation(self, stock_code: str, date: datetime) -> RPointPluginResult:
@@ -1577,6 +1577,29 @@ class RPointPluginService:
             return ((current_data.high - current_data.low) / current_data.open) * 100
 
         return 0.0
+
+    # ========== 辅助工具，防止缺失方法导致插件异常 ==========
+    def _to_date_str(self, value) -> str:
+        """统一日期转字符串，兼容datetime/date/str，缺省用str(value)。"""
+        if isinstance(value, datetime):
+            return value.strftime('%Y-%m-%d')
+        if isinstance(value, date):
+            return value.strftime('%Y-%m-%d')
+        return str(value)
+
+    def _find_latest_c_before(self, date_str: str, stock_code: str):
+        """
+        占位实现：如需严格依赖历史C点，请补充实际查询逻辑。
+        当前返回None以避免因缺方法导致插件中断。
+        """
+        return None
+
+    def _is_previous_point_r(self, c_date_str: str, stock_code: str) -> bool:
+        """
+        占位实现：判断C点前最近是否为R点。
+        当前返回False，意味着相关插件（如临近压力位滞涨）不会触发但也不会抛异常。
+        """
+        return False
     
     def _get_pressure_threshold(self, stock_nature: str) -> float:
         """
