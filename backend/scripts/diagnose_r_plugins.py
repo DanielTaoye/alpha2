@@ -1038,7 +1038,7 @@ def diagnose_downtrend_break(stock_code: str, date_str: str, current_data: Dict,
             print("  当前及前3日未发现死叉转换 ❌")
 
 
-def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
+def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, last_valid_point_type: str = None):
     """完整诊断一只股票"""
     stock_code = stock_info['code']
     stock_name = stock_info['name']
@@ -1049,6 +1049,8 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
     print(f"   日期: {date_str}")
     if c_point_date:
         print(f"   C点日期: {c_point_date}")
+    if last_valid_point_type:
+        print(f"   上一有效点类型: {last_valid_point_type}")
     print("=" * 80)
     
     # 获取当日数据
@@ -1116,7 +1118,7 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
         check_date = datetime.strptime(date_str, '%Y-%m-%d')
         
         is_r_point, r_plugins = r_plugin_service.check_r_point(
-            stock_code, check_date, c_point_datetime
+            stock_code, check_date, c_point_datetime, last_valid_point_type=last_valid_point_type
         )
         
         if is_r_point:
@@ -1205,7 +1207,8 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None):
                 is_r_point2, r_plugins2 = r_plugin_service2.check_r_point(
                     stock_code, check_date, c_point_datetime,
                     ma_data=ma_data, macd_data=macd_data,
-                    current_index=target_index, kline_data=k_objs
+                    current_index=target_index, kline_data=k_objs,
+                    last_valid_point_type=last_valid_point_type
                 )
                 
                 print("\n🛰 携带MA/MACD/索引的R点重检结果")
@@ -1245,6 +1248,7 @@ def main():
     parser.add_argument('stock', help='股票名称或代码，如: 东华软件 或 SZ002065')
     parser.add_argument('date', help='日期，格式: YYYY-MM-DD，如: 2025-02-21')
     parser.add_argument('-c', '--c_point', help='C点日期(可选)，格式: YYYY-MM-DD', default=None)
+    parser.add_argument('-p', '--prev_point_type', help='上一有效点类型，可选: R 或 C', default=None)
     
     args = parser.parse_args()
     
@@ -1268,7 +1272,7 @@ def main():
         return
     
     # 诊断
-    diagnose_stock(stock_info, args.date, args.c_point)
+    diagnose_stock(stock_info, args.date, args.c_point, args.prev_point_type)
 
 
 if __name__ == '__main__':
