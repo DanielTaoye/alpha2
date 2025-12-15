@@ -168,6 +168,24 @@ class CRPointService:
                 volume_type = volume_types.get(date_str) if volume_types else None
                 bullish_pattern = bullish_patterns.get(date_str) if bullish_patterns else None
                 
+                # 策略1是否被减分插件否决（赔率高胜率低/风险K线/不追涨）
+                strategy1_penalty_plugins = {"赔率高胜率低", "风险K线", "不追涨"}
+                strategy1_reject_by_penalty = False
+                if strategy1_scores.get(date_str):
+                    s1_info = strategy1_scores[date_str]
+                    plugins = s1_info.get('plugins') or []
+                    is_rejected_flag = s1_info.get('is_rejected', False)
+                    if is_rejected_flag:
+                        for p in plugins:
+                            try:
+                                name = p.get('pluginName') or p.get('plugin_name')
+                                triggered = p.get('triggered', False)
+                                if triggered and name in strategy1_penalty_plugins:
+                                    strategy1_reject_by_penalty = True
+                                    break
+                            except Exception:
+                                continue
+                
                 # 获取前30个交易日数据（用于判断低位）
                 daily_data_30 = []
                 if index >= 29:
@@ -197,7 +215,8 @@ class CRPointService:
                     bullish_pattern=bullish_pattern,
                     daily_data_30=daily_data_30,
                     index=index,
-                    prev_day_has_r=has_prev_valid_r
+                    prev_day_has_r=has_prev_valid_r,
+                    strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty
                 )
                 
                 # 记录所有K线的策略2评分（用于前端显示）

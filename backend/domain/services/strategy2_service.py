@@ -27,7 +27,8 @@ class Strategy2Service:
                        bullish_pattern: Optional[str],
                        daily_data_30: List[Dict],  # 前30个交易日数据
                        index: int,
-                       prev_day_has_r: bool = False) -> Tuple[bool, float, str]:
+                       prev_day_has_r: bool = False,
+                       strategy1_reject_by_penalty_plugins: bool = False) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -41,6 +42,7 @@ class Strategy2Service:
             bullish_pattern: 多头K线组合
             daily_data_30: 前30个交易日数据（用于判断低位）
             index: 当前K线在数据中的索引
+            strategy1_reject_by_penalty_plugins: 策略1被减分插件否决（赔率高胜率低/风险K线/不追涨）
             
         Returns:
             (是否触发, 总分, 详细原因)
@@ -85,6 +87,12 @@ class Strategy2Service:
         if prev_day_has_r and pre_case3_score >= threshold:
             total_score -= 45
             details.append("策略2取消发C情形3扣45分(前一日有R)")
+        
+        # 情形4：策略2本身达到阈值，且策略1被减分插件（赔率高胜率低/风险K线/不追涨）否决，则再扣55分
+        pre_case4_score = total_score
+        if strategy1_reject_by_penalty_plugins and pre_case4_score >= threshold:
+            total_score -= 55
+            details.append("策略2取消发C情形4扣55分(策略1被减分插件否决)")
         
         # 判断是否触发
         is_triggered = total_score >= threshold

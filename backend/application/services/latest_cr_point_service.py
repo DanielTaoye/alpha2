@@ -551,7 +551,9 @@ class LatestCRPointService:
                 volume_type,
                 bullish_pattern,  # 🔥 传入多头K线组合
                 daily_data_30,
-                current_index
+                current_index,
+                prev_day_has_r=False,
+                strategy1_reject_by_penalty_plugins=False
             )
             
             return {
