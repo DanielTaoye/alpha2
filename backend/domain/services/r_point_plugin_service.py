@@ -201,10 +201,10 @@ class RPointPluginService:
                 logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 无daily_chance数据，跳过检查")
                 return RPointPluginResult("乖离率偏离", False, "")
             
-            # 获取历史数据
+            # 获取历史数据（需要至少21个前序交易日，用于“前20日+1”基准价）
             prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            if len(prev_dates) < 20:
-                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足20天({len(prev_dates)}天)")
+            if len(prev_dates) < 21:
+                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足21天({len(prev_dates)}天)")
                 return RPointPluginResult("乖离率偏离", False, "")
             
             # 判断当日是否放量（XYH）或（XYZH）
@@ -235,14 +235,14 @@ class RPointPluginService:
             
             # 获取前N日数据
             prev_data_list = []
-            for prev_date in prev_dates[:20]:
+            for prev_date in prev_dates[:25]:
                 data = self._daily_cache.get(prev_date)
                 if not data:
                     data = self.daily_repo.find_by_date(stock_code, prev_date)
                 if data:
                     prev_data_list.append(data)
             
-            if len(prev_data_list) < 5:
+            if len(prev_data_list) < 6:
                 return RPointPluginResult("乖离率偏离", False, "")
             
             # 计算涨跌幅：使用当前收盘价相对前一日收盘价（不依赖数据库涨跌幅字段）
@@ -289,8 +289,8 @@ class RPointPluginService:
                         )
             
             # === 条件2: 前3日涨幅过大（起止收盘比） ===
-            if len(prev_data_list) >= 3:
-                prev_3_day = prev_data_list[2]
+            if len(prev_data_list) >= 4:
+                prev_3_day = prev_data_list[3]
                 if prev_3_day.close and prev_3_day.close > 0:
                     gain_3days = (current_data.close - prev_3_day.close) / prev_3_day.close * 100
                     threshold_3days = 15 if is_main_board else 20
@@ -316,8 +316,8 @@ class RPointPluginService:
                                 )
             
             # === 条件3: 前5日涨幅过大（起止收盘比） ===
-            if len(prev_data_list) >= 5:
-                prev_5_day = prev_data_list[4]
+            if len(prev_data_list) >= 6:
+                prev_5_day = prev_data_list[5]
                 if prev_5_day.close and prev_5_day.close > 0:
                     gain_5days = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
                     threshold_5days = 20 if is_main_board else 25
@@ -343,9 +343,9 @@ class RPointPluginService:
                                 )
             
             # === 条件4: 连续5连阳+涨幅过大（起止收盘比） ===
-            if len(prev_data_list) >= 5:
+            if len(prev_data_list) >= 6:
                 all_bullish = all(prev_data_list[i].close >= prev_data_list[i].open for i in range(5))
-                prev_5_day = prev_data_list[4]
+                prev_5_day = prev_data_list[5]
                 if all_bullish and prev_5_day.close and prev_5_day.close > 0:
                     gain_5days_yang = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
                     threshold_yang = 20 if is_main_board else 25
@@ -371,8 +371,8 @@ class RPointPluginService:
                                 )
             
             # === 条件5: 前15日涨幅>50%（起止收盘比） ===
-            if len(prev_data_list) >= 15:
-                prev_15_day = prev_data_list[14]
+            if len(prev_data_list) >= 16:
+                prev_15_day = prev_data_list[15]
                 if prev_15_day.close and prev_15_day.close > 0:
                     gain_15days = (current_data.close - prev_15_day.close) / prev_15_day.close * 100
                     if gain_15days > 50:
@@ -397,8 +397,8 @@ class RPointPluginService:
                             )
             
             # === 条件6: 前20日涨幅>50%（起止收盘比） ===
-            if len(prev_data_list) >= 20:
-                prev_20_day = prev_data_list[19]
+            if len(prev_data_list) >= 21:
+                prev_20_day = prev_data_list[20]
                 if prev_20_day.close and prev_20_day.close > 0:
                     gain_20days = (current_data.close - prev_20_day.close) / prev_20_day.close * 100
                     if gain_20days > 50:
@@ -796,7 +796,7 @@ class RPointPluginService:
                     result.append(date_str)
 
             # 如果缓存中没有足够数据，从数据库查询真实交易日
-            if len(result) < 20 and stock_code:
+            if len(result) < 25 and stock_code:
                 try:
                     # 从数据库查询前N个交易日
                     table_name = f"basic_data_{stock_code.lower()}"
@@ -810,7 +810,7 @@ class RPointPluginService:
                             WHERE DATE(shi_jian) < %s
                               AND peroid_type = '1day'
                             ORDER BY trade_date DESC
-                            LIMIT 20
+                            LIMIT 25
                         """
                         cursor.execute(sql, (current_date_str,))
                         rows = cursor.fetchall()
