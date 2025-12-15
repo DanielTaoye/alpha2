@@ -127,8 +127,8 @@ class RPointPluginService:
         # 插件6: 跌破支撑位
         plugin6 = self._check_break_support(stock_code, date)
         if plugin6.triggered:
-            triggered_plugins.append(plugin5)
-            logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin5.reason}")
+            triggered_plugins.append(plugin6)
+            logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin6.reason}")
             return True, triggered_plugins
         
         # 插件7: 高位发R

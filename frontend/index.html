@@ -8,18 +8,18 @@
     <link rel="stylesheet" href="css/styles.css?v=20251118020">
     <!-- ECharts 多CDN备份加载方案 -->
     <script>
-        // ECharts CDN列表（按优先级排序：国内CDN优先）
+        // ECharts CDN列表（按可靠性排序：最可靠的CDN优先）
         const echartsUrls = [
+            'https://unpkg.com/echarts@5.4.3/dist/echarts.min.js',            // 国际：unpkg（最可靠）
+            'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js', // 国际：jsdelivr（备用）
+            'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js', // 国际：cloudflare（备用）
             'https://lib.baomitu.com/echarts/5.4.3/echarts.min.js',           // 国内：360前端静态资源库
-            'https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js', // 国内：BootCDN
-            'https://unpkg.com/echarts@5.4.3/dist/echarts.min.js',            // 国际：unpkg
-            'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js', // 国际：jsdelivr
-            'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js' // 国际：cloudflare
+            'https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js'  // 国内：BootCDN
         ];
 
         let currentCdnIndex = 0;
         let loadStartTime = Date.now();
-        const TIMEOUT_PER_CDN = 5000; // 每个CDN尝试超时时间（毫秒）
+        const TIMEOUT_PER_CDN = 8000; // 每个CDN尝试超时时间（毫秒）- 增加到8秒以应对慢速网络
         window.echartsLoadStatus = 'loading'; // 全局加载状态
 
         function isValidECharts() {
@@ -56,7 +56,14 @@
                     console.warn(`⏱️ ECharts加载超时 (${TIMEOUT_PER_CDN}ms): ${echartsUrls[currentCdnIndex]}`);
                     script.onerror = null;
                     script.onload = null;
-                    document.head.removeChild(script);
+                    // 安全地移除script标签
+                    try {
+                        if (script.parentNode) {
+                            script.parentNode.removeChild(script);
+                        }
+                    } catch (e) {
+                        console.warn('移除超时script标签失败:', e);
+                    }
                     currentCdnIndex++;
                     loadECharts(); // 尝试下一个CDN
                 }
@@ -76,6 +83,15 @@
                         window.echartsLoadStatus = 'success';
                     } else {
                         console.warn(`⚠️ ECharts脚本加载但验证失败: ${echartsUrls[currentCdnIndex]}`);
+                        // 清理无效的script标签
+                        try {
+                            const failedScript = document.querySelector(`script[src="${echartsUrls[currentCdnIndex]}"]`);
+                            if (failedScript && failedScript.parentNode) {
+                                failedScript.parentNode.removeChild(failedScript);
+                            }
+                        } catch (e) {
+                            console.warn('清理script标签失败:', e);
+                        }
                         window.echarts = undefined; // 清除无效对象
                         currentCdnIndex++;
                         loadECharts(); // 尝试下一个CDN
@@ -88,6 +104,14 @@
                 
                 clearTimeout(timeoutId);
                 console.warn(`❌ ECharts加载失败: ${echartsUrls[currentCdnIndex]}`, e);
+                // 清理失败的script标签
+                try {
+                    if (script.parentNode) {
+                        script.parentNode.removeChild(script);
+                    }
+                } catch (err) {
+                    console.warn('清理失败script标签时出错:', err);
+                }
                 currentCdnIndex++;
                 loadECharts(); // 尝试下一个CDN
             };
