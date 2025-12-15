@@ -819,7 +819,8 @@ class BearishPatternService:
             return None
         
         is_main = KLinePatternService.is_main_board(stock_code)
-        prev_change_threshold = 4.0 if is_main else 6.0
+        # 主板阈值改为3.5%，非主板仍为6%
+        prev_change_threshold = 3.5 if is_main else 6.0
         if prev_change_pct <= prev_change_threshold:
             return None
         

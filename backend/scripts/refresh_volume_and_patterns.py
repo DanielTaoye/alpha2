@@ -945,6 +945,39 @@ def identify_bearish_patterns(stock_code: str, daily_data: List[Dict], target_id
                 if is_today_negative and today['close'] < start_positive_open:
                     matched_patterns.append("吞没阴线（1-3根最终吞没一根阳线）")
     
+    # 15. 强转弱
+    # 条件：
+    # - 前一日为涨幅大于4%（主板）/6%（非主板）的阳线
+    # - 今日为高开低走：开盘价>收盘价，C<2B，且(A==0或A<3B)
+    # - 今日实体跌幅≥3%（相对开盘）
+    # - 今日开盘价 > 前一日收盘价
+    # - 今日收盘价 < (前一日开盘价 + 前一日收盘价) / 2
+    is_prev_positive = prev_day['close'] > prev_day['open']
+    if is_prev_positive:
+        prev_change = (prev_day['close'] - prev_day['open']) / prev_day['open'] if prev_day['open'] > 0 else 0
+        prev_change_pct = prev_change * 100
+        
+        is_main = KLinePatternService.is_main_board(stock_code)
+        # 主板阈值改为3.5%，非主板仍为6%
+        prev_change_threshold = 3.5 if is_main else 6.0
+        
+        if prev_change_pct > prev_change_threshold:
+            is_today_negative = today['close'] < today['open']
+            if is_today_negative:
+                today_abc = KLinePatternService.calculate_abc(
+                    today['open'], today['close'], today['high'], today['low']
+                )
+                
+                # 高开低走形态约束
+                if today_abc.c < 2 * today_abc.b and (today_abc.a == 0 or today_abc.a < 3 * today_abc.b):
+                    # 实体跌幅（相对开盘）需 ≥ 3%
+                    body_pct = ((today['open'] - today['close']) / today['open'] * 100) if today['open'] > 0 else 0
+                    if body_pct >= 3.0:
+                        # 高开且收盘位于前一日实体下半部分
+                        prev_mid = (prev_day['open'] + prev_day['close']) / 2
+                        if today['open'] > prev_day['close'] and today['close'] < prev_mid:
+                            matched_patterns.append("强转弱")
+    
     return matched_patterns
 
 
@@ -953,10 +986,26 @@ def batch_update_records(conn, updates: List[Dict]) -> int:
     if not updates:
         return 0
     
-    cursor = conn.cursor()
-    success_count = 0
+    # 保活一次，避免长连接在批量更新前被踢掉
+    try:
+        conn.ping(reconnect=True)
+    except Exception as e:
+        logger.warning(f"⚠️ ping 主库失败: {e}")
+    # 降低锁等待风险与卡死：缩短锁等待时间，分批提交
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SET SESSION innodb_lock_wait_timeout=5")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ 设置锁等待超时失败: {e}")
+        cursor = conn.cursor()
+    conn.autocommit(False)
     
-    for update in updates:
+    success_count = 0
+    batch_size = 100
+    last_commit_idx = 0
+    
+    for idx, update in enumerate(updates, 1):
         try:
             sql = """
                 UPDATE b_daily_chance 
@@ -974,10 +1023,18 @@ def batch_update_records(conn, updates: List[Dict]) -> int:
                 update['date']
             ))
             success_count += 1
+            
+            # 分批提交，避免长事务卡住
+            if idx % batch_size == 0:
+                conn.commit()
+                last_commit_idx = idx
+                logger.info(f"  💾 分批提交进度: {idx}/{len(updates)}")
         except Exception as e:
             logger.debug(f"更新失败 {update['stock_code']} {update['date']}: {e}")
     
-    conn.commit()
+    # 提交剩余
+    if last_commit_idx < len(updates):
+        conn.commit()
     return success_count
 
 
