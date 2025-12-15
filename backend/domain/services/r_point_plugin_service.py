@@ -102,57 +102,57 @@ class RPointPluginService:
             logger.info(f"[R点插件-临近压力位滞涨] {stock_code} {date}: {plugin2.reason}")
             return True, triggered_plugins
 
-        # 插件2.1: 强转弱且未反转
-        plugin2_1 = self._check_strong_to_weak_not_reversed(stock_code, date)
-        if plugin2_1.triggered:
-            triggered_plugins.append(plugin2_1)
-            logger.info(f"[R点插件-强转弱未反转] {stock_code} {date}: {plugin2_1.reason}")
+        # 插件3: 强转弱且未反转
+        plugin3_strong_to_weak = self._check_strong_to_weak_not_reversed(stock_code, date)
+        if plugin3_strong_to_weak.triggered:
+            triggered_plugins.append(plugin3_strong_to_weak)
+            logger.info(f"[R点插件-强转弱未反转] {stock_code} {date}: {plugin3_strong_to_weak.reason}")
             return True, triggered_plugins
         
-        # 插件3: 基本面突发利空
-        plugin3 = self._check_fundamental_negative(stock_code, date)
-        if plugin3.triggered:
-            triggered_plugins.append(plugin3)
-            logger.info(f"[R点插件-基本面突发利空] {stock_code} {date}: {plugin3.reason}")
+        # 插件4: 基本面突发利空
+        plugin4 = self._check_fundamental_negative(stock_code, date)
+        if plugin4.triggered:
+            triggered_plugins.append(plugin4)
+            logger.info(f"[R点插件-基本面突发利空] {stock_code} {date}: {plugin4.reason}")
             return True, triggered_plugins
-        
-        # 插件4: 上冲乏力
+
+        # 插件5: 上冲乏力
         if c_point_date:
-            plugin4 = self._check_weak_breakout(stock_code, date, c_point_date)
-            if plugin4.triggered:
-                triggered_plugins.append(plugin4)
-                logger.info(f"[R点插件-上冲乏力] {stock_code} {date}: {plugin4.reason}")
+            plugin5 = self._check_weak_breakout(stock_code, date, c_point_date)
+            if plugin5.triggered:
+                triggered_plugins.append(plugin5)
+                logger.info(f"[R点插件-上冲乏力] {stock_code} {date}: {plugin5.reason}")
                 return True, triggered_plugins
-        
-        # 插件5: 跌破支撑位
-        plugin5 = self._check_break_support(stock_code, date)
-        if plugin5.triggered:
+
+        # 插件6: 跌破支撑位
+        plugin6 = self._check_break_support(stock_code, date)
+        if plugin6.triggered:
             triggered_plugins.append(plugin5)
             logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin5.reason}")
             return True, triggered_plugins
         
-        # 插件6: 高位发R
+        # 插件7: 高位发R
         if ma_data and macd_data and current_index is not None:
-            plugin6 = self._check_high_position_r(stock_code, date, ma_data, macd_data, current_index)
-            if plugin6.triggered:
-                triggered_plugins.append(plugin6)
-                logger.info(f"[R点插件-高位发R] {stock_code} {date}: {plugin6.reason}")
-                return True, triggered_plugins
-        
-        # 插件7: 箱体回踩被跌破
-        if macd_data and current_index is not None and kline_data is not None:
-            plugin7 = self._check_box_breakdown(stock_code, date, macd_data, current_index, kline_data)
+            plugin7 = self._check_high_position_r(stock_code, date, ma_data, macd_data, current_index)
             if plugin7.triggered:
                 triggered_plugins.append(plugin7)
-                logger.info(f"[R点插件-箱体回踩被跌破] {stock_code} {date}: {plugin7.reason}")
+                logger.info(f"[R点插件-高位发R] {stock_code} {date}: {plugin7.reason}")
                 return True, triggered_plugins
-        
-        # 插件8: 趋势向下+未放量跌破支撑+MACD死叉
-        if ma_data and macd_data and current_index is not None:
-            plugin8 = self._check_downtrend_break_support(stock_code, date, ma_data, macd_data, current_index)
+
+        # 插件8: 箱体回踩被跌破
+        if macd_data and current_index is not None and kline_data is not None:
+            plugin8 = self._check_box_breakdown(stock_code, date, macd_data, current_index, kline_data)
             if plugin8.triggered:
                 triggered_plugins.append(plugin8)
-                logger.info(f"[R点插件-趋势向下+未放量跌破支撑+MACD死叉] {stock_code} {date}: {plugin8.reason}")
+                logger.info(f"[R点插件-箱体回踩被跌破] {stock_code} {date}: {plugin8.reason}")
+                return True, triggered_plugins
+
+        # 插件9: 趋势向下+未放量跌破支撑+MACD死叉
+        if ma_data and macd_data and current_index is not None:
+            plugin9 = self._check_downtrend_break_support(stock_code, date, ma_data, macd_data, current_index)
+            if plugin9.triggered:
+                triggered_plugins.append(plugin9)
+                logger.info(f"[R点插件-趋势向下+未放量跌破支撑+MACD死叉] {stock_code} {date}: {plugin9.reason}")
                 return True, triggered_plugins
         
         return False, triggered_plugins
