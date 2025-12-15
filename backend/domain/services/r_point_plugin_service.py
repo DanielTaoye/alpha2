@@ -36,6 +36,7 @@ class RPointPluginService:
         # 数据缓存
         self._daily_cache = {}  # {date_str: DailyData}
         self._daily_chance_cache = {}  # {date_str: DailyChance}
+        self._cr_history_cache = {}  # {(stock_code, cutoff_date): {'c': [...], 'r': [...]}}
     
     def init_cache(self, stock_code: str, start_date: str, end_date: str):
         """
@@ -1587,19 +1588,110 @@ class RPointPluginService:
             return value.strftime('%Y-%m-%d')
         return str(value)
 
+    def _load_cr_history(self, stock_code: str, cutoff_date_str: str):
+        """
+        计算截止某日(含)之前的历史C/R点，结果缓存以复用。
+        仅用于插件2的辅助判断，性能要求不高。
+        为降低开销：
+        - 回溯窗口从400天缩短为180天
+        - 若k线或daily_chance缓存为空，直接返回空结果避免反复查询
+        """
+        cache_key = (stock_code, cutoff_date_str)
+        if cache_key in self._cr_history_cache:
+            return self._cr_history_cache[cache_key]
+        try:
+            from datetime import timedelta
+            from infrastructure.persistence.kline_repository_impl import KLineRepositoryImpl
+            from application.services.cr_point_service import CRPointService
+
+            cutoff_dt = datetime.strptime(cutoff_date_str, "%Y-%m-%d")
+            start_dt = cutoff_dt - timedelta(days=180)  # 缩短回溯窗口
+            table_name = f"basic_data_{stock_code.lower()}"
+
+            kline_repo = KLineRepositoryImpl()
+            kline_list = kline_repo.get_kline_data(
+                table_name=table_name,
+                period_type="day",
+                start_date=start_dt,
+                limit=2000,
+            )
+            # 无K线直接返回空
+            if not kline_list:
+                self._cr_history_cache[cache_key] = {"c": [], "r": []}
+                return self._cr_history_cache[cache_key]
+
+            # 过滤截止日及以前
+            kline_list = [k for k in kline_list if k.time.date() <= cutoff_dt.date()]
+            if not kline_list:
+                self._cr_history_cache[cache_key] = {"c": [], "r": []}
+                return self._cr_history_cache[cache_key]
+
+            cr_service = CRPointService()
+            cr_result = cr_service.analyze_cr_points(
+                stock_code=stock_code,
+                stock_name="",
+                kline_data=kline_list,
+            )
+            c_points = cr_result.get("c_points", []) or []
+            r_points = cr_result.get("r_points", []) or []
+            # 归一化 trigger_date 为 datetime，便于比较
+            def norm_points(points):
+                normed = []
+                for p in points:
+                    try:
+                        dt = p.trigger_date if hasattr(p, "trigger_date") else p.get("trigger_date") or p.get("triggerDate")
+                        if isinstance(dt, str):
+                            dt = datetime.strptime(dt.split(" ")[0], "%Y-%m-%d")
+                        normed.append((dt, p))
+                    except Exception:
+                        continue
+                return normed
+            self._cr_history_cache[cache_key] = {
+                "c": norm_points(c_points),
+                "r": norm_points(r_points),
+            }
+            return self._cr_history_cache[cache_key]
+        except Exception as e:
+            logger.warning(f"加载历史CR点失败({stock_code},{cutoff_date_str}): {e}")
+            self._cr_history_cache[cache_key] = {"c": [], "r": []}
+            return self._cr_history_cache[cache_key]
+
     def _find_latest_c_before(self, date_str: str, stock_code: str):
         """
-        占位实现：如需严格依赖历史C点，请补充实际查询逻辑。
-        当前返回None以避免因缺方法导致插件中断。
+        查找指定日期之前最近的C点（含date_str之前的所有K线，C本身必须早于date_str）。
         """
-        return None
+        history = self._load_cr_history(stock_code, date_str)
+        target_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        latest_c = None
+        for dt, c in history.get("c", []):
+            if dt and dt < target_dt:
+                if latest_c is None or dt > latest_c.trigger_date:
+                    latest_c = c if hasattr(c, "trigger_date") else c
+                    if hasattr(latest_c, "trigger_date"):
+                        latest_c.trigger_date = dt
+        return latest_c
 
     def _is_previous_point_r(self, c_date_str: str, stock_code: str) -> bool:
         """
-        占位实现：判断C点前最近是否为R点。
-        当前返回False，意味着相关插件（如临近压力位滞涨）不会触发但也不会抛异常。
+        判断给定C点前一个最近的点是否为R点。
         """
-        return False
+        if not c_date_str:
+            return False
+        history = self._load_cr_history(stock_code, c_date_str)
+        target_dt = datetime.strptime(c_date_str, "%Y-%m-%d")
+        # 合并C/R点，按时间排序
+        combined = []
+        for dt, c in history.get("c", []):
+            if dt and dt < target_dt:
+                combined.append((dt, "C"))
+        for dt, r in history.get("r", []):
+            if dt and dt < target_dt:
+                combined.append((dt, "R"))
+        if not combined:
+            return False
+        combined.sort(key=lambda x: x[0], reverse=True)
+        # 最近的一个点
+        return combined[0][1] == "R"
     
     def _get_pressure_threshold(self, stock_nature: str) -> float:
         """
