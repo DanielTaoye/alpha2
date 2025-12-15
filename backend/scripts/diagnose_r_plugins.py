@@ -20,6 +20,7 @@ import pymysql
 from infrastructure.persistence.database import DatabaseConnection
 from infrastructure.logging.logger import get_logger
 from domain.services.r_point_plugin_service import RPointPluginService
+from domain.services.kline_pattern_service import KLinePatternService
 
 logger = get_logger(__name__)
 
@@ -254,8 +255,8 @@ def diagnose_deviation(stock_code: str, date_str: str, current_data: Dict,
     print("📊 插件1: 乖离率偏离")
     print("=" * 80)
     
-    # 判断主板还是非主板
-    is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+    # 判断主板还是非主板（统一规则）
+    is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
     board_type = "主板" if is_main_board else "非主板(创业板/科创板)"
     print(f"  板块类型: {board_type}")
     
@@ -523,7 +524,7 @@ def diagnose_fundamental_negative(stock_code: str, date_str: str, current_data: 
     print("📊 插件3: 基本面突发利空")
     print("=" * 80)
     
-    is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+    is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
     limit_threshold = -9.9 if is_main_board else -19.8
     
     pre_close = current_data['pre_close']
@@ -586,7 +587,7 @@ def diagnose_weak_breakout(stock_code: str, date_str: str, current_data: Dict,
     
     # 检查前日涨幅
     if historical_data:
-        is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+        is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
         yesterday_threshold = 6 if is_main_board else 8
         yesterday = historical_data[0]
         yesterday_change = yesterday.get('change_pct', 0) or 0

@@ -51,6 +51,7 @@ class CRPointController:
             stock_name = data.get('stockName', '')
             table_name = data.get('tableName')
             period = data.get('period', 'day')
+            stock_nature = data.get('stockNature') or data.get('stock_nature')
             
             if not stock_code:
                 return jsonify(ResponseBuilder.error('股票代码不能为空')), 400
@@ -121,7 +122,8 @@ class CRPointController:
                 ma_data=ma_data,
                 macd_data=macd_data,
                 volume_types=volume_types,
-                bullish_patterns=bullish_patterns
+                bullish_patterns=bullish_patterns,
+                stock_nature=stock_nature
             )
             
             # 将MACD和MA数据添加到返回结果中

@@ -183,6 +183,10 @@ class StreamingScoreService:
         # 获取阈值
         strategy1_threshold = self.config_service.get_strategy1_threshold()
         strategy2_threshold = self.config_service.get_strategy2_threshold()
+        for s in stocks:
+            nature = s.get('nature', '波段')
+            s['s1_threshold'] = self.config_service.get_strategy1_threshold(nature)
+            s['s2_threshold'] = self.config_service.get_strategy2_threshold(nature)
         
         # 2. 分批处理
         total_batches = (total_stocks + self.batch_size - 1) // self.batch_size
@@ -239,8 +243,8 @@ class StreamingScoreService:
                 executor.submit(
                     self._calculate_stock_score,
                     stock,
-                    strategy1_threshold,
-                    strategy2_threshold
+                    stock.get('s1_threshold', strategy1_threshold),
+                    stock.get('s2_threshold', strategy2_threshold)
                 ): stock for stock in batch_stocks
             }
             
@@ -285,7 +289,7 @@ class StreamingScoreService:
             latest_cr_service = LatestCRPointService(kline_service, daily_chance_service)
             
             # 计算分数
-            result = latest_cr_service.calculate_latest_cr_points(stock_code, table_name)
+            result = latest_cr_service.calculate_latest_cr_points(stock_code, table_name, stock_nature=stock.get('nature'))
             
             if not result.get('success'):
                 logger.debug(f"计算失败: {stock_code} - {result.get('message', '未知错误')}")

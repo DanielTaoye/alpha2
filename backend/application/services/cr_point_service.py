@@ -63,7 +63,8 @@ class CRPointService:
     
     def analyze_cr_points(self, stock_code: str, stock_name: str, kline_data: List[KLineData],
                          ma_data: Optional[Dict] = None, macd_data: Optional[Dict] = None,
-                         volume_types: Optional[Dict] = None, bullish_patterns: Optional[Dict] = None) -> Dict[str, Any]:
+                         volume_types: Optional[Dict] = None, bullish_patterns: Optional[Dict] = None,
+                         stock_nature: Optional[str] = None) -> Dict[str, Any]:
         """
         实时分析K线数据的CR点（不存储）
         
@@ -75,10 +76,12 @@ class CRPointService:
             macd_data: MACD数据 (可选，用于策略2)
             volume_types: 成交量类型字典 {date_str: volume_type} (可选，用于策略2)
             bullish_patterns: 多头K线组合字典 {date_str: pattern} (可选，用于策略2)
+            stock_nature: 股性（短线/波段/中长线），为空则尝试从daily_chance推断
             
         Returns:
             分析结果统计
         """
+        resolved_nature = stock_nature
         # 性能优化：批量预加载数据到缓存
         if kline_data:
             # 计算数据日期范围（往前多取15天以支持插件查询历史数据）
@@ -91,6 +94,15 @@ class CRPointService:
             self.strategy_service.init_cache(stock_code, start_date, end_date)
             # 初始化R点插件缓存
             self.r_point_service.init_cache(stock_code, start_date, end_date)
+            
+            if resolved_nature is None and self.strategy_service._daily_chance_cache:
+                try:
+                    first_dc = next(iter(self.strategy_service._daily_chance_cache.values()))
+                    resolved_nature = getattr(first_dc, "stock_nature", None)
+                except StopIteration:
+                    resolved_nature = None
+        
+        resolved_nature = resolved_nature or '波段'
         
         c_points = []
         r_points = []
@@ -136,7 +148,8 @@ class CRPointService:
                 stock_code, 
                 kline.time,
                 historical_r_points=r_points,
-                historical_c_points=c_points
+            historical_c_points=c_points,
+            stock_nature=resolved_nature
             )
             
             # 记录所有K线的策略1评分和插件信息（用于前端显示）
@@ -216,7 +229,8 @@ class CRPointService:
                     daily_data_30=daily_data_30,
                     index=index,
                     prev_day_has_r=has_prev_valid_r,
-                    strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty
+                    strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty,
+                    stock_nature=resolved_nature
                 )
                 
                 # 记录所有K线的策略2评分（用于前端显示）
@@ -510,6 +524,7 @@ class CRPointService:
             'rejected_c_points': [rcp.to_dict() for rcp in rejected_c_points],
             'strategy2_c_points': [s2p.to_dict() for s2p in strategy2_c_points],  # 策略2的C点
             'strategy2_scores': strategy2_scores,  # 所有K线的策略2评分
-            'strategy1_scores': strategy1_scores  # 所有K线的策略1评分和插件信息
+            'strategy1_scores': strategy1_scores,  # 所有K线的策略1评分和插件信息
+            'stock_nature': resolved_nature
         }
 

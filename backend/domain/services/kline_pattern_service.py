@@ -52,28 +52,25 @@ class KLinePatternService:
     @staticmethod
     def is_main_board(stock_code: str) -> bool:
         """
-        判断是否为主板股票
+        判断是否为主板股票（统一规则）
         
-        Args:
-            stock_code: 股票代码，如 "SH600001" 或 "SZ000001"
-            
-        Returns:
-            True表示主板，False表示非主板（创业、科创）
+        规则：去掉 SH/SZ 前缀后，
+        - 60 开头 或 00 开头：主板
+        - 30 开头 或 68 开头：非主板
+        其他默认按主板处理
         """
-        # 去掉前缀，只取数字部分
-        code = stock_code.upper()
-        if code.startswith('SH') or code.startswith('SZ'):
-            code = code[2:]
-        
-        # 主板：600, 000开头
-        if code.startswith('600') or code.startswith('000'):
+        if not stock_code:
             return True
         
-        # 非主板：688（科创）, 300（创业）开头
-        if code.startswith('688') or code.startswith('300'):
+        code = stock_code.upper()
+        if code.startswith(('SH', 'SZ')):
+            code = code[2:]
+        
+        if code.startswith(('60', '00')):
+            return True
+        if code.startswith(('30', '68')):
             return False
         
-        # 默认按主板处理
         return True
     
     @staticmethod

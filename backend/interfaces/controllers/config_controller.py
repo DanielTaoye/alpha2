@@ -34,6 +34,8 @@ class ConfigController:
             market_type = data.get('market_type')
             pressure_distance_threshold = data.get('pressure_distance_threshold')
             high_position_gain_threshold = data.get('high_position_gain_threshold')
+            strategy1_nature_thresholds_raw = data.get('strategy1_nature_thresholds') or data.get('strategy1_thresholds')
+            strategy2_nature_thresholds_raw = data.get('strategy2_nature_thresholds') or data.get('strategy2_thresholds')
             
             # 参数验证
             if strategy1_threshold is not None:
@@ -71,6 +73,31 @@ class ConfigController:
                         return jsonify(ResponseBuilder.error('高位发R-涨幅阈值必须在0-100之间')), 400
                 except (ValueError, TypeError):
                     return jsonify(ResponseBuilder.error('高位发R-涨幅阈值必须是数字')), 400
+
+            def parse_nature_thresholds(raw_value, label):
+                if raw_value is None:
+                    return None, None
+                if not isinstance(raw_value, dict):
+                    return None, (jsonify(ResponseBuilder.error(f'{label}股性阈值必须是对象类型，例如 {{"短线":60,"波段":56}}')), 400)
+                parsed = {}
+                for nature, val in raw_value.items():
+                    if val is None:
+                        continue
+                    try:
+                        val_float = float(val)
+                    except (TypeError, ValueError):
+                        return None, (jsonify(ResponseBuilder.error(f'{label}股性[{nature}]阈值必须是数字')), 400)
+                    if val_float < 0 or val_float > 100:
+                        return None, (jsonify(ResponseBuilder.error(f'{label}股性[{nature}]阈值必须在0-100之间')), 400)
+                    parsed[nature] = val_float
+                return parsed, None
+
+            strategy1_nature_thresholds, error_resp = parse_nature_thresholds(strategy1_nature_thresholds_raw, '策略1')
+            if error_resp:
+                return error_resp
+            strategy2_nature_thresholds, error_resp = parse_nature_thresholds(strategy2_nature_thresholds_raw, '策略2')
+            if error_resp:
+                return error_resp
             
             # 更新配置
             updated_config = self.config_service.update_config(
@@ -78,7 +105,9 @@ class ConfigController:
                 strategy2_threshold=strategy2_threshold,
                 market_type=market_type,
                 pressure_distance_threshold=pressure_distance_threshold,
-                high_position_gain_threshold=high_position_gain_threshold
+                high_position_gain_threshold=high_position_gain_threshold,
+                strategy1_nature_thresholds=strategy1_nature_thresholds,
+                strategy2_nature_thresholds=strategy2_nature_thresholds
             )
             
             # 构建更新信息
@@ -93,6 +122,10 @@ class ConfigController:
                 update_info_parts.append(f'压力位距离阈值:{pressure_distance_threshold}%')
             if high_position_gain_threshold is not None:
                 update_info_parts.append(f'高位发R涨幅阈值:{high_position_gain_threshold}%')
+            if strategy1_nature_thresholds:
+                update_info_parts.append(f'策略1股性阈值:{strategy1_nature_thresholds}')
+            if strategy2_nature_thresholds:
+                update_info_parts.append(f'策略2股性阈值:{strategy2_nature_thresholds}')
             
             update_info = ', '.join(update_info_parts) if update_info_parts else '未改变'
             

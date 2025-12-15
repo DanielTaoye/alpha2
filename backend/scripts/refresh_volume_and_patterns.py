@@ -16,6 +16,7 @@
 import sys
 import os
 import csv
+import json
 import argparse
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -56,6 +57,7 @@ READONLY_DB_CONFIG = {
 
 # 股票列表文件
 STOCK_LIST_FILE = os.path.join(project_root, 'stock_list.csv')
+STOCK_CONFIG_FILE = os.path.join(backend_dir, 'infrastructure', 'config', 'stock_config.json')
 
 # 设置日志
 logging.basicConfig(
@@ -101,6 +103,43 @@ def load_stock_list_from_csv() -> List[Dict]:
         logger.error(f"❌ 读取CSV文件失败: {e}")
     
     logger.info(f"📊 从 CSV 加载了 {len(stocks)} 支股票")
+    return stocks
+
+
+def load_stock_list_from_json() -> List[Dict]:
+    """从 stock_config.json 读取股票列表（包含所有分类的股票）"""
+    stocks = []
+    
+    logger.info(f"📁 股票配置文件路径: {STOCK_CONFIG_FILE}")
+    logger.info(f"📁 文件是否存在: {os.path.exists(STOCK_CONFIG_FILE)}")
+    
+    if not os.path.exists(STOCK_CONFIG_FILE):
+        logger.error(f"❌ 股票配置文件不存在: {STOCK_CONFIG_FILE}")
+        return stocks
+    
+    try:
+        with open(STOCK_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            
+            # 遍历所有分类（波段、短线、中长线）
+            for category, stock_list in config.items():
+                if isinstance(stock_list, list):
+                    for stock in stock_list:
+                        code = stock.get('code', '').strip()
+                        name = stock.get('name', '').strip()
+                        table = stock.get('table', '').strip()
+                        
+                        if code:
+                            stocks.append({
+                                'code': code,
+                                'name': name,
+                                'table_name': table if table else f"basic_data_{code.lower()}",
+                                'category': category
+                            })
+    except Exception as e:
+        logger.error(f"❌ 读取JSON文件失败: {e}")
+    
+    logger.info(f"📊 从 JSON 配置加载了 {len(stocks)} 支股票")
     return stocks
 
 
@@ -1187,6 +1226,8 @@ def main():
                         help='指定股票代码，逗号分隔（如: SZ301565,SH688701）')
     parser.add_argument('--limit', type=int, default=5,
                         help='限制处理的股票数量（默认5个，用于测试）')
+    parser.add_argument('--from-json', action='store_true',
+                        help='从 stock_config.json 读取股票列表（而不是 stock_list.csv）')
     args = parser.parse_args()
     
     # 检查服务是否可用
@@ -1200,7 +1241,11 @@ def main():
     logger.info("=" * 80)
     
     # 加载股票列表
-    all_stocks = load_stock_list_from_csv()
+    if args.from_json:
+        all_stocks = load_stock_list_from_json()
+    else:
+        all_stocks = load_stock_list_from_csv()
+    
     if not all_stocks:
         logger.error("❌ 无法加载股票列表")
         return

@@ -78,7 +78,8 @@ class CRStrategyService:
     def check_c_point_strategy_1(self, stock_code: str, date: datetime, volume_type: Optional[str] = None, 
                                   total_win_rate_score: Optional[float] = None,
                                   historical_r_points: Optional[List] = None,
-                                  historical_c_points: Optional[List] = None) -> Tuple[bool, float, str, List[Dict[str, Any]], float, bool]:
+                                  historical_c_points: Optional[List] = None,
+                                  stock_nature: Optional[str] = None) -> Tuple[bool, float, str, List[Dict[str, Any]], float, bool]:
         """
         检查是否满足C点策略1（新逻辑 + 插件系统）
         
@@ -113,6 +114,9 @@ class CRStrategyService:
         logger.info(f"  - date: {date}")
         logger.info(f"  - volume_type (传入): {volume_type}")
         logger.info(f"  - total_win_rate_score (传入): {total_win_rate_score}")
+        logger.info(f"  - stock_nature (传入): {stock_nature}")
+        
+        resolved_nature = stock_nature
         
         # 如果没有传入 total_win_rate_score，从缓存或数据库查询
         # 注意：volume_type 可以为 None（表示没有有效的放量类型），这是合法的
@@ -142,10 +146,15 @@ class CRStrategyService:
                 volume_type = daily_chance.volume_type
             if total_win_rate_score is None:
                 total_win_rate_score = daily_chance.total_win_ratio_score
+            if resolved_nature is None:
+                resolved_nature = getattr(daily_chance, "stock_nature", None)
             
             logger.info(f"  ✅ 从数据库获取:")
             logger.info(f"    - volume_type: {volume_type}")
             logger.info(f"    - total_win_rate_score: {total_win_rate_score}")
+        
+        resolved_nature = resolved_nature or "波段"
+        logger.info(f"  🧬 [Strategy1] 股性: {resolved_nature}")
         
         # === 基础层计算 ===
         # 赔率分
@@ -166,7 +175,7 @@ class CRStrategyService:
         )
         
         # 从配置读取触发阈值
-        threshold = self.config_service.get_strategy1_threshold()
+        threshold = self.config_service.get_strategy1_threshold(resolved_nature)
         
         # 判断是否触发C点
         # 如果插件强制发C，则直接触发；否则根据分数判断

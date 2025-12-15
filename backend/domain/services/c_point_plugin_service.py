@@ -3,6 +3,7 @@ from typing import Tuple, List, Optional
 from datetime import datetime, timedelta, date
 from types import SimpleNamespace
 from infrastructure.logging.logger import get_logger
+from domain.services.kline_pattern_service import KLinePatternService
 
 logger = get_logger(__name__)
 
@@ -335,7 +336,7 @@ class CPointPluginService:
             amplitude_pct = ((daily_data.high - daily_data.low) / daily_data.pre_close * 100) if daily_data.pre_close else 0
             
             # 判断振幅阈值（主板6%，非主板8%）
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             amplitude_threshold = 6 if is_main_board else 8
             
             if amplitude_pct <= amplitude_threshold:
@@ -402,8 +403,8 @@ class CPointPluginService:
                 if stock_nature == "短线":
                     allow_legacy_checks = False
             
-            # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            # 判断主板还是非主板（统一规则）
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             
             # 获取前6个交易日数据（多看一天，避免首日缺前收导致涨幅为0）
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
@@ -599,8 +600,8 @@ class CPointPluginService:
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
-            # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001'))
+            # 判断主板还是非主板（统一规则）
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             
             # 获取当日数据
             current_data = self._daily_cache.get(date_str)

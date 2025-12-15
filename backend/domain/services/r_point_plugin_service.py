@@ -2,6 +2,7 @@
 from typing import Tuple, List, Optional
 from datetime import datetime, timedelta, date
 from infrastructure.logging.logger import get_logger
+from domain.services.kline_pattern_service import KLinePatternService
 
 logger = get_logger(__name__)
 
@@ -180,8 +181,8 @@ class RPointPluginService:
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
-            # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+            # 判断主板还是非主板（统一规则）
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             
             # 获取当日数据
             current_data = self._daily_cache.get(date_str)
@@ -455,7 +456,7 @@ class RPointPluginService:
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             amplitude_threshold = 6 if is_main_board else 8
             decline_threshold = 3 if is_main_board else 5
             distance_threshold = 8.0  # 固定8%
@@ -607,7 +608,7 @@ class RPointPluginService:
                 return RPointPluginResult("基本面突发利空", False, "")
             
             # 判断是否跌停
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             limit_threshold = -9.9 if is_main_board else -19.8
             
             if current_data.pre_close and current_data.pre_close > 0:
@@ -653,8 +654,8 @@ class RPointPluginService:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else c_point_date
             
-            # 判断主板还是非主板
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+            # 判断主板还是非主板（统一规则）
+            is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             
             # 获取C点日期的数据
             c_data = self._daily_cache.get(c_date_str)
@@ -1627,12 +1628,8 @@ class RPointPluginService:
         
         matched_patterns = []
         
-        # 判断主板还是非主板
-        # 主板：SH60x（沪市主板）、SZ000/SZ001/SZ002/SZ003（深市主板）
-        # 非主板：SZ300（创业板）、SH688（科创板）、SZ北交所
-        is_main_board = True
-        if stock_code:
-            is_main_board = stock_code.startswith(('SH600', 'SH601', 'SH603', 'SH605', 'SZ000', 'SZ001', 'SZ002', 'SZ003'))
+        # 判断主板还是非主板（统一规则）
+        is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
         
         # 计算ABC
         O = daily_data.open

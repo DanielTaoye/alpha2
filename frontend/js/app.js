@@ -2282,6 +2282,9 @@ async function analyzeCRPointsAuto() {
     
     try {
         console.log('[快速加载] 开始获取最新一天的策略评分...', { stockCode: currentStockCode });
+        const stockSelect = document.getElementById('stockSelect');
+        const selectedOption = stockSelect ? stockSelect.options[stockSelect.selectedIndex] : null;
+        const stockNature = selectedOption?.dataset?.nature || currentStrategy || '波段';
         
         // 🔥 只调用最新一天的CR点接口，不分析483天的历史数据
         const response = await fetch(`${API_BASE_URL}/latest_cr_points`, {
@@ -2291,7 +2294,8 @@ async function analyzeCRPointsAuto() {
             },
             body: JSON.stringify({
                 stockCode: currentStockCode,
-                tableName: currentTableName
+                tableName: currentTableName,
+                stockNature: stockNature
             })
         });
         
@@ -2342,6 +2346,7 @@ async function analyzeCRPoints() {
     const stockSelect = document.getElementById('stockSelect');
     const selectedOption = stockSelect.options[stockSelect.selectedIndex];
     const stockName = selectedOption.dataset.name || '';
+    const stockNature = selectedOption.dataset.nature || currentStrategy || '波段';
     
     const analyzeBtn = document.getElementById('analyzeCRBtn');
     if (analyzeBtn) {
@@ -2361,7 +2366,8 @@ async function analyzeCRPoints() {
                 stockCode: currentStockCode,
                 stockName: stockName,
                 tableName: currentTableName,
-                period: 'day'
+                period: 'day',
+                stockNature: stockNature
             })
         });
         
@@ -2403,7 +2409,8 @@ async function analyzeCRPoints() {
                     },
                     body: JSON.stringify({
                         stockCode: currentStockCode,
-                        tableName: currentTableName
+                        tableName: currentTableName,
+                        stockNature: stockNature
                     })
                 });
                 
@@ -2498,6 +2505,7 @@ async function loadCRPoints(existingData = null) {
             const stockSelect = document.getElementById('stockSelect');
             const selectedOption = stockSelect.options[stockSelect.selectedIndex];
             const stockName = selectedOption.dataset.name || '';
+            const stockNature = selectedOption.dataset.nature || currentStrategy || '波段';
             
             console.log('实时计算CR点...', { stockCode: currentStockCode, stockName });
             
@@ -2510,7 +2518,8 @@ async function loadCRPoints(existingData = null) {
                     stockCode: currentStockCode,
                     stockName: stockName,
                     tableName: currentTableName,
-                    period: 'day'
+                    period: 'day',
+                    stockNature: stockNature
                 })
             });
             
@@ -2540,7 +2549,8 @@ async function loadCRPoints(existingData = null) {
                         },
                         body: JSON.stringify({
                             stockCode: currentStockCode,
-                            tableName: currentTableName
+                            tableName: currentTableName,
+                            stockNature: stockNature
                         })
                     });
                     
@@ -3277,6 +3287,9 @@ async function refreshLatestKline() {
         
         let latestCRUpdated = false;
         try {
+            const stockSelect = document.getElementById('stockSelect');
+            const selectedOption = stockSelect ? stockSelect.options[stockSelect.selectedIndex] : null;
+            const stockNature = selectedOption?.dataset?.nature || currentStrategy || '波段';
             const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
                 method: 'POST',
                 headers: {
@@ -3284,7 +3297,8 @@ async function refreshLatestKline() {
                 },
                 body: JSON.stringify({
                     stockCode: currentStockCode,
-                    tableName: currentTableName
+                    tableName: currentTableName,
+                    stockNature: stockNature
                 })
             });
             

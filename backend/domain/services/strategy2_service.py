@@ -28,7 +28,8 @@ class Strategy2Service:
                        daily_data_30: List[Dict],  # 前30个交易日数据
                        index: int,
                        prev_day_has_r: bool = False,
-                       strategy1_reject_by_penalty_plugins: bool = False) -> Tuple[bool, float, str]:
+                       strategy1_reject_by_penalty_plugins: bool = False,
+                       stock_nature: Optional[str] = None) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -78,8 +79,8 @@ class Strategy2Service:
         penalty = self._calculate_penalty(ma_data, close_price, index, details)
         total_score += penalty
         
-        # 从配置读取触发阈值
-        threshold = self.config_service.get_strategy2_threshold()
+        # 从配置读取触发阈值（支持股性）
+        threshold = self.config_service.get_strategy2_threshold(stock_nature)
         
         # 情形3：前一日刚发R，且当日原始分数达到阈值，扣45分
         # 先记录未扣前得分用于判断“符合发C条件”

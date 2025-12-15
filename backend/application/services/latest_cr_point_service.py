@@ -43,7 +43,8 @@ class LatestCRPointService:
         stock_code: str, 
         table_name: str,
         predicted_volume: Optional[float] = None,
-        volume_type: Optional[str] = None
+        volume_type: Optional[str] = None,
+        stock_nature: Optional[str] = None
     ) -> Dict:
         """
         计算最新一天的CR点
@@ -59,6 +60,7 @@ class LatestCRPointService:
         """
         try:
             logger.info(f"开始计算最新一天CR点: {stock_code}")
+            resolved_nature = stock_nature
             
             # 🔥 重要：从table_name提取完整的stock_code（带市场前缀）
             # 例如: basic_data_sz300188 → SZ300188
@@ -252,6 +254,11 @@ class LatestCRPointService:
             
             logger.info(f"  前一日赔率分 - 日:{day_win_ratio_score:.2f}, 周:{week_win_ratio_score:.2f}, 总:{total_win_ratio_score:.2f}")
             
+            if resolved_nature is None and previous_daily_chance:
+                resolved_nature = getattr(previous_daily_chance, "stock_nature", None)
+            resolved_nature = resolved_nature or "波段"
+            logger.info(f"  股性: {resolved_nature}")
+            
             # 4. 获取预测成交量和成交量类型
             if not predicted_volume:
                 volume_result = self.kline_service.predict_today_volume(table_name)
@@ -305,7 +312,8 @@ class LatestCRPointService:
                 total_win_ratio_score,
                 cached_cr_service,  # 传入缓存的服务
                 historical_c_points,  # 传入历史C点
-                historical_r_points  # 传入历史R点
+                historical_r_points,  # 传入历史R点
+                stock_nature=resolved_nature
             )
             logger.info(f"  🔥 策略1计算结果: 基础分={strategy1_result.get('base_score', 0):.2f}, 最终分={strategy1_result.get('score', 0):.2f}")
             
@@ -340,7 +348,8 @@ class LatestCRPointService:
                 macd_data,
                 volume_type,
                 bullish_pattern,
-                kline_data
+                kline_data,
+                stock_nature=resolved_nature
             )
             
             # 11. 检查R点
@@ -372,6 +381,7 @@ class LatestCRPointService:
                 'success': True,
                 'date': current_kline['date'],
                 'stock_code': stock_code,
+                'stock_nature': resolved_nature,
                 'kline': {
                     'open': current_kline['open'],
                     'close': current_kline['close'],
@@ -448,7 +458,8 @@ class LatestCRPointService:
         total_win_ratio_score: float,
         cr_service = None,  # 使用传入的缓存服务
         historical_c_points: Optional[List] = None,  # 历史C点
-        historical_r_points: Optional[List] = None  # 历史R点
+        historical_r_points: Optional[List] = None,  # 历史R点
+        stock_nature: Optional[str] = None
     ) -> Dict:
         """检查策略1的C点"""
         try:
@@ -480,7 +491,8 @@ class LatestCRPointService:
                     volume_type,
                     total_win_ratio_score,
                     historical_r_points,  # 传入历史R点
-                    historical_c_points  # 传入历史C点
+                    historical_c_points,  # 传入历史C点
+                    stock_nature=stock_nature
                 )
             
             logger.info(f"  ✅ [Strategy1] 计算完成:")
@@ -496,7 +508,7 @@ class LatestCRPointService:
                 'score': final_score,
                 'base_score': base_score,
                 'plugins': plugins,
-                'threshold': 70
+                'threshold': service.config_service.get_strategy1_threshold(stock_nature)
             }
             
         except Exception as e:
@@ -523,7 +535,8 @@ class LatestCRPointService:
         macd_data: Dict,
         volume_type: Optional[str],
         bullish_pattern: Optional[str],
-        kline_data: List[Dict]
+        kline_data: List[Dict],
+        stock_nature: Optional[str] = None
     ) -> Dict:
         """检查策略2的C点"""
         try:
@@ -553,13 +566,15 @@ class LatestCRPointService:
                 daily_data_30,
                 current_index,
                 prev_day_has_r=False,
-                strategy1_reject_by_penalty_plugins=False
+                strategy1_reject_by_penalty_plugins=False,
+                stock_nature=stock_nature
             )
             
             return {
                 'is_c_point': is_triggered,
                 'score': score,
-                'reason': reason
+                'reason': reason,
+                'threshold': self.strategy2_service.config_service.get_strategy2_threshold(stock_nature)
             }
             
         except Exception as e:

@@ -136,7 +136,8 @@ class HighScoreCacheService:
         try:
             result = self.latest_cr_service.calculate_latest_cr_points(
                 stock["code"],
-                stock["table_name"]
+                stock["table_name"],
+                stock_nature=stock.get("nature")
             )
             # 即便返回 success=False 也写入占位，避免整榜空掉
             s1_score = result.get("strategy1", {}).get("score", 0) if result else 0
