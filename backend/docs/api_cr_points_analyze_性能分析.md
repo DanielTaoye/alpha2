@@ -131,31 +131,53 @@ Controller 会把结果包一层 `ResponseBuilder.success(data, message)`，其�
 ## 5. 主要“慢点”定位（按优先级）
 
 ### 5.1 最高优先：重复 DB 批量查询（daily/daily_chance 多套缓存）
-**现状：**
-- Controller 为策略2查一次 `b_daily_chance`（volume_type/bullish_pattern）
-- `CRStrategyService.init_cache` 再查一次 `b_daily_chance`
-- `CPointPluginService.init_cache` 再查一次 `daily` + `b_daily_chance`
-- `RPointPluginService.init_cache` 再查一次 `daily` + `b_daily_chance`
+**已优化（代码已落地）：**
+- 现在由 `CRPointService.analyze_cr_points` **单次预加载**：
+  - `daily_repo.find_by_date_range(...)`：1次
+  - `daily_chance_repo.find_by_stock_code(...)`：1次
+- 随后把同一份 `daily_list/daily_chance_list` 注入：
+  - `CRStrategyService.init_cache(..., daily_chance_list=..., daily_list=...)`（并复用到 `CPointPluginService.init_cache`）
+  - `RPointPluginService.init_cache(..., daily_list=..., daily_chance_list=...)`
+- Controller 不再为策略2重复查询 `b_daily_chance`（策略2需要的映射由 service 从 `daily_chance_list` 派生）。
 
-**影响：**
-- 同一股票、同一日期区间，重复 I/O 与对象构建（MySQL + Python 映射）；
-- 在并发下会放大数据库压力与锁/连接开销。
+**效果：**
+- 单次请求内同区间数据的批量查询从“2~4次”收敛为“各1次”，降低 DB 压力与 Python 映射开销。
 
 ### 5.2 高优先：大量 `INFO` 日志在主循环内输出
-`CRStrategyService.check_c_point_strategy_1` 每次调用都会打印多条 `logger.info`；主循环 N≈730（day）时，单请求就可能写入几千行日志。
+**已优化（代码已落地）：**
+- `CRStrategyService.check_c_point_strategy_1` 的过程日志已从 `info` 降为 `debug`，并使用惰性格式化（`logger.debug("..%s", x)`）避免无谓字符串拼接。
+- 触发C点/被否决/接近阈值等关键日志仍保留为 `info`。
 
 **影响：**
 - 日志落盘是 I/O；在 Windows 下尤为明显；
 - 多线程/多进程时日志锁竞争也会放大。
 
 ### 5.3 高优先：插件在“缓存不足/缺前收/缺交易日”时的 DB 回退查询可能发生在循环内
-典型触发点（只要缓存内日期不够或字段缺失，就可能查询）：
+**已优化（代码已落地）：**
+- `RPointPluginService` 增加 `self._sorted_dates`，`_get_previous_trading_dates_from_cache` 在缓存已初始化时**只走内存**（不再回退查数据库交易日）。
+- `RPointPluginService._check_bearish_kline_patterns` / `_calculate_amplitude`：当 `pre_close` 缺失时**只从缓存补齐**，不再在循环内额外查“前一交易日收盘价”。
+- `CRPointService` 的预加载区间会额外往前取一段时间（当前为 90 天），降低“前N交易日不足”的概率。
 
-- `RPointPluginService._get_previous_trading_dates_from_cache(...)`
-  - 若缓存里 `<25` 个交易日，会对 `basic_data_{stock_code}` 额外查 `LIMIT 25` 的交易日列表
-- `RPointPluginService._check_bearish_kline_patterns(...)`
-  - 若 `pre_close` 缺失，会再查一次“前一交易日收盘价”
-- 若这些发生在循环里（尤其对起始区间的前几十天），会出现“每根K线多一次SQL”的放大效应。
+**效果：**
+- 避免出现“每根K线多一次SQL”的放大效应，减少尾部慢查询风险。
+
+### 5.7 仍然可能导致 10+ 秒的剩余瓶颈（建议按打点结果定位）
+即使以上三项修完，接口仍可能慢在下面这些地方（通常是主因）：
+
+- **K线读取 + 指标计算**：`KLineApplicationService.get_kline_data` 同时做 DB 查询 + MA/MACD 计算。若 K线表无合适索引或表很大，SQL 本身可能秒级。
+- **R点插件本身的 CPU 复杂度**：`RPointPluginService.check_r_point` 在每根K线上依次跑多个插件（很多包含多日窗口扫描/形态识别），在 700+ 根K线时会累加成明显 CPU 时间。
+- **返回体过大导致序列化慢**：`strategy1_scores`/`strategy2_scores` 是按日期的全量明细（含插件列表与reason），JSON 序列化 + 传输可能成为秒级瓶颈（尤其 Windows + 日志/IO 负载高时）。
+- **重复对象转换仍存在**：目前仍有 dict→`KLineData` 的二次构建（含 `strptime`），虽然不是主因，但可进一步减少。
+
+### 6.1（更新）已经加入最小侵入的耗时打点
+为了让你能直接看到“慢在哪里”，已在后端加了耗时日志：
+
+- `CRPointController.analyze_cr_points`：打印 `kline+指标 / k线转换 / 核心分析 / jsonify / total`
+- `CRPointService.analyze_cr_points`：打印 `preload / initCaches / loop / total`
+
+你跑一次接口后，直接看日志里类似关键字：
+- `CR点分析耗时(ms): ...`
+- `CR核心分析耗时(ms): ...`
 
 ### 5.4 中优先：数据转换与重复构建对象
 当前链路里有明显的重复转换：

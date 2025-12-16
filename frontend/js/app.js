@@ -2399,58 +2399,54 @@ async function analyzeCRPoints() {
                 console.log('MA数据已更新', Object.keys(result.data.ma));
             }
             
-            // 🔥 获取最新一天的CR点（如果有预测数据的话）
-            try {
-                console.log('正在获取最新一天的CR点...');
-                const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        stockCode: currentStockCode,
-                        tableName: currentTableName,
-                        stockNature: stockNature
-                    })
-                });
-                
-                const latestResult = await latestResponse.json();
-                console.log('最新一天CR点结果:', latestResult);
-                
-                // 🔥 后端返回的code是200，不是0！
-                if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
-                    const latestData = latestResult.data;
-                    
-                    // 合并最新一天的策略评分到历史数据中
-                    if (latestData.date) {
-                        console.log(`✅ 合并最新一天(${latestData.date})的CR点数据`);
-                        
-                        // 合并策略1评分
-                        if (latestData.strategy1) {
-                            result.data.strategy1_scores = result.data.strategy1_scores || {};
-                            result.data.strategy1_scores[latestData.date] = latestData.strategy1;
-                            console.log(`  ✅ 策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
-                            console.log(`  🔥 合并后strategy1_scores的日期:`, Object.keys(result.data.strategy1_scores));
-                        }
-                        
-                        // 合并策略2评分
-                        if (latestData.strategy2) {
-                            result.data.strategy2_scores = result.data.strategy2_scores || {};
-                            result.data.strategy2_scores[latestData.date] = latestData.strategy2;
-                            console.log(`  ✅ 策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
-                            console.log(`  🔥 合并后strategy2_scores的日期:`, Object.keys(result.data.strategy2_scores));
-                        }
-                    }
-                }
-            } catch (latestError) {
-                console.warn('获取最新一天CR点失败（可能今天没有数据）:', latestError);
-            }
-            
             // 🔥 自动加载时不弹提示框，控制台输出即可
             console.log(`✅ CR点加载完成！C点(买入信号): ${cCount}个, R点(卖出信号): ${rCount}个`);
             
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
+
+            // 🔥 获取最新一天的CR点（不阻塞界面渲染，后台合并评分即可）
+            (async () => {
+                try {
+                    console.log('正在后台获取最新一天的CR点...');
+                    const latestResponse = await fetch(`${API_BASE_URL}/latest_cr_points`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            stockCode: currentStockCode,
+                            tableName: currentTableName,
+                            stockNature: stockNature
+                        })
+                    });
+
+                    const latestResult = await latestResponse.json();
+                    console.log('最新一天CR点结果(后台):', latestResult);
+
+                    // 🔥 后端返回的code是200，不是0！
+                    if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
+                        const latestData = latestResult.data;
+
+                        if (latestData.date) {
+                            // 合并策略评分到全局 crPointsData（tooltip 会直接读取 crPointsData）
+                            crPointsData.strategy1_scores = crPointsData.strategy1_scores || {};
+                            crPointsData.strategy2_scores = crPointsData.strategy2_scores || {};
+
+                            if (latestData.strategy1) {
+                                crPointsData.strategy1_scores[latestData.date] = latestData.strategy1;
+                                console.log(`  ✅(后台) 合并策略1评分: ${latestData.strategy1.score.toFixed(2)} @ ${latestData.date}`);
+                            }
+                            if (latestData.strategy2) {
+                                crPointsData.strategy2_scores[latestData.date] = latestData.strategy2;
+                                console.log(`  ✅(后台) 合并策略2评分: ${latestData.strategy2.score.toFixed(2)} @ ${latestData.date}`);
+                            }
+                        }
+                    }
+                } catch (latestError) {
+                    console.warn('后台获取最新一天CR点失败（可能今天没有数据）:', latestError);
+                }
+            })();
         } else {
             console.error(`❌ CR点分析失败: ${result.message}`);
         }

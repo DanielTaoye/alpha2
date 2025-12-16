@@ -345,15 +345,14 @@ class CPointPluginService:
             amplitude_pct = ((daily_data.high - daily_data.low) / daily_data.pre_close * 100) if daily_data.pre_close else 0
             
             # 判断振幅阈值（主板6%，非主板8%）
+            # 注意：不要在本函数内部再次 import 同名 KLinePatternService，否则会导致 UnboundLocalError
             is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             amplitude_threshold = 6 if is_main_board else 8
             
             if amplitude_pct <= amplitude_threshold:
                 return CPointPluginResult("风险K线", False, 0, "")
             
-            # 使用K线形态识别服务
-            from domain.services.kline_pattern_service import KLinePatternService
-            
+            # 使用K线形态识别服务（已在文件顶部导入 KLinePatternService）
             pattern = KLinePatternService.identify_pattern(
                 stock_code,
                 daily_data.open,

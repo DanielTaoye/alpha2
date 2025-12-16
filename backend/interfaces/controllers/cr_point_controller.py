@@ -1,6 +1,7 @@
 """CR点控制器"""
 from flask import request, jsonify
 from typing import Dict, Any
+from time import perf_counter
 from application.services.cr_point_service import CRPointService
 from application.services.kline_service import KLineApplicationService
 from infrastructure.persistence.kline_repository_impl import KLineRepositoryImpl
@@ -32,6 +33,7 @@ class CRPointController:
             CR点分析结果
         """
         try:
+            t0 = perf_counter()
             # 添加详细日志
             logger.info(f"收到CR点分析请求")
             logger.info(f"请求内容类型: {request.content_type}")
@@ -60,7 +62,9 @@ class CRPointController:
             logger.info(f"开始分析CR点: {stock_code} {stock_name} 表:{table_name} 周期:{period}")
             
             # 🔥 获取K线数据及技术指标（排除今天的数据，只计算历史）
+            t_kline_0 = perf_counter()
             result = self.kline_service.get_kline_data(table_name, period, exclude_today=True)
+            t_kline_1 = perf_counter()
             kline_data_list = result.get('kline_data', [])
             macd_data = result.get('macd', {})
             ma_data = result.get('ma', {})
@@ -72,6 +76,7 @@ class CRPointController:
             from domain.models.kline import KLineData
             from datetime import datetime
             
+            t_convert_0 = perf_counter()
             kline_objects = []
             for kline in kline_data_list:
                 kline_obj = KLineData(
@@ -85,8 +90,10 @@ class CRPointController:
                     weibi=kline.get('weibi', 0)
                 )
                 kline_objects.append(kline_obj)
+            t_convert_1 = perf_counter()
             
             # 实时分析CR点（不保存）
+            t_analyze_0 = perf_counter()
             cr_result = self.cr_service.analyze_cr_points(
                 stock_code, 
                 stock_name, 
@@ -98,12 +105,27 @@ class CRPointController:
                 bullish_patterns=None,
                 stock_nature=stock_nature
             )
+            t_analyze_1 = perf_counter()
             
             # 将MACD和MA数据添加到返回结果中
             cr_result['macd'] = macd_data
             cr_result['ma'] = ma_data
+
+            t_resp_0 = perf_counter()
+            resp = jsonify(ResponseBuilder.success(cr_result, f'CR点实时分析完成，发现C点{cr_result["c_points_count"]}个，R点{cr_result["r_points_count"]}个'))
+            t_resp_1 = perf_counter()
+
+            logger.info(
+                "CR点分析耗时(ms): total=%.1f, kline+指标=%.1f, kline转换=%.1f, 核心分析=%.1f, jsonify=%.1f, k线数=%d",
+                (t_resp_1 - t0) * 1000,
+                (t_kline_1 - t_kline_0) * 1000,
+                (t_convert_1 - t_convert_0) * 1000,
+                (t_analyze_1 - t_analyze_0) * 1000,
+                (t_resp_1 - t_resp_0) * 1000,
+                len(kline_objects),
+            )
             
-            return jsonify(ResponseBuilder.success(cr_result, f'CR点实时分析完成，发现C点{cr_result["c_points_count"]}个，R点{cr_result["r_points_count"]}个')), 200
+            return resp, 200
             
         except Exception as e:
             logger.error(f"分析CR点失败: {e}", exc_info=True)

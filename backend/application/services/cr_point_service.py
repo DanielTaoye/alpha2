@@ -1,6 +1,7 @@
 """CR点应用服务 - 实时计算，不存储"""
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from time import perf_counter
 from domain.models.cr_point import CRPoint, ABCComponents
 from domain.models.kline import KLineData
 from domain.services.cr_strategy_service import CRStrategyService
@@ -81,6 +82,7 @@ class CRPointService:
         Returns:
             分析结果统计
         """
+        t0 = perf_counter()
         resolved_nature = stock_nature
         derived_volume_types: Dict[str, str] = {}
         derived_bullish_patterns: Dict[str, str] = {}
@@ -102,10 +104,14 @@ class CRPointService:
             daily_repo = DailyRepositoryImpl()
             daily_chance_repo = DailyChanceRepositoryImpl()
 
+            t_preload_0 = perf_counter()
             daily_list = daily_repo.find_by_date_range(stock_code, start_date, end_date)
+            t_preload_1 = perf_counter()
             daily_chance_list = daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+            t_preload_2 = perf_counter()
 
             # 初始化C点策略缓存（复用 daily_chance_list，同时会把同一份数据注入 C点插件缓存）
+            t_init_0 = perf_counter()
             self.strategy_service.init_cache(
                 stock_code,
                 start_date,
@@ -122,6 +128,7 @@ class CRPointService:
                 daily_list=daily_list,
                 daily_chance_list=daily_chance_list,
             )
+            t_init_1 = perf_counter()
 
             # 从已加载的 daily_chance 派生策略2所需映射（替代 controller 的重复查询）
             for dc in daily_chance_list:
@@ -143,6 +150,14 @@ class CRPointService:
         
         resolved_nature = resolved_nature or '波段'
         
+        # 进一步打点：定位 loop 内真正的耗时占比（只在汇总日志输出，不改变业务）
+        t_r_total = 0.0
+        t_s1_total = 0.0
+        t_s2_total = 0.0
+        r_calls = 0
+        s1_calls = 0
+        s2_calls = 0
+
         c_points = []
         r_points = []
         rejected_c_points = []  # 被插件否决的C点
@@ -156,8 +171,10 @@ class CRPointService:
         last_valid_point_date: Optional[datetime] = None
         last_valid_point_index: Optional[int] = None  # 记录最后一个C点的K线索引
         
+        t_loop_0 = perf_counter()
         for index, kline in enumerate(kline_data):
             # === 第一步：先检查R点（优先级最高）===
+            t_r0 = perf_counter()
             is_r_point, r_plugins = self.r_point_service.check_r_point(
                 stock_code, 
                 kline.time, 
@@ -168,6 +185,8 @@ class CRPointService:
                 kline_data,  # 传入完整K线数据（用于箱体回踩插件）
                 last_valid_point_type=last_valid_point_type  # 传入最近有效点类型，供插件2使用
             )
+            t_r_total += (perf_counter() - t_r0)
+            r_calls += 1
             
             # 【重要】先判断R点能否真正添加（考虑CR关系规则）
             r_point_can_add = False
@@ -184,6 +203,7 @@ class CRPointService:
             has_valid_r_today = r_point_can_add
             
             # === 第二步：检查C点策略1（新逻辑：基于赔率分+胜率分+插件）===
+            t_s10 = perf_counter()
             is_c_point, c_score, c_strategy, c_plugins, base_score, is_rejected = self.strategy_service.check_c_point_strategy_1(
                 stock_code, 
                 kline.time,
@@ -191,6 +211,8 @@ class CRPointService:
             historical_c_points=c_points,
             stock_nature=resolved_nature
             )
+            t_s1_total += (perf_counter() - t_s10)
+            s1_calls += 1
             
             # 记录所有K线的策略1评分和插件信息（用于前端显示）
             date_str = kline.time.strftime('%Y-%m-%d')
@@ -260,6 +282,7 @@ class CRPointService:
                                     last_valid_point_date is not None and
                                     (kline.time.date() - last_valid_point_date.date()).days == 1)
                 
+                t_s20 = perf_counter()
                 is_strategy2_c, strategy2_score, strategy2_reason = self.strategy2_service.check_strategy2(
                     stock_code=stock_code,
                     date=kline.time,
@@ -274,6 +297,8 @@ class CRPointService:
                     strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty,
                     stock_nature=resolved_nature
                 )
+                t_s2_total += (perf_counter() - t_s20)
+                s2_calls += 1
                 
                 # 记录所有K线的策略2评分（用于前端显示）
                 date_str = kline.time.strftime('%Y-%m-%d')
@@ -525,6 +550,7 @@ class CRPointService:
                         plugins=[p.to_dict() for p in r_plugins]
                     )
                     rejected_c_points.append(rejected_r_point)
+        t_loop_1 = perf_counter()
         
         # 计算总C点数（策略1 + 策略2）
         total_c_count = len(c_points) + len(strategy2_c_points)
@@ -535,6 +561,28 @@ class CRPointService:
         self.strategy_service.clear_cache()
         self.r_point_service.clear_cache()
         self.strategy2_service.clear_cache()
+
+        # 汇总耗时（仅日志，不改变业务）
+        try:
+            preload_ms = 0.0
+            init_ms = 0.0
+            if 't_preload_0' in locals():
+                preload_ms = (t_preload_2 - t_preload_0) * 1000
+            if 't_init_0' in locals():
+                init_ms = (t_init_1 - t_init_0) * 1000
+            logger.info(
+                "CR核心分析耗时(ms): total=%.1f, preload(daily+chance)=%.1f, initCaches=%.1f, loop=%.1f, loop拆分(R/S1/S2)=%.1f/%.1f/%.1f, k线数=%d",
+                (perf_counter() - t0) * 1000,
+                preload_ms,
+                init_ms,
+                (t_loop_1 - t_loop_0) * 1000,
+                (t_r_total * 1000),
+                (t_s1_total * 1000),
+                (t_s2_total * 1000),
+                len(kline_data),
+            )
+        except Exception:
+            pass
         
         # 日志输出：确认数据
         logger.info(f"strategy1_scores 数量: {len(strategy1_scores)}")
