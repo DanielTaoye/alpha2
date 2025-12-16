@@ -1,5 +1,5 @@
 """C点插件服务 - 优先级高于基础分数"""
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Any
 from datetime import datetime, timedelta, date
 from types import SimpleNamespace
 from infrastructure.logging.logger import get_logger
@@ -41,7 +41,14 @@ class CPointPluginService:
         self._daily_chance_cache = {}  # {date_str: DailyChance}
         self._sorted_dates = []  # 🚀 性能优化：缓存排序后的日期列表（避免重复排序）
     
-    def init_cache(self, stock_code: str, start_date: str, end_date: str):
+    def init_cache(
+        self,
+        stock_code: str,
+        start_date: str,
+        end_date: str,
+        daily_list: Optional[List[Any]] = None,
+        daily_chance_list: Optional[List[Any]] = None,
+    ):
         """
         初始化数据缓存（批量查询）
         
@@ -52,15 +59,17 @@ class CPointPluginService:
         """
         logger.info(f"开始初始化插件缓存: {stock_code} {start_date} 至 {end_date}")
         
-        # 批量查询 daily 数据
-        daily_list = self.daily_repo.find_by_date_range(stock_code, start_date, end_date)
+        # 批量查询 daily 数据（允许外部注入，避免重复IO）
+        if daily_list is None:
+            daily_list = self.daily_repo.find_by_date_range(stock_code, start_date, end_date)
         self._daily_cache = {}
         for daily in daily_list:
             date_str = daily.date.strftime('%Y-%m-%d') if isinstance(daily.date, datetime) else str(daily.date)
             self._daily_cache[date_str] = daily
         
-        # 批量查询 daily_chance 数据
-        daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+        # 批量查询 daily_chance 数据（允许外部注入，避免重复IO）
+        if daily_chance_list is None:
+            daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
         self._daily_chance_cache = {}
         for dc in daily_chance_list:
             date_str = dc.date.strftime('%Y-%m-%d') if isinstance(dc.date, datetime) else str(dc.date)

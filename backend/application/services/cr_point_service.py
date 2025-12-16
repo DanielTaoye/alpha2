@@ -82,19 +82,58 @@ class CRPointService:
             分析结果统计
         """
         resolved_nature = stock_nature
-        # 性能优化：批量预加载数据到缓存
+        derived_volume_types: Dict[str, str] = {}
+        derived_bullish_patterns: Dict[str, str] = {}
+
+        # 性能优化：单次预加载 daily + daily_chance，并复用到多个 service 的进程内缓存，避免重复 DB 查询
         if kline_data:
-            # 计算数据日期范围（往前多取15天以支持插件查询历史数据）
             from datetime import timedelta
-            start_date = (kline_data[0].time - timedelta(days=15)).strftime('%Y-%m-%d')
+            # 额外往前取一段时间，减少插件对“前N交易日”的循环内回退查询（旧逻辑也会回退查库）
+            EXTRA_DAYS_FOR_CACHE = 90
+            start_date = (kline_data[0].time - timedelta(days=EXTRA_DAYS_FOR_CACHE)).strftime('%Y-%m-%d')
             end_date = kline_data[-1].time.strftime('%Y-%m-%d')
-            
-            logger.info(f"初始化C点和R点缓存: {stock_code} {start_date} 至 {end_date}")
-            # 初始化C点策略缓存
-            self.strategy_service.init_cache(stock_code, start_date, end_date)
-            # 初始化R点插件缓存
-            self.r_point_service.init_cache(stock_code, start_date, end_date)
-            
+
+            logger.info(f"初始化C点和R点缓存(合并预加载): {stock_code} {start_date} 至 {end_date}")
+
+            # 单次预加载
+            from infrastructure.persistence.daily_repository_impl import DailyRepositoryImpl
+            from infrastructure.persistence.daily_chance_repository_impl import DailyChanceRepositoryImpl
+
+            daily_repo = DailyRepositoryImpl()
+            daily_chance_repo = DailyChanceRepositoryImpl()
+
+            daily_list = daily_repo.find_by_date_range(stock_code, start_date, end_date)
+            daily_chance_list = daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+
+            # 初始化C点策略缓存（复用 daily_chance_list，同时会把同一份数据注入 C点插件缓存）
+            self.strategy_service.init_cache(
+                stock_code,
+                start_date,
+                end_date,
+                daily_chance_list=daily_chance_list,
+                daily_list=daily_list,
+            )
+
+            # 初始化R点插件缓存（复用 daily_list + daily_chance_list）
+            self.r_point_service.init_cache(
+                stock_code,
+                start_date,
+                end_date,
+                daily_list=daily_list,
+                daily_chance_list=daily_chance_list,
+            )
+
+            # 从已加载的 daily_chance 派生策略2所需映射（替代 controller 的重复查询）
+            for dc in daily_chance_list:
+                try:
+                    date_str = dc.date.strftime('%Y-%m-%d')
+                except Exception:
+                    date_str = str(dc.date)
+                if getattr(dc, "volume_type", None):
+                    derived_volume_types[date_str] = dc.volume_type
+                if getattr(dc, "bullish_pattern", None):
+                    derived_bullish_patterns[date_str] = dc.bullish_pattern
+
             if resolved_nature is None and self.strategy_service._daily_chance_cache:
                 try:
                     first_dc = next(iter(self.strategy_service._daily_chance_cache.values()))
@@ -179,8 +218,10 @@ class CRPointService:
             if ma_data and macd_data:
                 # 准备策略2所需数据
                 date_str = kline.time.strftime('%Y-%m-%d')
-                volume_type = volume_types.get(date_str) if volume_types else None
-                bullish_pattern = bullish_patterns.get(date_str) if bullish_patterns else None
+                vt_map = volume_types if volume_types is not None else derived_volume_types
+                bp_map = bullish_patterns if bullish_patterns is not None else derived_bullish_patterns
+                volume_type = vt_map.get(date_str) if vt_map else None
+                bullish_pattern = bp_map.get(date_str) if bp_map else None
                 
                 # 策略1是否被减分插件否决（赔率高胜率低/风险K线/不追涨）
                 strategy1_penalty_plugins = {"赔率高胜率低", "风险K线", "不追涨"}

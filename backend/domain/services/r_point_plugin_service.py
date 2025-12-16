@@ -38,7 +38,9 @@ class RPointPluginService:
         self._daily_chance_cache = {}  # {date_str: DailyChance}
         self._cr_history_cache = {}  # {(stock_code, cutoff_date): {'c': [...], 'r': [...]}}
     
-    def init_cache(self, stock_code: str, start_date: str, end_date: str):
+    def init_cache(self, stock_code: str, start_date: str, end_date: str,
+                   daily_list: Optional[list] = None,
+                   daily_chance_list: Optional[list] = None):
         """
         初始化数据缓存（批量查询）
         
@@ -49,15 +51,17 @@ class RPointPluginService:
         """
         logger.info(f"开始初始化R点插件缓存: {stock_code} {start_date} 至 {end_date}")
         
-        # 批量查询 daily 数据
-        daily_list = self.daily_repo.find_by_date_range(stock_code, start_date, end_date)
+        # 批量查询 daily 数据（允许外部注入，避免重复IO）
+        if daily_list is None:
+            daily_list = self.daily_repo.find_by_date_range(stock_code, start_date, end_date)
         self._daily_cache = {}
         for daily in daily_list:
             date_str = daily.date.strftime('%Y-%m-%d') if isinstance(daily.date, datetime) else str(daily.date)
             self._daily_cache[date_str] = daily
         
-        # 批量查询 daily_chance 数据
-        daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+        # 批量查询 daily_chance 数据（允许外部注入，避免重复IO）
+        if daily_chance_list is None:
+            daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
         self._daily_chance_cache = {}
         for dc in daily_chance_list:
             date_str = dc.date.strftime('%Y-%m-%d') if isinstance(dc.date, datetime) else str(dc.date)

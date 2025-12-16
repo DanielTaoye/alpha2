@@ -21,7 +21,9 @@ class CRStrategyService:
         # 数据缓存
         self._daily_chance_cache = {}  # {date_str: DailyChance}
     
-    def init_cache(self, stock_code: str, start_date: str, end_date: str):
+    def init_cache(self, stock_code: str, start_date: str, end_date: str,
+                   daily_chance_list: Optional[List] = None,
+                   daily_list: Optional[List] = None):
         """
         初始化数据缓存（批量查询）
         
@@ -32,8 +34,9 @@ class CRStrategyService:
         """
         logger.info(f"开始初始化CR策略缓存: {stock_code} {start_date} 至 {end_date}")
         
-        # 批量查询 daily_chance 数据
-        daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
+        # 批量查询 daily_chance 数据（允许外部注入，避免重复IO）
+        if daily_chance_list is None:
+            daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
         self._daily_chance_cache = {}
         for dc in daily_chance_list:
             from datetime import datetime
@@ -42,8 +45,14 @@ class CRStrategyService:
         
         logger.info(f"CR策略缓存初始化完成: daily_chance={len(self._daily_chance_cache)}条")
         
-        # 同时初始化插件服务的缓存
-        self.plugin_service.init_cache(stock_code, start_date, end_date)
+        # 同时初始化插件服务的缓存（复用同一份预加载数据，避免重复IO）
+        self.plugin_service.init_cache(
+            stock_code,
+            start_date,
+            end_date,
+            daily_list=daily_list,
+            daily_chance_list=daily_chance_list,
+        )
     
     def clear_cache(self):
         """清空缓存"""
