@@ -109,12 +109,21 @@ class LatestCRPointService:
             historical_r_points = []
             try:
                 if kline_data:
+                    # ✅ 性能优化（仅 latest_cr_points 接口生效）：
+                    # 为了插件判断，仅计算最近 N 个交易日的历史CR点，避免全量历史循环
+                    HISTORY_TRADING_DAYS = 90
+                    if len(kline_data) > HISTORY_TRADING_DAYS:
+                        kline_data_for_history = kline_data[-HISTORY_TRADING_DAYS:]
+                        logger.info(f"  ✅ 历史CR点仅计算最近{HISTORY_TRADING_DAYS}个交易日: {len(kline_data)} -> {len(kline_data_for_history)}")
+                    else:
+                        kline_data_for_history = kline_data
+
                     # 转换为KLineData对象
                     from domain.models.kline import KLineData
                     from datetime import datetime as dt
                     
                     kline_objects = []
-                    for kline in kline_data:
+                    for kline in kline_data_for_history:
                         kline_obj = KLineData(
                             time=dt.strptime(kline['time'], '%Y-%m-%d %H:%M:%S'),
                             open=kline['open'],
@@ -134,8 +143,8 @@ class LatestCRPointService:
                     volume_types_hist = {}
                     bullish_patterns_hist = {}
                     
-                    start_date = kline_data[0]['time'].split(' ')[0]
-                    end_date = kline_data[-1]['time'].split(' ')[0]
+                    start_date = kline_data_for_history[0]['time'].split(' ')[0]
+                    end_date = kline_data_for_history[-1]['time'].split(' ')[0]
                     
                     daily_chances = daily_chance_repo.find_by_stock_code(
                         full_stock_code, start_date, end_date
@@ -152,13 +161,33 @@ class LatestCRPointService:
                     from application.services.cr_point_service import CRPointService
                     cr_service = CRPointService()
                     
-                    logger.info(f"  🔥 调用 analyze_cr_points 分析历史数据（共{len(kline_objects)}条K线）...")
+                    # ⚠️ 注意：CRPointService.analyze_cr_points 内部的策略2会用 index 访问 MA/MACD 数组
+                    # 因此这里必须把 MA/MACD 数据裁剪到与 kline_objects 相同长度，避免索引错位/越界
+                    ma_hist = kline_data_result.get('ma', {}) or {}
+                    macd_hist = kline_data_result.get('macd', {}) or {}
+                    n_hist = len(kline_objects)
+
+                    ma_hist_sliced = {}
+                    for key, arr in ma_hist.items():
+                        if isinstance(arr, list) and len(arr) >= n_hist:
+                            ma_hist_sliced[key] = arr[-n_hist:]
+                        else:
+                            ma_hist_sliced[key] = arr
+
+                    macd_hist_sliced = {}
+                    for key, arr in macd_hist.items():
+                        if isinstance(arr, list) and len(arr) >= n_hist:
+                            macd_hist_sliced[key] = arr[-n_hist:]
+                        else:
+                            macd_hist_sliced[key] = arr
+
+                    logger.info(f"  🔥 调用 analyze_cr_points 分析历史数据（最近{n_hist}条日K）...")
                     cr_result = cr_service.analyze_cr_points(
                         full_stock_code,
                         '',  # stock_name
                         kline_objects,
-                        ma_data=kline_data_result.get('ma', {}),
-                        macd_data=kline_data_result.get('macd', {}),
+                        ma_data=ma_hist_sliced,
+                        macd_data=macd_hist_sliced,
                         volume_types=volume_types_hist,
                         bullish_patterns=bullish_patterns_hist
                     )
@@ -599,9 +628,42 @@ class LatestCRPointService:
         try:
             from datetime import datetime
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-            
-            # 找到当前日期在kline_data中的索引
-            current_index = len(kline_data) - 1
+
+            # 将 kline_data(dict) 转为 KLineData 对象列表
+            # 重要：R点插件的部分逻辑（如箱体回踩）会直接访问 kline_data[i].high/low
+            from domain.models.kline import KLineData as DomainKLineData
+
+            def _parse_dt(value: str) -> datetime:
+                if not value:
+                    return date_obj
+                candidate = str(value).replace("T", " ").split(".")[0]
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                    try:
+                        return datetime.strptime(candidate, fmt)
+                    except ValueError:
+                        continue
+                return date_obj
+
+            kline_objects = []
+            for k in kline_data:
+                try:
+                    kline_objects.append(
+                        DomainKLineData(
+                            time=_parse_dt(k.get("time")),
+                            open=float(k.get("open", 0) or 0),
+                            high=float(k.get("high", 0) or 0),
+                            low=float(k.get("low", 0) or 0),
+                            close=float(k.get("close", 0) or 0),
+                            volume=float(k.get("volume", 0) or 0),
+                            liangbi=float(k.get("liangbi", 0) or 0),
+                            weibi=float(k.get("weibi", 0) or 0),
+                        )
+                    )
+                except Exception:
+                    continue
+
+            # 找到当前日期在kline_data中的索引（转换后列表）
+            current_index = len(kline_objects) - 1
             
             # 转换c_point_date为datetime对象
             c_point_date_obj = None
@@ -622,7 +684,7 @@ class LatestCRPointService:
                 ma_data,
                 macd_data,
                 current_index,
-                kline_data,
+                kline_objects,
                 last_valid_point_type=None  # 单日计算不维护序列，这里置None
             )
             
