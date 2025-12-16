@@ -449,7 +449,7 @@ class RPointPluginService:
         2）临近压力位 + 前两日放量 + 风险K线
         
         公共前置：
-        - 向前找到最近的有效C，且该C之前最近的是R（C前是R，C前无更近的C）；否则不触发
+        - 向前找到最近的有效C（上一个点为C）；否则不触发
         - 取“今日前一交易日”的压力线，与“发C日”的压力线比较，若发C日压力线 > 今日前一日压力线 => 不触发
         - 若发C日压力线为空/0，则用“发C日前一日收盘”到“今日收盘”涨幅，需 >15%，否则不触发
         - 前一交易日赔率 > 0
@@ -493,8 +493,8 @@ class RPointPluginService:
             if not prev_chance or not prev_data:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 回溯最近C且其前是R：由上层传入最近C点和最近有效点类型，避免在此重算历史
-            if not c_point_date or last_valid_point_type != 'R':
+            # 回溯最近C点：由上层传入最近C点和最近有效点类型，避免在此重算历史
+            if not c_point_date or last_valid_point_type != 'C':
                 return RPointPluginResult("临近压力位滞涨", False, "")
             c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else str(c_point_date)
             
