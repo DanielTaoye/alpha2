@@ -10,6 +10,9 @@ from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 市场类型日期切换点：2025-02-05（不含）之前=熊市，含当天及之后=牛市
+MARKET_TYPE_CUTOFF = datetime(2025, 2, 5).date()
+
 
 class ConfigService:
     """配置管理服务"""
@@ -130,10 +133,29 @@ class ConfigService:
             logger.error(f"配置保存失败: {e}")
             raise
     
+    def _compute_market_type(self) -> str:
+        """根据日期规则计算市场类型"""
+        today = datetime.now().date()
+        return 'bear' if today < MARKET_TYPE_CUTOFF else 'bull'
+
+    def _get_market_type_rule_info(self) -> Dict[str, Any]:
+        """返回市场类型自动判定规则说明"""
+        return {
+            "mode": "date_rule",
+            "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",
+            "cutoff_date": MARKET_TYPE_CUTOFF.isoformat()
+        }
+
     def get_config(self) -> Dict[str, Any]:
-        """获取完整配置"""
+        """获取完整配置，附带自动判定的市场类型"""
         if self._config_cache is None:
             self._load_config()
+
+        # 在配置中强制写入自动判定结果与规则说明，供前端展示
+        self._config_cache['market_type'] = self._compute_market_type()
+        self._config_cache['market_type_rule'] = self._get_market_type_rule_info()
+        self._config_cache['market_type_description'] = "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市"
+
         return self._config_cache
     
     def get_strategy1_threshold(self, stock_nature: Optional[str] = None) -> float:
@@ -158,9 +180,8 @@ class ConfigService:
         return result
     
     def get_market_type(self) -> str:
-        """获取市场类型"""
-        config = self.get_config()
-        return config.get('market_type', 'bull')
+        """获取市场类型（自动判定）"""
+        return self._compute_market_type()
     
     def get_pressure_stagnation_distance_threshold(self) -> float:
         """获取临近压力位滞涨插件的距离阈值（百分比）"""
@@ -207,10 +228,8 @@ class ConfigService:
                 logger.info(f"策略2股性[{nature}]阈值更新为: {value}")
         
         if market_type is not None:
-            if market_type not in ['bull', 'bear']:
-                raise ValueError(f"无效的市场类型: {market_type}，必须是 'bull' 或 'bear'")
-            config['market_type'] = market_type
-            logger.info(f"市场类型更新为: {market_type}")
+            # 市场类型已由日期规则自动判定，忽略外部更新请求
+            logger.info(f"市场类型更新请求已忽略，当前自动判定值为: {self._compute_market_type()}")
         
         # 确保r_point_plugins配置存在
         if 'r_point_plugins' not in config:

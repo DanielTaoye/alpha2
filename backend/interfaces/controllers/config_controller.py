@@ -31,7 +31,8 @@ class ConfigController:
             
             strategy1_threshold = data.get('strategy1_threshold')
             strategy2_threshold = data.get('strategy2_threshold')
-            market_type = data.get('market_type')
+            # 市场类型由日期规则自动判定，忽略外部输入
+            market_type = None
             pressure_distance_threshold = data.get('pressure_distance_threshold')
             high_position_gain_threshold = data.get('high_position_gain_threshold')
             strategy1_nature_thresholds_raw = data.get('strategy1_nature_thresholds') or data.get('strategy1_thresholds')
@@ -53,10 +54,6 @@ class ConfigController:
                         return jsonify(ResponseBuilder.error('策略2阈值必须在0-100之间')), 400
                 except (ValueError, TypeError):
                     return jsonify(ResponseBuilder.error('策略2阈值必须是数字')), 400
-            
-            if market_type is not None:
-                if market_type not in ['bull', 'bear']:
-                    return jsonify(ResponseBuilder.error('市场类型必须是 bull 或 bear')), 400
             
             if pressure_distance_threshold is not None:
                 try:
@@ -103,7 +100,6 @@ class ConfigController:
             updated_config = self.config_service.update_config(
                 strategy1_threshold=strategy1_threshold,
                 strategy2_threshold=strategy2_threshold,
-                market_type=market_type,
                 pressure_distance_threshold=pressure_distance_threshold,
                 high_position_gain_threshold=high_position_gain_threshold,
                 strategy1_nature_thresholds=strategy1_nature_thresholds,
@@ -116,8 +112,6 @@ class ConfigController:
                 update_info_parts.append(f'策略1:{strategy1_threshold}')
             if strategy2_threshold is not None:
                 update_info_parts.append(f'策略2:{strategy2_threshold}')
-            if market_type is not None:
-                update_info_parts.append(f'市场类型:{market_type}')
             if pressure_distance_threshold is not None:
                 update_info_parts.append(f'压力位距离阈值:{pressure_distance_threshold}%')
             if high_position_gain_threshold is not None:

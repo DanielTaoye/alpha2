@@ -535,25 +535,25 @@
             <div class="config-section">
                 <h2>
                     市场类型配置
-                    <span class="strategy-badge" style="background: #FF9800;">人工判断</span>
+                    <span class="strategy-badge" style="background: #9E9E9E;">自动规则</span>
                 </h2>
                 
                 <div class="form-group">
-                    <label>当前市场类型（手动选择）</label>
-                    <div class="radio-group">
+                    <label>当前市场类型（自动判定）</label>
+                    <div class="radio-group" style="pointer-events: none; opacity: 0.6;">
                         <div class="radio-option">
-                            <input type="radio" id="marketBull" name="marketType" value="bull" checked>
+                            <input type="radio" id="marketBull" name="marketType" value="bull" checked disabled>
                             <label for="marketBull">🐂 牛市</label>
                         </div>
                         <div class="radio-option">
-                            <input type="radio" id="marketBear" name="marketType" value="bear">
+                            <input type="radio" id="marketBear" name="marketType" value="bear" disabled>
                             <label for="marketBear">🐻 熊市</label>
                         </div>
                     </div>
-                    <p class="description">
-                        市场类型由人工判断设置，不根据历史数据自动判断。<br>
-                        某些插件的行为会根据市场类型调整策略（具体插件待后续配置）。
+                    <p class="description" id="marketTypeRuleText">
+                        市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市。
                     </p>
+                    <p class="description">牛熊切换暂不支持调参，按钮已置灰，仅用于展示。</p>
                 </div>
             </div>
 
@@ -793,10 +793,12 @@
                     
                     // 更新市场类型显示
                     const marketType = config.market_type || 'bull';
+                    const marketRule = config.market_type_rule?.rule_text || '2025-02-05（不含）前为熊市，含当天及之后为牛市';
                     const marketTypeText = marketType === 'bull' ? '🐂 牛市' : '🐻 熊市';
                     const marketTypeBadge = marketType === 'bull' ? 'bull-badge' : 'bear-badge';
                     document.getElementById('currentMarketType').innerHTML = 
                         `<span class="market-badge ${marketTypeBadge}">${marketTypeText}</span>`;
+                    document.getElementById('marketTypeRuleText').textContent = `当前规则：${marketRule}`;
                     
                     document.getElementById('lastUpdated').textContent = config.last_updated || '-';
 
@@ -851,7 +853,6 @@
                 const strategy2Mid = parseFloat(document.getElementById('strategy2ThresholdMid').value);
                 const strategy2 = strategy2Swing;
 
-                const marketType = document.querySelector('input[name="marketType"]:checked').value;
                 const highPositionGain = parseFloat(document.getElementById('highPositionGainThreshold').value);
                 const pressureDistance = parseFloat(document.getElementById('pressureDistanceThreshold').value);
 
@@ -900,7 +901,6 @@
                     body: JSON.stringify({
                         strategy1_threshold: strategy1,
                         strategy2_threshold: strategy2,
-                        market_type: marketType,
                         high_position_gain_threshold: highPositionGain,
                         pressure_distance_threshold: pressureDistance,
                         strategy1_nature_thresholds: strategy1NatureThresholds,
