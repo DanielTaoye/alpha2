@@ -36,6 +36,7 @@ class RPointPluginService:
         # 数据缓存
         self._daily_cache = {}  # {date_str: DailyData}
         self._daily_chance_cache = {}  # {date_str: DailyChance}
+        self._sorted_dates = []  # 🚀 性能优化：预排序日期列表，避免每次都 sorted()
         self._cr_history_cache = {}  # {(stock_code, cutoff_date): {'c': [...], 'r': [...]}}
     
     def init_cache(self, stock_code: str, start_date: str, end_date: str,
@@ -58,6 +59,9 @@ class RPointPluginService:
         for daily in daily_list:
             date_str = daily.date.strftime('%Y-%m-%d') if isinstance(daily.date, datetime) else str(daily.date)
             self._daily_cache[date_str] = daily
+
+        # 🚀 性能优化：预排序日期列表（只排序一次）
+        self._sorted_dates = sorted(self._daily_cache.keys(), reverse=True)
         
         # 批量查询 daily_chance 数据（允许外部注入，避免重复IO）
         if daily_chance_list is None:
@@ -73,6 +77,7 @@ class RPointPluginService:
         """清空缓存"""
         self._daily_cache = {}
         self._daily_chance_cache = {}
+        self._sorted_dates = []
     
     def check_r_point(self, stock_code: str, date: datetime, c_point_date: Optional[datetime] = None,
                      ma_data: Optional[dict] = None, macd_data: Optional[dict] = None, 
@@ -791,15 +796,16 @@ class RPointPluginService:
             elif isinstance(current_date_str, date):
                 current_date_str = current_date_str.strftime('%Y-%m-%d')
             
-            # 首先尝试从缓存获取
-            all_dates = sorted(self._daily_cache.keys(), reverse=True)
+            # 首先从缓存获取（缓存初始化后只用内存，避免循环内回退查库）
+            all_dates = self._sorted_dates if self._sorted_dates else sorted(self._daily_cache.keys(), reverse=True)
             result = []
             for date_str in all_dates:
                 if date_str < current_date_str:
                     result.append(date_str)
 
-            # 如果缓存中没有足够数据，从数据库查询真实交易日
-            if len(result) < 25 and stock_code:
+            # 如果缓存未初始化（或缓存为空）才允许回退查询数据库交易日
+            # 重要：在 analyze 接口中我们已做区间预加载，正常不应走到这里
+            if (not self._daily_cache) and len(result) < 25 and stock_code:
                 try:
                     # 从数据库查询前N个交易日
                     table_name = f"basic_data_{stock_code.lower()}"
@@ -830,6 +836,28 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"获取前N个交易日失败: {e}")
             return []
+
+    def _get_prev_close_from_cache(self, current_date_str: str) -> Optional[float]:
+        """
+        从缓存中获取某日期的前一交易日收盘价（不查数据库）。
+        """
+        try:
+            if isinstance(current_date_str, datetime):
+                current_date_str = current_date_str.strftime('%Y-%m-%d')
+            elif isinstance(current_date_str, date):
+                current_date_str = current_date_str.strftime('%Y-%m-%d')
+            if not current_date_str:
+                return None
+
+            prev_dates = self._get_previous_trading_dates_from_cache(current_date_str)
+            if not prev_dates:
+                return None
+            prev_data = self._daily_cache.get(prev_dates[0])
+            if prev_data and getattr(prev_data, "close", 0) and prev_data.close > 0:
+                return float(prev_data.close)
+            return None
+        except Exception:
+            return None
 
     def _check_strong_to_weak_not_reversed(self, stock_code: str, date: datetime) -> RPointPluginResult:
         """
@@ -1564,16 +1592,10 @@ class RPointPluginService:
         if current_data.pre_close and current_data.pre_close > 0:
             return ((current_data.high - current_data.low) / current_data.pre_close) * 100
 
-        # 如果pre_close无效，查询前一天的收盘价
-        try:
-            prev_dates = self._get_previous_trading_dates_from_cache(current_data.date, stock_code)
-            if prev_dates:
-                prev_date = prev_dates[0]  # 前一个交易日
-                prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
-                if prev_data and prev_data.close > 0:
-                    return ((current_data.high - current_data.low) / prev_data.close) * 100
-        except Exception as e:
-            logger.warning(f"查询前一日数据失败 ({stock_code}): {e}")
+        # 如果pre_close无效，优先从缓存获取前一日收盘价（避免循环内查库）
+        prev_close = self._get_prev_close_from_cache(getattr(current_data, "date", None) or "")
+        if prev_close and prev_close > 0:
+            return ((current_data.high - current_data.low) / prev_close) * 100
 
         # 如果都失败了，使用开盘价作为基准（最后的后备方案）
         if current_data.open and current_data.open > 0:
@@ -1651,45 +1673,20 @@ class RPointPluginService:
         H = daily_data.high
         L = daily_data.low
         
-        # 获取前收价：优先使用pre_close，如果无效则查询前一交易日的收盘价
+        # 获取前收价：优先使用pre_close；无效时仅从缓存补齐（不做DB回退，避免循环内SQL放大）
         prev_close = daily_data.pre_close if hasattr(daily_data, 'pre_close') else 0
         if not prev_close or prev_close == 0:
             if stock_code:
                 try:
-                    # 方法1：从缓存获取
-                    prev_dates = self._get_previous_trading_dates_from_cache(daily_data.date, stock_code)
-                    if prev_dates:
-                        prev_date = prev_dates[0]
-                        # 先从缓存查
-                        prev_data = self._daily_cache.get(prev_date)
-                        if not prev_data:
-                            prev_data = self.daily_repo.find_by_date(stock_code, prev_date)
-                        if prev_data and prev_data.close > 0:
-                            prev_close = prev_data.close
-                            logger.debug(f"[K线形态] 从前一交易日({prev_date})获取收盘价: {prev_close}")
-                    
-                    # 方法2：如果缓存没有，直接查数据库前一个交易日
-                    if not prev_close or prev_close == 0:
-                        table_name = f"basic_data_{stock_code.lower()}"
-                        from infrastructure.persistence.database import DatabaseConnection
-                        date_str = daily_data.date.strftime('%Y-%m-%d') if hasattr(daily_data.date, 'strftime') else str(daily_data.date)[:10]
-                        with DatabaseConnection.get_connection_context() as conn:
-                            cursor = conn.cursor()
-                            sql = f"""
-                                SELECT shou_pan_jia FROM `{table_name}`
-                                WHERE DATE(shi_jian) < %s AND peroid_type = '1day'
-                                ORDER BY shi_jian DESC LIMIT 1
-                            """
-                            cursor.execute(sql, (date_str,))
-                            row = cursor.fetchone()
-                            if row and row[0]:
-                                prev_close = float(row[0])
-                                logger.debug(f"[K线形态] 从数据库查询前一交易日收盘价: {prev_close}")
+                    date_str = daily_data.date.strftime('%Y-%m-%d') if hasattr(daily_data.date, 'strftime') else str(daily_data.date)[:10]
+                    prev_close_cached = self._get_prev_close_from_cache(date_str)
+                    if prev_close_cached and prev_close_cached > 0:
+                        prev_close = prev_close_cached
                 except Exception as e:
-                    logger.warning(f"[K线形态] 获取前收价失败: {e}")
+                    logger.debug(f"[K线形态] 从缓存获取前收价失败: {e}")
                     return []
             else:
-                return []  # 没有stock_code无法查询
+                return []  # 没有stock_code无法从缓存推断交易日顺序
         
         if prev_close == 0:
             logger.warning(f"[K线形态] 无法获取有效的前收价，跳过K线形态检测")

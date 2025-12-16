@@ -25,11 +25,14 @@ class MAService:
             return [None] * len(prices)
         
         sma = [None] * len(prices)
-        
-        # 计算每个位置的SMA
-        for i in range(period - 1, len(prices)):
-            window = prices[i - period + 1:i + 1]
-            sma[i] = sum(window) / period
+
+        # 性能优化：使用滚动和，避免每次切片/求和产生 O(period) 的额外开销
+        window_sum = sum(prices[:period])
+        sma[period - 1] = window_sum / period
+
+        for i in range(period, len(prices)):
+            window_sum += prices[i] - prices[i - period]
+            sma[i] = window_sum / period
         
         return sma
     

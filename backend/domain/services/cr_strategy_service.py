@@ -1,5 +1,6 @@
 """CR策略领域服务"""
 from typing import Optional, Tuple, List, Dict, Any
+import logging
 from datetime import datetime
 from domain.models.cr_point import ABCComponents
 from domain.services.c_point_plugin_service import CPointPluginService, CPointPluginResult
@@ -117,13 +118,15 @@ class CRStrategyService:
                 (是否触发, 最终分, 策略描述, 触发的插件列表, 基础分, 是否被插件否决)
         """
         strategy_name = "策略一-赔率+胜率综合评分+插件"
-        
-        logger.info(f"🔍 [CRStrategyService] check_c_point_strategy_1 被调用:")
-        logger.info(f"  - stock_code: {stock_code}")
-        logger.info(f"  - date: {date}")
-        logger.info(f"  - volume_type (传入): {volume_type}")
-        logger.info(f"  - total_win_rate_score (传入): {total_win_rate_score}")
-        logger.info(f"  - stock_nature (传入): {stock_nature}")
+
+        # 性能优化：此方法会在主循环内被调用数百次；将“过程日志”降为 debug，且使用惰性格式化避免无谓字符串拼接
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("🔍 [CRStrategyService] check_c_point_strategy_1 被调用:")
+            logger.debug("  - stock_code: %s", stock_code)
+            logger.debug("  - date: %s", date)
+            logger.debug("  - volume_type (传入): %s", volume_type)
+            logger.debug("  - total_win_rate_score (传入): %s", total_win_rate_score)
+            logger.debug("  - stock_nature (传入): %s", stock_nature)
         
         resolved_nature = stock_nature
         
@@ -131,19 +134,20 @@ class CRStrategyService:
         # 注意：volume_type 可以为 None（表示没有有效的放量类型），这是合法的
         if total_win_rate_score is None:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            
-            logger.info(f"  🔎 [CRStrategyService] 需要从数据库查询 daily_chance:")
-            logger.info(f"    - stock_code: {stock_code}")
-            logger.info(f"    - date_str: {date_str}")
+
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("  🔎 [CRStrategyService] 需要从数据库查询 daily_chance:")
+                logger.debug("    - stock_code: %s", stock_code)
+                logger.debug("    - date_str: %s", date_str)
             
             # 优先使用缓存
             daily_chance = self._daily_chance_cache.get(date_str)
             if not daily_chance:
                 # 缓存未命中，查询数据库
-                logger.info(f"  🔎 缓存未命中，查询数据库...")
+                logger.debug("  🔎 缓存未命中，查询数据库...")
                 daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
             else:
-                logger.info(f"  ✅ 从缓存获取到数据")
+                logger.debug("  ✅ 从缓存获取到数据")
             
             if not daily_chance:
                 logger.warning(f"❌ {strategy_name}: 未找到股票 {stock_code} 在 {date_str} 的daily_chance数据")
@@ -158,25 +162,26 @@ class CRStrategyService:
             if resolved_nature is None:
                 resolved_nature = getattr(daily_chance, "stock_nature", None)
             
-            logger.info(f"  ✅ 从数据库获取:")
-            logger.info(f"    - volume_type: {volume_type}")
-            logger.info(f"    - total_win_rate_score: {total_win_rate_score}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("  ✅ 获取到 daily_chance:")
+                logger.debug("    - volume_type: %s", volume_type)
+                logger.debug("    - total_win_rate_score: %s", total_win_rate_score)
         
         resolved_nature = resolved_nature or "波段"
-        logger.info(f"  🧬 [Strategy1] 股性: {resolved_nature}")
+        logger.debug("  🧬 [Strategy1] 股性: %s", resolved_nature)
         
         # === 基础层计算 ===
         # 赔率分
         win_ratio_score = total_win_rate_score if total_win_rate_score is not None else 0
-        logger.info(f"  💰 [Strategy1-BaseScore] 赔率分: {win_ratio_score}")
+        logger.debug("  💰 [Strategy1-BaseScore] 赔率分: %s", win_ratio_score)
         
         # 计算胜率分
         win_rate_score = self._calculate_win_rate_score(volume_type)
-        logger.info(f"  📈 [Strategy1-BaseScore] 胜率分: {win_rate_score} (成交量类型: {volume_type})")
+        logger.debug("  📈 [Strategy1-BaseScore] 胜率分: %s (成交量类型: %s)", win_rate_score, volume_type)
         
         # 基础总分
         base_score = win_ratio_score + win_rate_score
-        logger.info(f"  🎯 [Strategy1-BaseScore] 基础总分: {base_score} = {win_ratio_score} + {win_rate_score}")
+        logger.debug("  🎯 [Strategy1-BaseScore] 基础总分: %s = %s + %s", base_score, win_ratio_score, win_rate_score)
         
         # === 计算层（插件）===
         final_score, triggered_plugins, force_c_point = self.plugin_service.apply_plugins(
@@ -236,33 +241,33 @@ class CRStrategyService:
         Returns:
             胜率分
         """
-        logger.info(f"  📊 [WinRateScore] 计算胜率分, volume_type={volume_type}")
+        logger.debug("  📊 [WinRateScore] 计算胜率分, volume_type=%s", volume_type)
         
         if not volume_type:
-            logger.info(f"    ❌ volume_type为空, 返回0分")
+            logger.debug("    ❌ volume_type为空, 返回0分")
             return 0
         
         # 分割多个类型
         types = [t.strip() for t in volume_type.split(',')]
-        logger.info(f"    分割后的类型列表: {types}")
+        logger.debug("    分割后的类型列表: %s", types)
         
         # 异常量（E或F）优先级最高，如果包含E或F，则得0分
         if 'E' in types or 'F' in types:
-            logger.info(f"    ❌ 包含异常量(E/F), 返回0分")
+            logger.debug("    ❌ 包含异常量(E/F), 返回0分")
             return 0
         
         # 温和放量（ABCD）任意一种，得40分
         if any(t in ['A', 'B', 'C', 'D'] for t in types):
-            logger.info(f"    ✅ 包含温和放量(A/B/C/D), 返回40分")
+            logger.debug("    ✅ 包含温和放量(A/B/C/D), 返回40分")
             return 40
         
         # 其他特殊型（H），得28分
         if 'H' in types:
-            logger.info(f"    ✅ 包含特殊型(H), 返回28分")
+            logger.debug("    ✅ 包含特殊型(H), 返回28分")
             return 28
         
         # 其他情况（如X、Y、Z、G等），不得分
-        logger.info(f"    ❌ 其他类型, 返回0分")
+        logger.debug("    ❌ 其他类型, 返回0分")
         return 0
     
     @staticmethod
