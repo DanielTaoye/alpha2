@@ -453,7 +453,7 @@ class RPointPluginService:
         - 取“今日前一交易日”的压力线，与“发C日”的压力线比较，若发C日压力线 > 今日前一日压力线 => 不触发
         - 若发C日压力线为空/0，则用“发C日前一日收盘”到“今日收盘”涨幅，需 >15%，否则不触发
         - 前一交易日赔率 > 0
-        - 距离压力线：0% < (压力线-今日收盘)/今日收盘 < 8%（固定阈值，主/非主一致）
+        - 距离压力线：0% < (压力线-今日收盘)/今日收盘 < 距离阈值（主/非主一致，可配置，默认10%）
         
         情形1（放量当日）：
         - 当日放量（XYZH）
@@ -471,7 +471,7 @@ class RPointPluginService:
             is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             amplitude_threshold = 6 if is_main_board else 8
             decline_threshold = 3 if is_main_board else 5
-            distance_threshold = 8.0  # 固定8%
+            distance_threshold = self.config_service.get_pressure_stagnation_distance_threshold() or 8.0
             
             # 当日数据
             current_data = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
