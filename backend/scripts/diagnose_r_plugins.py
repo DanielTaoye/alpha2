@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import argparse
 import requests
+from functools import lru_cache
 
 # 控制台输出强制使用UTF-8，避免 Windows 控制台 emoji/中文报编码错误
 try:
@@ -30,6 +31,8 @@ from infrastructure.persistence.database import DatabaseConnection
 from infrastructure.logging.logger import get_logger
 from domain.services.r_point_plugin_service import RPointPluginService
 from domain.services.kline_pattern_service import KLinePatternService
+from application.services.cr_point_service import CRPointService
+from domain.models.kline import KLineData as DomainKLineData
 
 logger = get_logger(__name__)
 
@@ -64,6 +67,109 @@ def get_cr_points_from_api(stock_code: str, table_name: str, start_date: str = N
     except Exception as e:
         print(f"❌ 获取K线数据失败: {e}")
         return None
+
+
+def _parse_dt(value):
+    """将接口返回的日期/时间转为 datetime"""
+    if hasattr(value, "strftime"):
+        return value
+    if value is None:
+        return None
+    candidate = str(value).replace("T", " ").split(".")[0]
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(candidate, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_data: Dict) -> Tuple[Optional[str], Optional[str]]:
+    """
+    基于 CR 全量计算推断目标日前最近的有效点类型与最近的C点日期
+    返回: (last_c_point_date_str, last_valid_point_type)
+    """
+    try:
+        kline_list = api_data.get('kline_data') or api_data.get('klineData') or []
+        if not kline_list:
+            return None, None
+
+        # 目标日期转换
+        target_dt = _parse_dt(date_str)
+        if not target_dt:
+            return None, None
+
+        # 转 DomainKLineData
+        k_objs = []
+        for k in kline_list:
+            dt = _parse_dt(k.get('date') or k.get('time'))
+            if not dt:
+                continue
+            k_objs.append(DomainKLineData(
+                time=dt,
+                open=float(k.get('open', 0) or 0),
+                high=float(k.get('high', 0) or 0),
+                low=float(k.get('low', 0) or 0),
+                close=float(k.get('close', 0) or 0),
+                volume=float(k.get('volume', 0) or 0),
+                liangbi=float(k.get('liangbi', 0) or 0),
+                weibi=float(k.get('weibi', 0) or 0),
+            ))
+
+        if not k_objs:
+            return None, None
+
+        # 只计算到目标日，避免未来数据干扰
+        k_objs = [k for k in k_objs if k.time <= target_dt]
+        if not k_objs:
+            return None, None
+
+        # 需要 MA/MACD 参与策略2计算（若缺失会自动降级）
+        ma_data = api_data.get('ma', {})
+        macd_data = api_data.get('macd', {})
+
+        cr_service = CRPointService()
+        cr_result = cr_service.analyze_cr_points(
+            stock_code,
+            stock_name,
+            k_objs,
+            ma_data=ma_data,
+            macd_data=macd_data,
+            volume_types=None,
+            bullish_patterns=None,
+            stock_nature=None
+        )
+
+        c_points = cr_result.get('c_points', []) or []
+        r_points = cr_result.get('r_points', []) or []
+
+        def _last_before(points, ptype):
+            last_dt = None
+            for p in points:
+                if p.get('pointType') != ptype:
+                    continue
+                dt = _parse_dt(p.get('triggerDate'))
+                if dt and dt <= target_dt and (last_dt is None or dt > last_dt):
+                    last_dt = dt
+            return last_dt
+
+        last_c_dt = _last_before(c_points, 'C')
+        last_r_dt = _last_before(r_points, 'R')
+
+        last_type = None
+        last_dt = None
+        if last_c_dt and (last_dt is None or last_c_dt > last_dt):
+            last_type = 'C'
+            last_dt = last_c_dt
+        if last_r_dt and (last_dt is None or last_r_dt > last_dt):
+            last_type = 'R'
+            last_dt = last_r_dt
+
+        last_c_str = last_c_dt.strftime('%Y-%m-%d') if last_c_dt else None
+        return last_c_str, last_type
+    except Exception as e:
+        print(f"⚠️ 推断CR序列失败: {e}")
+        return None, None
 
 
 def search_stock(keyword: str) -> Optional[Dict]:
@@ -207,6 +313,25 @@ def get_daily_chance(stock_code: str, date_str: str) -> Optional[Dict]:
     except Exception as e:
         print(f"❌ 获取daily_chance数据失败: {e}")
         return None
+
+
+def get_prev_daily_chances(stock_code: str, date_str: str, limit: int = 2) -> List[Dict]:
+    """获取目标日期之前的最近N个交易日daily_chance（倒序返回）"""
+    try:
+        with DatabaseConnection.get_connection_context() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            sql = """
+                SELECT *
+                FROM b_daily_chance
+                WHERE stock_code = %s AND DATE(date) < %s
+                ORDER BY DATE(date) DESC
+                LIMIT %s
+            """
+            cursor.execute(sql, (stock_code, date_str, limit))
+            return cursor.fetchall() or []
+    except Exception as e:
+        print(f"❌ 获取历史daily_chance失败: {e}")
+        return []
 
 
 def get_historical_daily_data(stock_code: str, date_str: str, days: int = 25) -> List[Dict]:
@@ -486,6 +611,13 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     print("📊 插件2: 临近压力位滞涨")
     print("=" * 80)
     
+    # 补充：打印上一个C点位置（若有）
+    if current_chance and current_chance.get('last_c_point'):
+        last_c = current_chance.get('last_c_point')
+        print(f"  上一个C点: {last_c}")
+    elif current_chance and current_chance.get('last_c_point_date'):
+        print(f"  上一个C点日期: {current_chance.get('last_c_point_date')}")
+    
     if not prev_chance:
         print("  ❌ 无前一日daily_chance数据，无法判断")
         return
@@ -523,6 +655,85 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     is_volume_xyzh = any(t in xyzh_types for t in volume_types)
     print(f"  成交量类型: {volume_type or '无'}")
     print(f"  是否放量(XYZH): {'✅' if is_volume_xyzh else '❌'}")
+
+    # 准备当日风险K线判定
+    is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
+    amplitude_threshold = 6 if is_main_board else 8
+    decline_threshold = 3 if is_main_board else 5
+
+    pattern_today = KLinePatternService.identify_pattern(
+        stock_code,
+        current_data['open'],
+        current_data['close'],
+        current_data['high'],
+        current_data['low'],
+        current_data.get('pre_close', current_data['close'])
+    )
+    pre_close = current_data.get('pre_close') or current_data['open']
+    amplitude_today = (current_data['high'] - current_data['low']) / pre_close * 100 if pre_close else 0
+    decline_today = (current_data['close'] - current_data['open']) / current_data['open'] * 100 if current_data['open'] else 0
+
+    risky_set = ["冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", "冲高回落阴十字星", "高开低走"]
+    is_risky_amp = pattern_today in risky_set and amplitude_today > amplitude_threshold
+    is_risky_decline = (current_data['close'] < current_data['open']) and (decline_today <= -decline_threshold)
+    is_risky_today = is_risky_amp or is_risky_decline
+
+    print("\n  --- 情形1：当日放量+风险K线 ---")
+    print(f"  当日是否放量(XYZH): {'✅' if is_volume_xyzh else '❌'}")
+    print(f"  当日形态: {pattern_today or '无'} | 振幅: {amplitude_today:.2f}% (阈值 {amplitude_threshold}%) | 跌幅: {decline_today:.2f}% (阈值 {-decline_threshold}%)")
+    print(f"  风险K线判定: {'✅' if is_risky_today else '❌'}（冲高回落/高开低走且振幅超阈值，或阴线跌幅超阈值）")
+
+    # 情形2：当日未放量，前两日任一天放量 + 当日风险K线（含乌云盖顶）
+    print("\n  --- 情形2：前两日放量+风险K线 ---")
+    prev_chances = get_prev_daily_chances(stock_code, date_str, 2)
+    day1 = prev_chances[0] if len(prev_chances) >= 1 else None
+    day2 = prev_chances[1] if len(prev_chances) >= 2 else None
+
+    def _is_volume(chance):
+        if not chance:
+            return False
+        vt = chance.get('volume_type') or ''
+        return any(t.strip() in ['X', 'Y', 'Z', 'H'] for t in vt.split(',') if t.strip())
+
+    def _pressure_distance_ok(chance):
+        if not chance or not chance.get('pressure_price'):
+            return None
+        chance_date_raw = chance.get('date')
+        chance_date = chance_date_raw.strftime('%Y-%m-%d') if hasattr(chance_date_raw, 'strftime') else str(chance_date_raw)
+        day_data = get_daily_data(stock_code, chance_date) if chance_date else None
+        if not day_data or not day_data.get('close'):
+            return None
+        p = float(chance['pressure_price']) / 100.0
+        dist = (p - day_data['close']) / day_data['close'] * 100
+        return dist, chance_date
+
+    day1_volume = _is_volume(day1)
+    day2_volume = _is_volume(day2)
+    day1_dist = _pressure_distance_ok(day1) if day1 else None
+    day2_dist = _pressure_distance_ok(day2) if day2 else None
+
+    if day1:
+        dist_str = f"{day1_dist[0]:.2f}%" if day1_dist else "无数据"
+        day1_date = day1_dist[1] if day1_dist and len(day1_dist) > 1 else (day1.get('date').strftime('%Y-%m-%d') if hasattr(day1.get('date'), 'strftime') else day1.get('date'))
+        print(f"  前一交易日({day1_date})放量(XYZH): {'✅' if day1_volume else '❌'}，距压: {dist_str}")
+    else:
+        print("  前一交易日: 无数据")
+
+    if day2:
+        dist_str = f"{day2_dist[0]:.2f}%" if day2_dist else "无数据"
+        day2_date = day2_dist[1] if day2_dist and len(day2_dist) > 1 else (day2.get('date').strftime('%Y-%m-%d') if hasattr(day2.get('date'), 'strftime') else day2.get('date'))
+        print(f"  前两交易日({day2_date})放量(XYZH): {'✅' if day2_volume else '❌'}，距压: {dist_str}")
+    else:
+        print("  前两交易日: 无数据")
+    # 当日风险K线（情形2判定集）
+    risk2_set = ["冲高回落阴线", "冲高回落阳线", "高开低走"]
+    bearish_combo_today = current_chance.get('bearish_pattern') or ''
+    has_cloud = "乌云盖顶" in bearish_combo_today if bearish_combo_today else False
+    is_risky_case2 = (pattern_today in risk2_set and amplitude_today > amplitude_threshold) or has_cloud
+
+    print(f"  当日形态: {pattern_today or '无'} | 振幅: {amplitude_today:.2f}% (阈值 {amplitude_threshold}%) | 跌幅: {decline_today:.2f}% (阈值 {-decline_threshold}%)")
+    print(f"  空头组合含乌云盖顶: {'✅' if has_cloud else '❌'}")
+    print(f"  风险K线判定(情形2): {'✅' if is_risky_case2 else '❌'}（冲高回落/高开低走振幅超阈值 或 乌云盖顶）")
 
 
 def diagnose_fundamental_negative(stock_code: str, date_str: str, current_data: Dict):
@@ -1101,6 +1312,39 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     
     # 获取历史数据
     historical_data = get_historical_daily_data(stock_code, date_str, 25)
+
+    # 缓存API数据，避免多次请求
+    api_data_cache = {}
+    table_name = stock_info.get('table_name', f"basic_data_{stock_code.lower()}")
+
+    @lru_cache(maxsize=1)
+    def load_api_data():
+        api_start_date = (datetime.strptime(date_str, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
+        data = get_cr_points_from_api(stock_code, table_name, api_start_date, date_str)
+        if data:
+            api_data_cache.update(data)
+        return data
+
+    # 如果未显式传入C点/上一有效点，尝试用CR全量计算推断
+    inferred_c_point = c_point_date
+    inferred_last_type = last_valid_point_type
+    api_data_for_infer = load_api_data()
+    if api_data_for_infer and (not c_point_date or not last_valid_point_type):
+        last_c, last_type = infer_last_cr_points(stock_code, stock_name, date_str, api_data_for_infer)
+        if not inferred_c_point:
+            inferred_c_point = last_c
+        if not inferred_last_type:
+            inferred_last_type = last_type
+        print("\n🧭 自动推断CR序列(基于CRPointService全量计算):")
+        print(f"   最近C点: {last_c or '未找到'}")
+        print(f"   上一有效点类型: {last_type or '未找到'}")
+    else:
+        if inferred_c_point or inferred_last_type:
+            print("\n🧭 使用外部传入的CR上下文")
+            if inferred_c_point:
+                print(f"   最近C点: {inferred_c_point}")
+            if inferred_last_type:
+                print(f"   上一有效点类型: {inferred_last_type}")
     
     # 运行实际的R点检查（第一遍：仅缓存数据，用于对比）
     print("\n" + "=" * 80)
@@ -1114,11 +1358,11 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
         r_plugin_service.init_cache(stock_code, start_date, date_str)
         
         # 检查R点（不带MA/MACD，可能导致插件7-10被跳过）
-        c_point_datetime = datetime.strptime(c_point_date, '%Y-%m-%d') if c_point_date else None
+        c_point_datetime = datetime.strptime(inferred_c_point, '%Y-%m-%d') if inferred_c_point else None
         check_date = datetime.strptime(date_str, '%Y-%m-%d')
         
         is_r_point, r_plugins = r_plugin_service.check_r_point(
-            stock_code, check_date, c_point_datetime, last_valid_point_type=last_valid_point_type
+            stock_code, check_date, c_point_datetime, last_valid_point_type=inferred_last_type
         )
         
         if is_r_point:
@@ -1148,8 +1392,8 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     table_name = stock_info.get('table_name', f"basic_data_{stock_code.lower()}")
     # 获取足够长的历史数据（60天）
     api_start_date = (datetime.strptime(date_str, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
-    api_data = get_cr_points_from_api(stock_code, table_name, api_start_date, date_str)
-    
+    api_data = api_data_cache or load_api_data()
+
     if api_data:
         ma_data = api_data.get('ma', {})
         macd_data = api_data.get('macd', {})
@@ -1201,14 +1445,14 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
                 r_plugin_service2 = RPointPluginService()
                 start_date2 = (datetime.strptime(date_str, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
                 r_plugin_service2.init_cache(stock_code, start_date2, date_str)
-                c_point_datetime = datetime.strptime(c_point_date, '%Y-%m-%d') if c_point_date else None
+                c_point_datetime = datetime.strptime(inferred_c_point, '%Y-%m-%d') if inferred_c_point else None
                 check_date = datetime.strptime(date_str, '%Y-%m-%d')
                 
                 is_r_point2, r_plugins2 = r_plugin_service2.check_r_point(
                     stock_code, check_date, c_point_datetime,
                     ma_data=ma_data, macd_data=macd_data,
                     current_index=target_index, kline_data=k_objs,
-                    last_valid_point_type=last_valid_point_type
+                    last_valid_point_type=inferred_last_type
                 )
                 
                 print("\n🛰 携带MA/MACD/索引的R点重检结果")
