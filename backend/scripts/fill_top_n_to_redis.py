@@ -163,6 +163,12 @@ def main():
     stocks = stocks[:top_n]
     print(f"🚀 开始计算前 {len(stocks)} 只股票，线程 {max_workers}")
 
+    # 日期化的Redis键，便于按天保存
+    keys = HighScoreCacheService.build_keys(os.getenv("SCORE_DATE"))
+    date_key = keys["date_key"]
+    ttl_seconds = HighScoreCacheService.TTL_SECONDS
+    print(f"📅 Redis key date: {date_key}，保存 {ttl_seconds // 86400} 天")
+
     s1 = svc.config_service.get_strategy1_threshold()
     s2 = svc.config_service.get_strategy2_threshold()
 
@@ -170,9 +176,9 @@ def main():
     high = []
 
     # 流式写入：先清空，随后每完成一只就写入Redis
-    zkey = RedisClient.full_key("high_score:zset")
-    mkey = RedisClient.full_key("high_score:meta")
-    ikey = RedisClient.full_key("high_score:member_by_code")
+    zkey = keys["zset"]
+    mkey = keys["meta"]
+    ikey = keys["member_by_code"]
     rds = RedisClient.instance().client
     rds.delete(zkey)
     rds.delete(mkey)
@@ -210,8 +216,12 @@ def main():
         "refreshed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "strategy1_threshold": s1,
         "strategy2_threshold": s2,
+        "date_key": date_key,
     }
     rds.set(mkey, json.dumps(meta, ensure_ascii=False))
+    rds.expire(zkey, ttl_seconds)
+    rds.expire(mkey, ttl_seconds)
+    rds.expire(ikey, ttl_seconds)
 
     print("✅ 写入完成")
     print(f"📊 总计算 {len(results)} 条，高分 {meta['high_score_count']} 条")

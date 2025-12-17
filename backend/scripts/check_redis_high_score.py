@@ -1,5 +1,6 @@
 """查看Redis中的高分排行榜数据"""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -8,20 +9,26 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from infrastructure.cache.redis_client import RedisClient
+from application.services.high_score_cache_service import HighScoreCacheService
+
 
 def main():
+    date_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    keys = HighScoreCacheService.build_keys(os.getenv("SCORE_DATE") or date_arg)
+    date_key = keys["date_key"]
+
     r = RedisClient.instance().client
-    zkey = RedisClient.full_key('high_score:zset')
-    mkey = RedisClient.full_key('high_score:meta')
-    
+    zkey = keys["zset"]
+    mkey = keys["meta"]
+
     print("=" * 60)
-    print("Redis高分排行榜数据")
+    print(f"Redis高分排行榜数据（date_key={date_key}）")
     print("=" * 60)
-    
+
     # 查看zset
     count = r.zcard(zkey)
     print(f"\n📊 ZSET总数: {count}")
-    
+
     if count > 0:
         print("\n🏆 排行榜（按总分降序）:")
         print("-" * 60)
@@ -37,7 +44,7 @@ def main():
                 print(f"{idx}. {member} (score: {score})")
     else:
         print("\n⚠️  ZSET为空")
-    
+
     # 查看元信息
     meta_str = r.get(mkey)
     if meta_str:
@@ -48,8 +55,9 @@ def main():
             print(f"   {k}: {v}")
     else:
         print("\n⚠️  元信息为空")
-    
+
     print("\n" + "=" * 60)
+
 
 if __name__ == '__main__':
     main()

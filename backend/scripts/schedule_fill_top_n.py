@@ -67,12 +67,19 @@ def _run_loop_until_15():
         print(f"[{now:%F %T}] 已过 15:00，跳过今日")
         return
 
-    while datetime.now(TZ) <= end:
+    date_key = now.strftime("%Y%m%d")
+    print(f"[{now:%F %T}] 盘中刷榜开始，date_key={date_key}，将持续到 15:00 后切换收盘全量刷新")
+
+    while datetime.now(TZ) < end:
         _run_once(top_n, max_workers)
         # 防止极短时间内过多循环，可按需小睡；这里不 sleep，确保一轮完立即下一轮
-        if datetime.now(TZ) > end:
+        if datetime.now(TZ) >= end:
             break
         # 若需要可放开下行：time.sleep(1)
+
+    print(f"[{datetime.now(TZ):%F %T}] 盘中刷新结束，开始收盘全量刷新（{date_key}）")
+    _run_once(top_n, max_workers)
+    print(f"[{datetime.now(TZ):%F %T}] 收盘全量刷新完成（{date_key}）")
 
 
 def main():

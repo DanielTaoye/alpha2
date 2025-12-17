@@ -1,5 +1,6 @@
 """高分排行榜缓存服务（Redis + 定时刷新）"""
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -23,6 +24,10 @@ logger = get_logger(__name__)
 class HighScoreCacheService:
     """负责拉取策略分数并写入Redis的服务"""
 
+    # 盘中及收盘数据的保存时长（默认30天，可通过环境变量覆盖）
+    TTL_SECONDS = int(os.getenv("HIGH_SCORE_TTL_SECONDS", 30 * 24 * 3600))
+    _DATE_FORMATS = ("%Y%m%d", "%Y-%m-%d")
+
     def __init__(self, max_workers: int = 100):
         self.max_workers = max_workers
         self.redis_client = RedisClient.instance().client
@@ -44,13 +49,38 @@ class HighScoreCacheService:
 
         self._last_stats = {}
 
+    # --------- key 辅助 ---------
+    @classmethod
+    def _resolve_date_str(cls, date_str: Optional[str] = None) -> str:
+        """将日期字符串规范为 YYYYMMDD；未提供或格式不对则返回今日。"""
+        if date_str:
+            for fmt in cls._DATE_FORMATS:
+                try:
+                    return datetime.strptime(date_str, fmt).strftime("%Y%m%d")
+                except ValueError:
+                    continue
+        return datetime.now().strftime("%Y%m%d")
+
+    @classmethod
+    def build_keys(cls, date_str: Optional[str] = None) -> Dict[str, str]:
+        """生成包含日期的Redis键，便于按天留存。"""
+        date_key = cls._resolve_date_str(date_str)
+        prefix = f"high_score:{date_key}"
+        return {
+            "date_key": date_key,
+            "zset": RedisClient.full_key(f"{prefix}:zset"),
+            "meta": RedisClient.full_key(f"{prefix}:meta"),
+            "member_by_code": RedisClient.full_key(f"{prefix}:member_by_code"),
+        }
+
     # --------- 对外入口 ---------
-    def refresh_scores(self) -> Dict:
-        """拉取全量股票分数，写入Redis"""
+    def refresh_scores(self, date_str: Optional[str] = None) -> Dict:
+        """拉取全量股票分数，写入当日（或指定日）的Redis键"""
         stocks = self._get_all_active_stocks()
         if not stocks:
             return {"success": False, "message": "没有可用股票"}
 
+        date_key = self._resolve_date_str(date_str)
         s1_threshold = self.config_service.get_strategy1_threshold()
         s2_threshold = self.config_service.get_strategy2_threshold()
 
@@ -88,16 +118,18 @@ class HighScoreCacheService:
             "strategy1_threshold": s1_threshold,
             "strategy2_threshold": s2_threshold,
         }
-        self._write_to_redis(high_scores, stats)
-        self._last_stats = stats
+        stats_with_date = {**stats, "date_key": date_key}
+        self._write_to_redis(high_scores, stats_with_date, date_key)
+        self._last_stats = stats_with_date
 
-        logger.info(f"✅ 高分缓存刷新完成: 高分 {len(high_scores)}/{len(results)}")
-        return {"success": True, "stats": stats, "high_scores": len(high_scores)}
+        logger.info(f"✅ 高分缓存刷新完成: 高分 {len(high_scores)}/{len(results)}，date_key={date_key}")
+        return {"success": True, "stats": stats_with_date, "high_scores": len(high_scores)}
 
-    def get_top_from_cache(self, limit: int = 100) -> Dict:
-        """从缓存获取排行榜"""
-        zset_key = RedisClient.full_key("high_score:zset")
-        meta_key = RedisClient.full_key("high_score:meta")
+    def get_top_from_cache(self, limit: int = 100, date_str: Optional[str] = None) -> Dict:
+        """从缓存获取指定日期（默认当日）的排行榜"""
+        keys = self.build_keys(date_str)
+        zset_key = keys["zset"]
+        meta_key = keys["meta"]
 
         items = self.redis_client.zrevrange(zset_key, 0, limit - 1, withscores=True)
         stocks = []
@@ -123,11 +155,14 @@ class HighScoreCacheService:
                 stats = None
         if not stats:
             stats = self._last_stats
+        if stats and "date_key" not in stats:
+            stats["date_key"] = keys["date_key"]
 
         return {
             "stocks": stocks,
             "total": len(stocks),
             "service_stats": stats,
+            "date_key": keys["date_key"],
         }
 
     # --------- 内部方法 ---------
@@ -181,9 +216,12 @@ class HighScoreCacheService:
                 "volumeTypeSource": None,
             }
 
-    def _write_to_redis(self, high_scores: List[Dict], stats: Dict):
-        zset_key = RedisClient.full_key("high_score:zset")
-        meta_key = RedisClient.full_key("high_score:meta")
+    def _write_to_redis(self, high_scores: List[Dict], stats: Dict, date_str: Optional[str] = None):
+        keys = self.build_keys(date_str)
+        zset_key = keys["zset"]
+        meta_key = keys["meta"]
+        payload_stats = stats.copy()
+        payload_stats.setdefault("date_key", keys["date_key"])
 
         pipe = self.redis_client.pipeline()
         pipe.delete(zset_key)
@@ -194,11 +232,11 @@ class HighScoreCacheService:
             pipe.zadd(zset_key, {member: item.get("total_score", 0)})
 
         # 元信息：最近刷新时间、阈值等
-        pipe.set(meta_key, json.dumps(stats, ensure_ascii=False))
+        pipe.set(meta_key, json.dumps(payload_stats, ensure_ascii=False))
 
         # 设置TTL，避免陈旧数据长期占用
-        pipe.expire(zset_key, 3 * 24 * 3600)
-        pipe.expire(meta_key, 3 * 24 * 3600)
+        pipe.expire(zset_key, self.TTL_SECONDS)
+        pipe.expire(meta_key, self.TTL_SECONDS)
         pipe.execute()
 
     def _get_all_active_stocks(self) -> List[Dict]:

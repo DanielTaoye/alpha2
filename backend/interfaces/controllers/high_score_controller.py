@@ -16,7 +16,8 @@ class HighScoreController:
         try:
             data = request.get_json(silent=True) or {}
             limit = data.get("limit", 100)
-            result = self.cache_service.get_top_from_cache(limit=limit)
+            date_str = data.get("date") or data.get("date_str")
+            result = self.cache_service.get_top_from_cache(limit=limit, date_str=date_str)
             return jsonify(ResponseBuilder.success(result, "ok"))
         except Exception as e:
             logger.error(f"获取高分排行榜失败: {e}", exc_info=True)
@@ -25,7 +26,9 @@ class HighScoreController:
     def refresh_high_score(self):
         """手动触发刷新（可用于调试或手动重算）"""
         try:
-            result = self.cache_service.refresh_scores()
+            data = request.get_json(silent=True) or {}
+            date_str = data.get("date") or data.get("date_str")
+            result = self.cache_service.refresh_scores(date_str=date_str)
             if result.get("success"):
                 return jsonify(ResponseBuilder.success(result, "刷新完成"))
             return jsonify(ResponseBuilder.error(result.get("message", "刷新失败")))
