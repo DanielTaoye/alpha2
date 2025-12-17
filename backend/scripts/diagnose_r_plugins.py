@@ -32,9 +32,11 @@ from infrastructure.logging.logger import get_logger
 from domain.services.r_point_plugin_service import RPointPluginService
 from domain.services.kline_pattern_service import KLinePatternService
 from application.services.cr_point_service import CRPointService
+from domain.services.config_service import get_config_service
 from domain.models.kline import KLineData as DomainKLineData
 
 logger = get_logger(__name__)
+config_service = get_config_service()
 
 # API基础URL
 API_BASE_URL = "http://localhost:5000"
@@ -1094,6 +1096,8 @@ def diagnose_high_stagnation_bearish(stock_code: str, date_str: str, current_dat
     print("📊 插件10: 高位滞涨+空头组合")
     print("=" * 80)
     
+    gain_threshold_pct = config_service.get_high_stagnation_gain_threshold()
+    
     if not current_chance or not prev_chance:
         print("  ❌ 缺少当日或前一日daily_chance数据")
         return
@@ -1136,9 +1140,9 @@ def diagnose_high_stagnation_bearish(stock_code: str, date_str: str, current_dat
         return
     
     gain_high = (x_high - y_low) / y_low * 100
-    print(f"  X日({x_date})最高: {x_high:.2f}, Y日({y_date})最低: {y_low:.2f}, 涨幅: {gain_high:.2f}% (需>15%)")
-    if gain_high <= 15:
-        print("  ❌ 高位涨幅不足15%")
+    print(f"  X日({x_date})最高: {x_high:.2f}, Y日({y_date})最低: {y_low:.2f}, 涨幅: {gain_high:.2f}% (需>{gain_threshold_pct:.2f}%)")
+    if gain_high <= gain_threshold_pct:
+        print(f"  ❌ 高位涨幅不足{gain_threshold_pct:.2f}%")
         return
     
     # 步骤3：跌破前一日支撑

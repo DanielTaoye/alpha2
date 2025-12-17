@@ -467,6 +467,10 @@
                 <span class="value" id="currentHighPositionGain">加载中...</span>
             </div>
             <div class="config-item">
+                <span class="label">高位滞涨+空头组合-涨幅阈值</span>
+                <span class="value" id="currentHighStagnationGain">加载中...</span>
+            </div>
+            <div class="config-item">
                 <span class="label">临近压力位滞涨-距离阈值</span>
                 <span class="value" id="currentPressureDistance">加载中...</span>
             </div>
@@ -590,6 +594,32 @@
                     <button class="preset-btn" onclick="setHighPositionGainPreset(10)">较高 (10%)</button>
                     <button class="preset-btn" onclick="setHighPositionGainPreset(18)">默认 (18%)</button>
                     <button class="preset-btn" onclick="setHighPositionGainPreset(5)">灵敏型 (5%)</button>
+                </div>
+
+                <div class="form-group" style="margin-top:20px;">
+                    <label for="highStagnationGainThreshold">高位滞涨+空头组合 - 高低点涨幅阈值</label>
+                    <div class="input-wrapper">
+                        <input type="number" id="highStagnationGainThreshold" min="0" max="50" step="0.5" value="15">
+                        <span class="unit">%</span>
+                    </div>
+                    <div class="slider-wrapper">
+                        <input type="range" id="highStagnationGainSlider" min="0" max="50" step="0.5" value="15">
+                        <div class="range-labels">
+                            <span>0%</span>
+                            <span>15%</span>
+                            <span>30%</span>
+                        </div>
+                    </div>
+                    <p class="description">
+                        控制“高位滞涨+空头组合”插件的高低点涨幅阈值：X日最高价相对X前20日内最低价的涨幅需大于此值才算“高位”。<br>
+                        阈值越高，越严格（更少触发）；阈值越低，越灵敏。默认15%。
+                    </p>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setHighStagnationGainPreset(12)">偏紧 (12%)</button>
+                    <button class="preset-btn" onclick="setHighStagnationGainPreset(15)">默认 (15%)</button>
+                    <button class="preset-btn" onclick="setHighStagnationGainPreset(18)">宽松 (18%)</button>
                 </div>
 
                 <div class="form-group" style="margin-top:20px;">
@@ -724,6 +754,14 @@
             document.getElementById('highPositionGainThreshold').value = this.value;
         });
 
+        document.getElementById('highStagnationGainThreshold').addEventListener('input', function() {
+            document.getElementById('highStagnationGainSlider').value = this.value;
+        });
+
+        document.getElementById('highStagnationGainSlider').addEventListener('input', function() {
+            document.getElementById('highStagnationGainThreshold').value = this.value;
+        });
+
         // 设置预设值
         function setStrategy1Preset(value) {
             document.getElementById('strategy1Threshold').value = value;
@@ -744,6 +782,11 @@
         function setHighPositionGainPreset(value) {
             document.getElementById('highPositionGainThreshold').value = value;
             document.getElementById('highPositionGainSlider').value = value;
+        }
+
+        function setHighStagnationGainPreset(value) {
+            document.getElementById('highStagnationGainThreshold').value = value;
+            document.getElementById('highStagnationGainSlider').value = value;
         }
 
         function setPressureDistancePreset(value) {
@@ -786,8 +829,10 @@
                     document.getElementById('currentStrategy2').textContent = `短线 ${s2Short}分 | 波段 ${s2Swing}分 | 中长线 ${s2Mid}分`;
                     
                     // 更新R点插件参数显示
-                    const highPositionGain = config.r_point_plugins?.high_position_r?.gain_threshold_pct || 18.0;
+                    const highPositionGain = config.r_point_plugins?.high_position_r?.gain_threshold_pct ?? 18.0;
                     document.getElementById('currentHighPositionGain').textContent = highPositionGain + ' %';
+                    const highStagnationGain = config.r_point_plugins?.high_stagnation_bearish?.gain_threshold_pct ?? 15.0;
+                    document.getElementById('currentHighStagnationGain').textContent = highStagnationGain + ' %';
                     const pressureDistance = config.r_point_plugins?.pressure_stagnation?.distance_threshold_pct ?? 8.0;
                     document.getElementById('currentPressureDistance').textContent = pressureDistance + ' %';
                     
@@ -813,6 +858,8 @@
                     // 更新R点插件输入框
                     document.getElementById('highPositionGainThreshold').value = highPositionGain;
                     document.getElementById('highPositionGainSlider').value = highPositionGain;
+                    document.getElementById('highStagnationGainThreshold').value = highStagnationGain;
+                    document.getElementById('highStagnationGainSlider').value = highStagnationGain;
                     document.getElementById('pressureDistanceThreshold').value = pressureDistance;
                     document.getElementById('pressureDistanceSlider').value = pressureDistance;
                     
@@ -854,11 +901,16 @@
                 const strategy2 = strategy2Swing;
 
                 const highPositionGain = parseFloat(document.getElementById('highPositionGainThreshold').value);
+                const highStagnationGain = parseFloat(document.getElementById('highStagnationGainThreshold').value);
                 const pressureDistance = parseFloat(document.getElementById('pressureDistanceThreshold').value);
 
                 // 参数验证
                 if (isNaN(highPositionGain) || highPositionGain < 0 || highPositionGain > 100) {
                     showMessage('高位发R-涨幅阈值必须在0-100之间', true);
+                    return;
+                }
+                if (isNaN(highStagnationGain) || highStagnationGain < 0 || highStagnationGain > 100) {
+                    showMessage('高位滞涨+空头组合-涨幅阈值必须在0-100之间', true);
                     return;
                 }
                 if (isNaN(pressureDistance) || pressureDistance < 0 || pressureDistance > 100) {
@@ -902,6 +954,7 @@
                         strategy1_threshold: strategy1,
                         strategy2_threshold: strategy2,
                         high_position_gain_threshold: highPositionGain,
+                        high_stagnation_gain_threshold: highStagnationGain,
                         pressure_distance_threshold: pressureDistance,
                         strategy1_nature_thresholds: strategy1NatureThresholds,
                         strategy2_nature_thresholds: strategy2NatureThresholds

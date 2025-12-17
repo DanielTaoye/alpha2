@@ -87,6 +87,8 @@ class ConfigService:
                         s2["nature_thresholds"].setdefault(nature, default_s2)
                     self._config_cache["strategy1"] = s1
                     self._config_cache["strategy2"] = s2
+                    # 补齐R点插件默认配置（向后兼容）
+                    self._ensure_r_point_plugin_defaults()
                 except Exception as compat_error:
                     logger.warning(f"补齐股性阈值时出错，使用原始配置: {compat_error}")
             else:
@@ -103,12 +105,29 @@ class ConfigService:
                         "nature_thresholds": {"短线": 20, "波段": 20, "中长线": 20},
                         "description": "策略2 C点触发阈值（基于MA+MACD+成交量+K线组合）"
                     },
+                    "r_point_plugins": {
+                        "pressure_stagnation": {
+                            "distance_threshold_pct": 10.0,
+                            "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
+                        },
+                        "high_position_r": {
+                            "gain_threshold_pct": 18.0,
+                            "description": "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值"
+                        },
+                        "high_stagnation_bearish": {
+                            "gain_threshold_pct": 15.0,
+                            "description": "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值"
+                        }
+                    },
                     "market_type": "bull",
                     "market_type_description": "市场类型：bull=牛市, bear=熊市（人工判断）",
                     "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 self._save_config()
                 logger.warning(f"配置文件不存在，已创建默认配置: {self.config_path}")
+            
+            # 兜底补齐R点插件默认配置
+            self._ensure_r_point_plugin_defaults()
             
             return self._config_cache
         except Exception as e:
@@ -118,6 +137,25 @@ class ConfigService:
                 "strategy1": {"c_point_threshold": 70, "nature_thresholds": {"短线": 70, "波段": 70, "中长线": 70}},
                 "strategy2": {"c_point_threshold": 20, "nature_thresholds": {"短线": 20, "波段": 20, "中长线": 20}}
             }
+    
+    def _ensure_r_point_plugin_defaults(self):
+        """补齐R点插件默认配置，保持向后兼容"""
+        if self._config_cache is None:
+            return
+        
+        r_cfg = self._config_cache.setdefault("r_point_plugins", {})
+        
+        pressure_cfg = r_cfg.setdefault("pressure_stagnation", {})
+        pressure_cfg.setdefault("distance_threshold_pct", 10.0)
+        pressure_cfg.setdefault("description", "临近压力位滞涨插件-股价距离压力线的百分比阈值")
+        
+        high_position_cfg = r_cfg.setdefault("high_position_r", {})
+        high_position_cfg.setdefault("gain_threshold_pct", 18.0)
+        high_position_cfg.setdefault("description", "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值")
+        
+        high_stagnation_cfg = r_cfg.setdefault("high_stagnation_bearish", {})
+        high_stagnation_cfg.setdefault("gain_threshold_pct", 15.0)
+        high_stagnation_cfg.setdefault("description", "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值")
     
     def _save_config(self):
         """保存配置到文件"""
@@ -150,6 +188,9 @@ class ConfigService:
         """获取完整配置，附带自动判定的市场类型"""
         if self._config_cache is None:
             self._load_config()
+        
+        # 每次返回前补齐R点插件默认配置（兼容旧文件）
+        self._ensure_r_point_plugin_defaults()
 
         # 在配置中强制写入自动判定结果与规则说明，供前端展示
         self._config_cache['market_type'] = self._compute_market_type()
@@ -193,8 +234,14 @@ class ConfigService:
         config = self.get_config()
         return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 18.0))
     
+    def get_high_stagnation_gain_threshold(self) -> float:
+        """获取高位滞涨+空头组合插件的高低点涨幅阈值（百分比）"""
+        config = self.get_config()
+        return float(config.get('r_point_plugins', {}).get('high_stagnation_bearish', {}).get('gain_threshold_pct', 15.0))
+    
     def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None, market_type: str = None, 
                      pressure_distance_threshold: float = None, high_position_gain_threshold: float = None,
+                     high_stagnation_gain_threshold: float = None,
                      strategy1_nature_thresholds: Dict[str, float] = None, strategy2_nature_thresholds: Dict[str, float] = None) -> Dict[str, Any]:
         """更新配置"""
         config = self.get_config()
@@ -235,7 +282,8 @@ class ConfigService:
         if 'r_point_plugins' not in config:
             config['r_point_plugins'] = {
                 'pressure_stagnation': {},
-                'high_position_r': {}
+                'high_position_r': {},
+                'high_stagnation_bearish': {}
             }
         
         if pressure_distance_threshold is not None:
@@ -249,6 +297,12 @@ class ConfigService:
                 config['r_point_plugins']['high_position_r'] = {}
             config['r_point_plugins']['high_position_r']['gain_threshold_pct'] = high_position_gain_threshold
             logger.info(f"高位发R-涨幅阈值更新为: {high_position_gain_threshold}%")
+        
+        if high_stagnation_gain_threshold is not None:
+            if 'high_stagnation_bearish' not in config['r_point_plugins']:
+                config['r_point_plugins']['high_stagnation_bearish'] = {}
+            config['r_point_plugins']['high_stagnation_bearish']['gain_threshold_pct'] = high_stagnation_gain_threshold
+            logger.info(f"高位滞涨+空头组合-高低点涨幅阈值更新为: {high_stagnation_gain_threshold}%")
         
         config['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         

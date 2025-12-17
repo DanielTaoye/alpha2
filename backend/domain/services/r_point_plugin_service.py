@@ -1411,7 +1411,7 @@ class RPointPluginService:
         
         1. 从当前价格往前20个交易日，找到最高价那日X（含当日）
         2. 从X日向前推20个交易日，找到最低价Y
-        3. 若X日最高价 > Y日最低价 * 1.15，视为高位
+        3. 若X日最高价 > Y日最低价 * (1+配置阈值)，视为高位（默认15%）
         4. 满足高位后，同时出现以下任一组合即触发：
            A. 当日空头组合 + 跌破支撑
            B. 当日MACD已出现死叉（含前5日内） + 跌破支撑
@@ -1467,8 +1467,10 @@ class RPointPluginService:
             if y_low is None or y_low <= 0:
                 return RPointPluginResult("高位滞涨+空头组合", False, "")
             
-            # ===== 步骤3：高位条件 =====
-            if x_high <= y_low * 1.15:
+            # ===== 步骤3：高位条件（可配置阈值）=====
+            gain_threshold_pct = self.config_service.get_high_stagnation_gain_threshold()
+            gain_pct = (x_high - y_low) / y_low * 100
+            if gain_pct <= gain_threshold_pct:
                 return RPointPluginResult("高位滞涨+空头组合", False, "")
             
             # ===== 支撑位检查（前一交易日）=====
@@ -1483,7 +1485,7 @@ class RPointPluginService:
             if has_bearish_combo:
                 reason = (f"X日{self._to_date_str(x_date_str)}高点{x_high:.2f}, "
                           f"X-20日Y日{self._to_date_str(y_date_str)}低点{y_low:.2f}, "
-                          f"涨幅{(x_high - y_low) / y_low * 100:.2f}%, "
+                          f"涨幅{gain_pct:.2f}%>阈值{gain_threshold_pct:.2f}%, "
                           f"空头组合({current_chance.bearish_pattern.strip()})+{break_detail}")
                 return RPointPluginResult("高位滞涨+空头组合", True, reason)
             
@@ -1516,7 +1518,7 @@ class RPointPluginService:
             
             reason = (f"X日{self._to_date_str(x_date_str)}高点{x_high:.2f}, "
                       f"X-20日Y日{self._to_date_str(y_date_str)}低点{y_low:.2f}, "
-                      f"涨幅{(x_high - y_low) / y_low * 100:.2f}%, "
+                      f"涨幅{gain_pct:.2f}%>阈值{gain_threshold_pct:.2f}%, "
                       f"MACD死叉+{break_detail}")
             return RPointPluginResult("高位滞涨+空头组合", True, reason)
         

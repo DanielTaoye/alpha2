@@ -35,6 +35,7 @@ class ConfigController:
             market_type = None
             pressure_distance_threshold = data.get('pressure_distance_threshold')
             high_position_gain_threshold = data.get('high_position_gain_threshold')
+            high_stagnation_gain_threshold = data.get('high_stagnation_gain_threshold')
             strategy1_nature_thresholds_raw = data.get('strategy1_nature_thresholds') or data.get('strategy1_thresholds')
             strategy2_nature_thresholds_raw = data.get('strategy2_nature_thresholds') or data.get('strategy2_thresholds')
             
@@ -70,6 +71,14 @@ class ConfigController:
                         return jsonify(ResponseBuilder.error('高位发R-涨幅阈值必须在0-100之间')), 400
                 except (ValueError, TypeError):
                     return jsonify(ResponseBuilder.error('高位发R-涨幅阈值必须是数字')), 400
+            
+            if high_stagnation_gain_threshold is not None:
+                try:
+                    high_stagnation_gain_threshold = float(high_stagnation_gain_threshold)
+                    if high_stagnation_gain_threshold < 0 or high_stagnation_gain_threshold > 100:
+                        return jsonify(ResponseBuilder.error('高位滞涨+空头组合-高低点涨幅阈值必须在0-100之间')), 400
+                except (ValueError, TypeError):
+                    return jsonify(ResponseBuilder.error('高位滞涨+空头组合-高低点涨幅阈值必须是数字')), 400
 
             def parse_nature_thresholds(raw_value, label):
                 if raw_value is None:
@@ -102,6 +111,7 @@ class ConfigController:
                 strategy2_threshold=strategy2_threshold,
                 pressure_distance_threshold=pressure_distance_threshold,
                 high_position_gain_threshold=high_position_gain_threshold,
+                high_stagnation_gain_threshold=high_stagnation_gain_threshold,
                 strategy1_nature_thresholds=strategy1_nature_thresholds,
                 strategy2_nature_thresholds=strategy2_nature_thresholds
             )
@@ -116,6 +126,8 @@ class ConfigController:
                 update_info_parts.append(f'压力位距离阈值:{pressure_distance_threshold}%')
             if high_position_gain_threshold is not None:
                 update_info_parts.append(f'高位发R涨幅阈值:{high_position_gain_threshold}%')
+            if high_stagnation_gain_threshold is not None:
+                update_info_parts.append(f'高位滞涨+空头组合涨幅阈值:{high_stagnation_gain_threshold}%')
             if strategy1_nature_thresholds:
                 update_info_parts.append(f'策略1股性阈值:{strategy1_nature_thresholds}')
             if strategy2_nature_thresholds:
