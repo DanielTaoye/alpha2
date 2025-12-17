@@ -289,7 +289,12 @@ class StreamingScoreService:
             latest_cr_service = LatestCRPointService(kline_service, daily_chance_service)
             
             # 计算分数
-            result = latest_cr_service.calculate_latest_cr_points(stock_code, table_name, stock_nature=stock.get('nature'))
+            result = latest_cr_service.calculate_latest_cr_points(
+                stock_code,
+                table_name,
+                stock_nature=stock.get('nature'),
+                stock_name=stock.get('name'),
+            )
             
             if not result.get('success'):
                 logger.debug(f"计算失败: {stock_code} - {result.get('message', '未知错误')}")

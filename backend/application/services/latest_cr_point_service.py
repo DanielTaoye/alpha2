@@ -39,12 +39,13 @@ class LatestCRPointService:
         return self._r_point_service
     
     def calculate_latest_cr_points(
-        self, 
-        stock_code: str, 
+        self,
+        stock_code: str,
         table_name: str,
         predicted_volume: Optional[float] = None,
         volume_type: Optional[str] = None,
-        stock_nature: Optional[str] = None
+        stock_nature: Optional[str] = None,
+        stock_name: Optional[str] = None,
     ) -> Dict:
         """
         计算最新一天的CR点
@@ -59,6 +60,28 @@ class LatestCRPointService:
             包含C点、R点信息的字典
         """
         try:
+            if self._is_blocked_stock(stock_code, stock_name):
+                logger.info(f"跳过CR点计算（ST/B股）：{stock_code} {stock_name or ''}")
+                latest_kline_result = self.kline_service.get_latest_day_kline(table_name)
+                latest_kline = (latest_kline_result or {}).get('kline_data') or {}
+                date_val = latest_kline.get('time') if isinstance(latest_kline, dict) else None
+                return {
+                    'success': True,
+                    'message': 'skip_cr_for_st_or_b',
+                    'stock_code': stock_code,
+                    'stock_name': stock_name,
+                    'stock_nature': stock_nature or "波段",
+                    'date': date_val,
+                    'kline': latest_kline if isinstance(latest_kline, dict) else {},
+                    'predicted_volume': None,
+                    'volume_type': None,
+                    'realtime_volume_type': None,
+                    'volume_type_source': 'skipped',
+                    'previous_day_scores': {},
+                    'strategy1': {'is_c_point': False, 'score': 0, 'base_score': 0, 'plugins': [], 'threshold': 0},
+                    'strategy2': {'is_c_point': False, 'score': 0, 'reason': '', 'threshold': 0},
+                    'r_point': {'is_r_point': False, 'plugins': []},
+                }
             logger.info(f"开始计算最新一天CR点: {stock_code}")
             resolved_nature = stock_nature
             
@@ -706,4 +729,18 @@ class LatestCRPointService:
                 'plugins': [],
                 'error': str(e)
             }
+
+    @staticmethod
+    def _is_blocked_stock(stock_code: str, stock_name: Optional[str] = None) -> bool:
+        """判定是否为需跳过CR计算的股票：B股(900/200开头)或名称含ST/*ST"""
+        code_upper = (stock_code or "").upper()
+        pure_code = code_upper
+        if code_upper.startswith(("SZ", "SH")) and len(code_upper) > 2:
+            pure_code = code_upper[2:]
+        if pure_code.startswith(("900", "200")):
+            return True
+        name_upper = (stock_name or "").upper()
+        if "ST" in name_upper:
+            return True
+        return False
 

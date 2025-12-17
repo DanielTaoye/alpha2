@@ -433,6 +433,23 @@
             }
         }
 
+        function formatTodayDigits() {
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            return `${y}${m}${d}`;
+        }
+
+        function normalizeDateDigits(val) {
+            if (!val) return null;
+            const digits = String(val).replace(/[^0-9]/g, '');
+            if (digits.length >= 8) {
+                return digits.slice(0, 8);
+            }
+            return null;
+        }
+
         // 扫描高分股票（使用快速查询接口，毫秒级）
         async function scanHighScoreStocks(useCache = true) {
             if (isScanning) {
@@ -445,22 +462,35 @@
 
             try {
                 // 使用快速接口（直接查数据库，毫秒级）
+                const todayDigits = formatTodayDigits();
                 const response = await fetch(`${API_BASE_URL}/streaming/high_score`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        limit: 100
+                        limit: 100,
+                        date: todayDigits
                     })
                 });
 
                 const result = await response.json();
 
                 if (result.code === 200 && result.data) {
-                    displayRanking(result.data);
+                    const filteredStocks = (result.data.stocks || []).filter(item => {
+                        const digits = normalizeDateDigits(item.date);
+                        return digits === todayDigits;
+                    });
+
+                    const filteredData = {
+                        ...result.data,
+                        stocks: filteredStocks,
+                        total: filteredStocks.length,
+                    };
+
+                    displayRanking(filteredData);
                     document.getElementById('total-count').textContent = 
-                        `共 ${result.data.total || 0} 只股票达到阈值`;
+                        `共 ${filteredData.total || 0} 只股票达到阈值（仅展示今日数据）`;
                     
                     // 显示流式服务统计信息
                     const stats = result.data.service_stats;

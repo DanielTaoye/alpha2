@@ -180,9 +180,6 @@ def main():
     mkey = keys["meta"]
     ikey = keys["member_by_code"]
     rds = RedisClient.instance().client
-    rds.delete(zkey)
-    rds.delete(mkey)
-    rds.delete(ikey)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {

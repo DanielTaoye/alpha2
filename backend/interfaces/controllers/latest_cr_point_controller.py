@@ -37,6 +37,7 @@ class LatestCRPointController:
             stock_code = data.get('stockCode')
             table_name = data.get('tableName')
             stock_nature = data.get('stockNature') or data.get('stock_nature')
+            stock_name = data.get('stockName') or data.get('stock_name')
             
             if not stock_code or not table_name:
                 return jsonify(ResponseBuilder.error("缺少参数: stockCode 或 tableName", code=400))
@@ -53,7 +54,8 @@ class LatestCRPointController:
                 table_name,
                 predicted_volume,
                 volume_type,
-                stock_nature
+                stock_nature,
+                stock_name=stock_name,
             )
             
             if result.get('success'):

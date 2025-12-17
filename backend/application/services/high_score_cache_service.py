@@ -128,6 +128,22 @@ class HighScoreCacheService:
     def get_top_from_cache(self, limit: int = 100, date_str: Optional[str] = None) -> Dict:
         """从缓存获取指定日期（默认当日）的排行榜"""
         keys = self.build_keys(date_str)
+        result = self._get_from_keys(keys, limit)
+
+        # 若指定日期/当日无数据，兼容读取旧版无日期Key
+        if not result["stocks"]:
+            legacy_keys = {
+                "zset": RedisClient.full_key("high_score:zset"),
+                "meta": RedisClient.full_key("high_score:meta"),
+                "date_key": "legacy",
+            }
+            legacy_result = self._get_from_keys(legacy_keys, limit)
+            if legacy_result["stocks"]:
+                result = legacy_result
+
+        return result
+
+    def _get_from_keys(self, keys: Dict[str, str], limit: int) -> Dict:
         zset_key = keys["zset"]
         meta_key = keys["meta"]
 
@@ -156,13 +172,13 @@ class HighScoreCacheService:
         if not stats:
             stats = self._last_stats
         if stats and "date_key" not in stats:
-            stats["date_key"] = keys["date_key"]
+            stats["date_key"] = keys.get("date_key")
 
         return {
             "stocks": stocks,
             "total": len(stocks),
             "service_stats": stats,
-            "date_key": keys["date_key"],
+            "date_key": keys.get("date_key"),
         }
 
     # --------- 内部方法 ---------
@@ -172,7 +188,8 @@ class HighScoreCacheService:
             result = self.latest_cr_service.calculate_latest_cr_points(
                 stock["code"],
                 stock["table_name"],
-                stock_nature=stock.get("nature")
+                stock_nature=stock.get("nature"),
+                stock_name=stock.get("name"),
             )
             # 即便返回 success=False 也写入占位，避免整榜空掉
             s1_score = result.get("strategy1", {}).get("score", 0) if result else 0
@@ -220,23 +237,27 @@ class HighScoreCacheService:
         keys = self.build_keys(date_str)
         zset_key = keys["zset"]
         meta_key = keys["meta"]
+        hash_key = keys["member_by_code"]
         payload_stats = stats.copy()
         payload_stats.setdefault("date_key", keys["date_key"])
 
-        pipe = self.redis_client.pipeline()
-        pipe.delete(zset_key)
-        pipe.delete(meta_key)
-
+        # 增量更新：逐个股票更新zset与hash，避免整榜删除
         for item in high_scores:
             member = json.dumps(item, ensure_ascii=False)
-            pipe.zadd(zset_key, {member: item.get("total_score", 0)})
+            stock_code = item.get("stock_code")
+            if stock_code:
+                old_member = self.redis_client.hget(hash_key, stock_code)
+                if old_member:
+                    self.redis_client.zrem(zset_key, old_member)
+                self.redis_client.hset(hash_key, stock_code, member)
+            self.redis_client.zadd(zset_key, {member: item.get("total_score", 0)})
 
-        # 元信息：最近刷新时间、阈值等
+        # 写入元信息并刷新TTL
+        pipe = self.redis_client.pipeline()
         pipe.set(meta_key, json.dumps(payload_stats, ensure_ascii=False))
-
-        # 设置TTL，避免陈旧数据长期占用
         pipe.expire(zset_key, self.TTL_SECONDS)
         pipe.expire(meta_key, self.TTL_SECONDS)
+        pipe.expire(hash_key, self.TTL_SECONDS)
         pipe.execute()
 
     def _get_all_active_stocks(self) -> List[Dict]:
