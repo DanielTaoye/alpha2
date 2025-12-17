@@ -5,6 +5,10 @@ from infrastructure.logging.logger import get_logger
 from domain.services.cr_strategy_service import CRStrategyService
 from domain.services.strategy2_service import Strategy2Service
 from domain.services.r_point_plugin_service import RPointPluginService
+from pathlib import Path
+import json
+import csv
+from infrastructure.persistence.database import DatabaseConnection
 
 logger = get_logger(__name__)
 
@@ -60,6 +64,7 @@ class LatestCRPointService:
             包含C点、R点信息的字典
         """
         try:
+            stock_name = stock_name or self._get_stock_name_by_code(stock_code)
             if self._is_blocked_stock(stock_code, stock_name):
                 logger.info(f"跳过CR点计算（ST/B股）：{stock_code} {stock_name or ''}")
                 latest_kline_result = self.kline_service.get_latest_day_kline(table_name)
@@ -743,4 +748,51 @@ class LatestCRPointService:
         if "ST" in name_upper:
             return True
         return False
+
+    @staticmethod
+    def _get_stock_name_by_code(stock_code: str) -> Optional[str]:
+        """按code查询名称，多级兜底，避免未传名称时漏判ST"""
+        if not stock_code:
+            return None
+
+        # 1) 数据库 all_stock
+        try:
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM all_stock WHERE LOWER(code)=LOWER(%s) LIMIT 1",
+                    (stock_code,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row[0] if isinstance(row, (list, tuple)) else row.get("name")
+        except Exception:
+            pass
+
+        # 2) 配置文件 backend/infrastructure/config/stock_config.json
+        try:
+            config_path = Path(__file__).resolve().parent.parent.parent / "infrastructure" / "config" / "stock_config.json"
+            if config_path.exists():
+                with config_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for stock_list in data.values():
+                        for s in stock_list:
+                            if str(s.get("code", "")).lower() == str(stock_code).lower():
+                                return s.get("name")
+        except Exception:
+            pass
+
+        # 3) CSV stock_list.csv（在项目根目录下）
+        try:
+            csv_path = Path(__file__).resolve().parent.parent.parent.parent / "stock_list.csv"
+            if csv_path.exists():
+                with csv_path.open("r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if str(row.get("code", "")).lower() == str(stock_code).lower():
+                            return row.get("name")
+        except Exception:
+            pass
+
+        return None
 

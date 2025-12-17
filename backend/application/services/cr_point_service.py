@@ -1,4 +1,7 @@
 """CR点应用服务 - 实时计算，不存储"""
+import csv
+import json
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from time import perf_counter
@@ -8,6 +11,7 @@ from domain.services.cr_strategy_service import CRStrategyService
 from domain.services.r_point_plugin_service import RPointPluginService
 from domain.services.strategy2_service import Strategy2Service
 from infrastructure.logging.logger import get_logger
+from infrastructure.persistence.database import DatabaseConnection
 
 logger = get_logger(__name__)
 
@@ -86,6 +90,24 @@ class CRPointService:
         resolved_nature = stock_nature
         derived_volume_types: Dict[str, str] = {}
         derived_bullish_patterns: Dict[str, str] = {}
+
+        stock_name = stock_name or self._get_stock_name_by_code(stock_code)
+        if self._is_blocked_stock(stock_code, stock_name):
+            logger.info(f"跳过CR点历史分析（ST/B股）：{stock_code} {stock_name or ''}")
+            return {
+                "c_points": [],
+                "r_points": [],
+                "rejected_c_points": [],
+                "strategy2_c_points": [],
+                "c_points_count": 0,
+                "r_points_count": 0,
+                "strategy1_scores": {},
+                "strategy2_scores": {},
+                "stock_code": stock_code,
+                "stock_name": stock_name,
+                "stock_nature": resolved_nature or "波段",
+                "message": "skip_cr_for_st_or_b",
+            }
 
         # 性能优化：单次预加载 daily + daily_chance，并复用到多个 service 的进程内缓存，避免重复 DB 查询
         if kline_data:
@@ -617,4 +639,65 @@ class CRPointService:
             'strategy1_scores': strategy1_scores,  # 所有K线的策略1评分和插件信息
             'stock_nature': resolved_nature
         }
+
+    @staticmethod
+    def _is_blocked_stock(stock_code: str, stock_name: Optional[str] = None) -> bool:
+        """判定是否为需跳过CR计算的股票：B股(900/200开头)或名称含ST/*ST"""
+        code_upper = (stock_code or "").upper()
+        pure_code = code_upper
+        if code_upper.startswith(("SZ", "SH")) and len(code_upper) > 2:
+            pure_code = code_upper[2:]
+        if pure_code.startswith(("900", "200")):
+            return True
+        name_upper = (stock_name or "").upper()
+        if "ST" in name_upper:
+            return True
+        return False
+
+    @staticmethod
+    def _get_stock_name_by_code(stock_code: str) -> Optional[str]:
+        """按code查询名称，多级兜底，避免未传名称时漏判ST"""
+        if not stock_code:
+            return None
+
+        # 1) 数据库 all_stock
+        try:
+            with DatabaseConnection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM all_stock WHERE LOWER(code)=LOWER(%s) LIMIT 1",
+                    (stock_code,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row[0] if isinstance(row, (list, tuple)) else row.get("name")
+        except Exception:
+            pass
+
+        # 2) 配置文件 backend/infrastructure/config/stock_config.json
+        try:
+            config_path = Path(__file__).resolve().parent.parent.parent / "infrastructure" / "config" / "stock_config.json"
+            if config_path.exists():
+                with config_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for stock_list in data.values():
+                        for s in stock_list:
+                            if str(s.get("code", "")).lower() == str(stock_code).lower():
+                                return s.get("name")
+        except Exception:
+            pass
+
+        # 3) CSV stock_list.csv（在项目根目录下）
+        try:
+            csv_path = Path(__file__).resolve().parent.parent.parent.parent / "stock_list.csv"
+            if csv_path.exists():
+                with csv_path.open("r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if str(row.get("code", "")).lower() == str(stock_code).lower():
+                            return row.get("name")
+        except Exception:
+            pass
+
+        return None
 
