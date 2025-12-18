@@ -22,7 +22,7 @@ class VolumeTypeService:
             predicted_volume: 预测的成交量
             
         Returns:
-            成交量类型: 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z' 或多个类型用逗号连接
+            成交量类型: 'A', 'B', 'C', 'D', 'S', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z' 或多个类型用逗号连接
         """
         try:
             from datetime import datetime, timedelta
@@ -103,6 +103,9 @@ class VolumeTypeService:
                     ratio = target_volume / prev_volume
                     if 2.0 <= ratio <= 3.0:
                         matched_types.append('A')
+                    # 计算类型S: 当日为前一日成交量的1.2倍及以上
+                    if ratio >= 1.2:
+                        matched_types.append('S')
             
             # 计算类型B: 当日为前3日成交均量的2倍及以上
             if target_idx >= 3:
@@ -270,7 +273,7 @@ class VolumeTypeService:
             if matched_types:
                 seen = set()
                 unique_types = []
-                for t in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
+                for t in ['A', 'B', 'C', 'D', 'S', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
                     if t in matched_types and t not in seen:
                         unique_types.append(t)
                         seen.add(t)
@@ -292,7 +295,7 @@ class VolumeTypeService:
             target_date: 目标日期
             
         Returns:
-            成交量类型: 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z' 或多个类型用逗号连接（如 'A,B' 或 'A,B,C,D,E,F,G,H,X,Y,Z'），如果没有匹配则返回 None
+            成交量类型: 'A', 'B', 'C', 'D', 'S', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z' 或多个类型用逗号连接（如 'A,B' 或 'A,B,C,D,S,E,F,G,H,X,Y,Z'），如果没有匹配则返回 None
         """
         try:
             # 获取日线数据（需要足够的历史数据来计算）
@@ -331,6 +334,9 @@ class VolumeTypeService:
                     ratio = target_volume / prev_volume
                     if 2.0 <= ratio <= 3.0:
                         matched_types.append('A')
+                    # 计算类型S: 当日为前一日成交量的1.2倍及以上
+                    if ratio >= 1.2:
+                        matched_types.append('S')
             
             # 计算类型B: 当日为前3日成交均量的2倍及以上
             if target_idx >= 3:
@@ -495,12 +501,12 @@ class VolumeTypeService:
                     if condition1 and condition2:
                         matched_types.append('Z')
             
-            # 返回所有匹配的类型，用逗号连接（按A、B、C、D、E、F、G、H、X、Y、Z的顺序）
+            # 返回所有匹配的类型，用逗号连接（按A、B、C、D、S、E、F、G、H、X、Y、Z的顺序）
             if matched_types:
                 # 去重并保持顺序
                 seen = set()
                 unique_types = []
-                for t in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
+                for t in ['A', 'B', 'C', 'D', 'S', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
                     if t in matched_types and t not in seen:
                         unique_types.append(t)
                         seen.add(t)
@@ -560,7 +566,7 @@ class VolumeTypeService:
     @staticmethod
     def _check_all_volume_types(daily_data: List[Dict], idx: int) -> Optional[str]:
         """
-        检查指定索引位置的成交量是否为A/B/C/D类型（返回所有匹配的类型）
+        检查指定索引位置的成交量是否为A/B/C/D/S类型（返回所有匹配的类型）
         
         Args:
             daily_data: 日线数据列表
@@ -582,6 +588,9 @@ class VolumeTypeService:
                 ratio = target_volume / prev_volume
                 if 2.0 <= ratio <= 3.0:
                     matched_types.append('A')
+                # 检查类型S：当日成交量为前一日1.2倍及以上
+                if ratio >= 1.2:
+                    matched_types.append('S')
         
         # 检查类型B
         if idx >= 3:
@@ -619,7 +628,7 @@ class VolumeTypeService:
             # 去重并保持顺序
             seen = set()
             unique_types = []
-            for t in ['A', 'B', 'C', 'D']:
+            for t in ['A', 'B', 'C', 'D', 'S']:
                 if t in matched_types and t not in seen:
                     unique_types.append(t)
                     seen.add(t)
@@ -771,6 +780,9 @@ class VolumeTypeService:
                             ratio = target_volume / prev_volume
                             if 2.0 <= ratio <= 3.0:
                                 matched_types.append('A')
+                            # 计算类型S: 当日为前一日成交量的1.2倍及以上
+                            if ratio >= 1.2:
+                                matched_types.append('S')
                     
                     # 计算类型B: 当日为前3日成交均量的2倍及以上
                     if target_idx >= 3:
@@ -934,12 +946,12 @@ class VolumeTypeService:
                             if condition1 and condition2:
                                 matched_types.append('Z')
                     
-                    # 返回所有匹配的类型，用逗号连接（按A、B、C、D、E、F、G、H、X、Y、Z的顺序）
+                    # 返回所有匹配的类型，用逗号连接（按A、B、C、D、S、E、F、G、H、X、Y、Z的顺序）
                     if matched_types:
                         # 去重并保持顺序
                         seen = set()
                         unique_types = []
-                        for t in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
+                        for t in ['A', 'B', 'C', 'D', 'S', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
                             if t in matched_types and t not in seen:
                                 unique_types.append(t)
                                 seen.add(t)
