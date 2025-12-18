@@ -371,7 +371,6 @@
             <div class="header-right">
                 <div class="status-indicator" id="status-indicator"></div>
                 <span id="status-text">准备中...</span>
-                <span id="trading-status" class="trading-status closed">非交易时段</span>
             </div>
         </div>
     </div>
@@ -412,26 +411,6 @@
         const API_BASE_URL = '/api';
         let isScanning = false;
 
-        // 检查交易状态
-        async function checkTradingStatus() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/trading_status`);
-                const result = await response.json();
-                
-                if (result.code === 0 && result.data) {
-                    const statusEl = document.getElementById('trading-status');
-                    if (result.data.is_trading_time) {
-                        statusEl.textContent = '交易时段';
-                        statusEl.className = 'trading-status trading';
-                    } else {
-                        statusEl.textContent = '非交易时段';
-                        statusEl.className = 'trading-status closed';
-                    }
-                }
-            } catch (error) {
-                console.error('检查交易状态失败:', error);
-            }
-        }
 
         function formatTodayDigits() {
             const now = new Date();
@@ -502,7 +481,7 @@
                             `更新时间: ${new Date().toLocaleTimeString('zh-CN')}`;
                     }
                     
-                    document.getElementById('status-text').textContent = '实时数据';
+                    document.getElementById('status-text').textContent = '已更新';
                 } else {
                     document.getElementById('ranking-content').innerHTML = 
                         '<div class="empty-state"><div class="empty-state-icon">⚠️</div><div>查询失败，请稍后重试</div></div>';
@@ -629,7 +608,6 @@
         // 手动刷新（不使用缓存）
         function manualRefresh() {
             scanHighScoreStocks(false);  // 不使用缓存
-            checkTradingStatus();
         }
 
         // 打开股票详情
@@ -640,7 +618,6 @@
 
         // 初始化加载（仅加载一次，不自动轮询）
         function initPage() {
-            checkTradingStatus();
             scanHighScoreStocks();  // 直接查询数据库
         }
 
