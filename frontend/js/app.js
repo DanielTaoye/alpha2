@@ -18,6 +18,30 @@ let autoRefreshInterval = null; // 自动刷新定时器
 let predictedVolume = null; // 预测的成交量
 let predictedVolumeType = null; // 预测的成交量类型（基于预测成交量实时计算）
 
+// 控制台日志开关：默认关闭冗余日志，可通过参数/本地存储开启
+const __origConsoleLog = console.log.bind(console);
+const VERBOSE_LOG_ENABLED = (() => {
+    try {
+        const search = window.location.search || '';
+        if (search.includes('debugLog=1') || search.includes('verboseLog=1')) return true;
+        const stored = localStorage.getItem('enableVerboseLog');
+        return stored === '1' || stored === 'true';
+    } catch (e) {
+        return false;
+    }
+})();
+console.log = (...args) => {
+    if (VERBOSE_LOG_ENABLED) {
+        __origConsoleLog(...args);
+    }
+};
+window.enableVerboseLog = (enabled = true) => {
+    try {
+        localStorage.setItem('enableVerboseLog', enabled ? '1' : '0');
+    } catch (e) {}
+    window.location.reload();
+};
+
 // ECharts加载状态检测和等待函数
 function waitForECharts(timeout = 15000) {
     return new Promise((resolve, reject) => {
@@ -1040,7 +1064,8 @@ async function loadVolumeTypes(stockCode) {
                     }
                     
                     if (item.totalWinRatioScore !== undefined && item.totalWinRatioScore !== null) {
-                        winRatioScoreMap[dateStr] = item.totalWinRatioScore;
+                        // 后端存储满分40，这里展示按业务满分60放大1.5倍
+                        winRatioScoreMap[dateStr] = item.totalWinRatioScore * 1.5;
                     }
                     if (item.bullishPattern) {
                         bullishPatternMap[dateStr] = item.bullishPattern;
