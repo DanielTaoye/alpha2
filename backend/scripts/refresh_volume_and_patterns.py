@@ -272,12 +272,20 @@ def check_abc_volume_type(daily_data: List[Dict], idx: int) -> Optional[str]:
 
 
 def check_all_volume_types(daily_data: List[Dict], idx: int) -> Optional[str]:
-    """检查指定索引位置的成交量是否为A/B/C/D类型"""
+    """检查指定索引位置的成交量是否为A/B/C/D/S类型（含S）"""
     if idx < 1:
         return None
     
     target_volume = daily_data[idx]['volume']
     matched_types = []
+    
+    # 先判 S（相对前一日1.2倍及以上）
+    if idx >= 1:
+        prev_volume = daily_data[idx - 1]['volume']
+        if prev_volume > 0:
+            ratio = target_volume / prev_volume
+            if ratio >= 1.2:
+                matched_types.append('S')
     
     # 检查类型A
     if idx >= 1:
@@ -286,9 +294,6 @@ def check_all_volume_types(daily_data: List[Dict], idx: int) -> Optional[str]:
             ratio = target_volume / prev_volume
             if 2.0 <= ratio <= 3.0:
                 matched_types.append('A')
-            # 类型S：当日成交量为前一日1.2倍及以上
-            if ratio >= 1.2:
-                matched_types.append('S')
     
     # 检查类型B
     if idx >= 3:
@@ -323,17 +328,30 @@ def check_all_volume_types(daily_data: List[Dict], idx: int) -> Optional[str]:
                 matched_types.append('D')
     
     if matched_types:
-        return ','.join(matched_types)
+        # 去重保持原顺序
+        deduped = []
+        for t in matched_types:
+            if t not in deduped:
+                deduped.append(t)
+        return ','.join(deduped)
     return None
 
 
 def calculate_volume_type_for_idx(daily_data: List[Dict], target_idx: int) -> Optional[str]:
-    """计算指定索引位置的成交量类型"""
+    """计算指定索引位置的成交量类型（含S）"""
     if target_idx < 1:
         return None
     
     target_volume = daily_data[target_idx]['volume']
     matched_types = []
+    
+    # 先判 S（相对前一日1.2倍及以上）
+    if target_idx >= 1:
+        prev_volume = daily_data[target_idx - 1]['volume']
+        if prev_volume > 0:
+            ratio = target_volume / prev_volume
+            if ratio >= 1.2:
+                matched_types.append('S')
     
     # 计算类型A: 当日为前1日成交均量的2倍-3倍
     if target_idx >= 1:
@@ -342,9 +360,6 @@ def calculate_volume_type_for_idx(daily_data: List[Dict], target_idx: int) -> Op
             ratio = target_volume / prev_volume
             if 2.0 <= ratio <= 3.0:
                 matched_types.append('A')
-            # 计算类型S: 当日为前1日成交量的1.2倍及以上
-            if ratio >= 1.2:
-                matched_types.append('S')
     
     # 计算类型B: 当日为前3日成交均量的2倍及以上
     if target_idx >= 3:
@@ -498,7 +513,8 @@ def calculate_volume_type_for_idx(daily_data: List[Dict], target_idx: int) -> Op
     if matched_types:
         seen = set()
         unique_types = []
-        for t in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z']:
+        # 保持固定顺序，S 放最后
+        for t in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X', 'Y', 'Z', 'S']:
             if t in matched_types and t not in seen:
                 unique_types.append(t)
                 seen.add(t)
