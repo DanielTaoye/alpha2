@@ -82,7 +82,8 @@ class RPointPluginService:
     def check_r_point(self, stock_code: str, date: datetime, c_point_date: Optional[datetime] = None,
                      ma_data: Optional[dict] = None, macd_data: Optional[dict] = None, 
                      current_index: Optional[int] = None, kline_data: Optional[list] = None,
-                     last_valid_point_type: Optional[str] = None) -> Tuple[bool, List[RPointPluginResult]]:
+                     last_valid_point_type: Optional[str] = None,
+                     last_c_point_type: Optional[str] = None) -> Tuple[bool, List[RPointPluginResult]]:
         """
         检查是否触发R点（卖出信号）
         
@@ -99,6 +100,13 @@ class RPointPluginService:
             Tuple[bool, List[RPointPluginResult]]: (是否触发R点, 触发的插件列表)
         """
         triggered_plugins = []
+        
+        # 测试插件：熊市直接发R（已禁用）
+        # bear_test = self._check_bear_market_test(stock_code, date, c_point_date, last_valid_point_type, last_c_point_type)
+        # if bear_test.triggered:
+        #     triggered_plugins.append(bear_test)
+        #     logger.info(f"[R点插件-熊市测试R] {stock_code} {date}: {bear_test.reason}")
+        #     return True, triggered_plugins
         
         # 插件1: 乖离率偏离
         plugin1 = self._check_deviation(stock_code, date)
@@ -595,7 +603,7 @@ class RPointPluginService:
 
             # 情形3：熊市 + 近3个交易日无AXYZ放量 + 当日空头组合（不看当日放量）
             # 仅在熊市生效
-            market_type = self.config_service.get_market_type()
+            market_type = self.config_service.get_market_type(date)
             if market_type == 'bear' and len(prev_dates) >= 3:
                 prev3_dates = prev_dates[:3]  # 不含当日，向前3个交易日
                 
@@ -626,6 +634,47 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"R点插件-临近压力位滞涨检查失败: {e}")
             return RPointPluginResult("临近压力位滞涨", False, "")
+    
+    def _check_bear_market_test(self, stock_code: str, date: datetime,
+                               c_point_date: Optional[datetime] = None,
+                               last_valid_point_type: Optional[str] = None,
+                               last_c_point_type: Optional[str] = None) -> RPointPluginResult:
+        """
+        测试插件：熊市且当日股价>0 则直接触发R点，用于前端tooltip验证
+        额外输出：最近C点日期 + 上一个信号类型
+        """
+        try:
+            market_type = self.config_service.get_market_type(date)
+            if market_type != 'bear':
+                return RPointPluginResult("熊市测试R", False, "")
+            
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            current_data = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data or not current_data.close or current_data.close <= 0:
+                return RPointPluginResult("熊市测试R", False, "")
+
+            c_date_str = None
+            if c_point_date:
+                if isinstance(c_point_date, datetime):
+                    c_date_str = c_point_date.strftime('%Y-%m-%d')
+                else:
+                    c_date_str = str(c_point_date)
+
+            last_sig = last_valid_point_type or "-"
+            last_c_src = "-"
+            if last_c_point_type:
+                if str(last_c_point_type).upper() == 'C_STRATEGY2':
+                    last_c_src = "C_STRATEGY2(S2)"
+                elif str(last_c_point_type).upper() == 'C':
+                    last_c_src = "C(S1)"
+                else:
+                    last_c_src = str(last_c_point_type)
+            
+            reason = f"熊市测试R: market_type=bear, close={current_data.close:.2f}>0, lastC={c_date_str or '-'}, lastSig={last_sig}, lastCSource={last_c_src}"
+            return RPointPluginResult("熊市测试R", True, reason)
+        except Exception as e:
+            logger.error(f"R点插件-熊市测试R检查失败: {e}")
+            return RPointPluginResult("熊市测试R", False, "")
     
     def _check_fundamental_negative(self, stock_code: str, date: datetime) -> RPointPluginResult:
         """

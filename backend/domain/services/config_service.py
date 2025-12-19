@@ -4,7 +4,7 @@
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional
 from infrastructure.logging.logger import get_logger
 
@@ -171,10 +171,33 @@ class ConfigService:
             logger.error(f"配置保存失败: {e}")
             raise
     
-    def _compute_market_type(self) -> str:
-        """根据日期规则计算市场类型"""
-        today = datetime.now().date()
-        return 'bear' if today < MARKET_TYPE_CUTOFF else 'bull'
+    def _compute_market_type(self, as_of: Optional[Any] = None) -> str:
+        """
+        根据日期规则计算市场类型。
+
+        重要：回测/历史分析时，应传入“当前正在计算的历史日期”（as_of），而不是使用机器当前日期。
+
+        Args:
+            as_of: 支持 datetime/date/字符串(YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS)；为空则使用当前日期
+        """
+        try:
+            if as_of is None:
+                d = datetime.now().date()
+            elif isinstance(as_of, datetime):
+                d = as_of.date()
+            elif isinstance(as_of, date):
+                d = as_of
+            else:
+                # 兼容 'YYYY-MM-DD ...' 字符串
+                s = str(as_of).strip()
+                if not s:
+                    d = datetime.now().date()
+                else:
+                    d = datetime.strptime(s.split(" ")[0], "%Y-%m-%d").date()
+        except Exception:
+            d = datetime.now().date()
+
+        return 'bear' if d < MARKET_TYPE_CUTOFF else 'bull'
 
     def _get_market_type_rule_info(self) -> Dict[str, Any]:
         """返回市场类型自动判定规则说明"""
@@ -220,9 +243,14 @@ class ConfigService:
                 continue
         return result
     
-    def get_market_type(self) -> str:
-        """获取市场类型（自动判定）"""
-        return self._compute_market_type()
+    def get_market_type(self, as_of: Optional[Any] = None) -> str:
+        """
+        获取市场类型（自动判定）。
+
+        - 实盘/当前：as_of=None（默认用机器当前日期）
+        - 回测/历史：传入正在计算的K线日期 as_of=date/datetime/'YYYY-MM-DD'
+        """
+        return self._compute_market_type(as_of)
     
     def get_pressure_stagnation_distance_threshold(self) -> float:
         """获取临近压力位滞涨插件的距离阈值（百分比）"""

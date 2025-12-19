@@ -828,7 +828,7 @@ class CPointPluginService:
         """
         try:
             # 检查市场类型，只在牛市时生效
-            market_type = self.config_service.get_market_type()
+            market_type = self.config_service.get_market_type(date)
             if market_type != 'bull':
                 return CPointPluginResult("阳包阴", False, 0, "")
             
@@ -947,7 +947,7 @@ class CPointPluginService:
         """
         try:
             # 检查市场类型，只在牛市时生效
-            market_type = self.config_service.get_market_type()
+            market_type = self.config_service.get_market_type(date)
             if market_type != 'bull':
                 return CPointPluginResult("横盘修整后突破", False, 0, "")
             

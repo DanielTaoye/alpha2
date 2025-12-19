@@ -189,6 +189,7 @@ class CRPointService:
         strategy2_scores = {}  # 记录所有K线的策略2评分 {date_str: {score, reason}}
         strategy1_scores = {}  # 记录所有K线的策略1评分和插件信息 {date_str: {score, base_score, plugins}}
         last_c_point_date: Optional[datetime] = None  # 记录最近的C点日期（用于R点判断）
+        last_c_point_type: Optional[str] = None       # 记录最近C点的类型（C=策略1，C_STRATEGY2=策略2）
         
         # CR关系校验：记录最后一个有效点的类型、日期和索引
         last_valid_point_type: Optional[str] = None  # 'C' 或 'R'
@@ -207,7 +208,8 @@ class CRPointService:
                 macd_data,  # 传入MACD数据（用于高位发R插件）
                 index,  # 传入当前K线索引（用于高位发R插件）
                 kline_data,  # 传入完整K线数据（用于箱体回踩插件）
-                last_valid_point_type=last_valid_point_type  # 传入最近有效点类型，供插件2使用
+                last_valid_point_type=last_valid_point_type,  # 传入最近有效点类型，供插件2使用
+                last_c_point_type=last_c_point_type  # 传入最近C点类型（策略1/策略2）
             )
             t_r_total += (perf_counter() - t_r0)
             r_calls += 1
@@ -381,6 +383,7 @@ class CRPointService:
                     c_points.append(cr_point)
                     # 记录最近的C点日期
                     last_c_point_date = kline.time
+                    last_c_point_type = 'C'
                     # 更新CR关系状态
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
@@ -464,6 +467,7 @@ class CRPointService:
                     strategy2_c_points.append(strategy2_point)
                     # 记录最近的C点日期
                     last_c_point_date = kline.time
+                    last_c_point_type = 'C_STRATEGY2'
                     # 更新CR关系状态
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
