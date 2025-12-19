@@ -592,6 +592,34 @@ class RPointPluginService:
                         True,
                         f"临近压力位+前两日放量+风险K线(距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
                     )
+
+            # 情形3：熊市 + 近3个交易日无AXYZ放量 + 当日空头组合（不看当日放量）
+            # 仅在熊市生效
+            market_type = self.config_service.get_market_type()
+            if market_type == 'bear' and len(prev_dates) >= 3:
+                prev3_dates = prev_dates[:3]  # 不含当日，向前3个交易日
+                
+                def has_target_volume(chance) -> bool:
+                    return self._check_volume_type(chance, ['A', 'X', 'Y', 'Z'])
+                
+                prev3_chances = []
+                for d in prev3_dates:
+                    dc = self._daily_chance_cache.get(d) or self.daily_chance_repo.find_by_stock_and_date(stock_code, d)
+                    if not dc:
+                        prev3_chances = None
+                        break
+                    prev3_chances.append(dc)
+                
+                if prev3_chances:
+                    no_ax_yz_prev3 = all(not has_target_volume(dc) for dc in prev3_chances)
+                    has_bearish_today = self._check_bearish_pattern(current_chance)
+                    
+                    if no_ax_yz_prev3 and has_bearish_today:
+                        return RPointPluginResult(
+                            "临近压力位滞涨",
+                            True,
+                            f"熊市临近压力位+近3日无AXYZ放量+当日空头组合(距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
+                        )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
             

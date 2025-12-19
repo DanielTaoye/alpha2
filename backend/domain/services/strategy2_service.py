@@ -64,7 +64,7 @@ class Strategy2Service:
         total_score += macd_score
         
         # 3. 成交量总分：30分
-        volume_score = self._calculate_volume_score(volume_type, details)
+        volume_score = self._calculate_volume_score(volume_type, details, stock_nature)
         total_score += volume_score
 
         # 3.5 策略2取消发C 情形1（惩罚项）
@@ -233,7 +233,8 @@ class Strategy2Service:
         
         return score
     
-    def _calculate_volume_score(self, volume_type: Optional[str], details: List[str]) -> float:
+    def _calculate_volume_score(self, volume_type: Optional[str], details: List[str],
+                               stock_nature: Optional[str] = None) -> float:
         """
         计算成交量得分：最高30分
         
@@ -241,6 +242,7 @@ class Strategy2Service:
         温和放量（ABCD）任意一种：30分
         其他特殊型（H）：21分（70%权重）
         XY型放量：21分（策略2专用）
+        中长线 + S型额外加分：+10
         """
         score = 0
         
@@ -273,6 +275,13 @@ class Strategy2Service:
                 details.append("成交量21分(H型放量)")
             else:
                 details.append("成交量21分(XY型放量)")
+        
+        # 中长线 + S型成交量加10分（在原有分数基础上累加）
+        if 'S' in volume_types:
+            normalized_nature = stock_nature
+            if normalized_nature in ["长线", "中长", "中长线"]:
+                score += 10
+                details.append("中长线S型成交量+10分")
         
         return score
     
