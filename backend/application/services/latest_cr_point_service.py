@@ -410,23 +410,47 @@ class LatestCRPointService:
             )
             
             # 11. 检查R点
-            # 获取最近的C点日期（用于R点判断）
+            # 计算最近的C点日期 & 最近有效点类型（C / R），供插件2使用
+            def _extract_trigger_date(point):
+                if point is None:
+                    return None
+                val = point.get('trigger_date') if isinstance(point, dict) else getattr(point, 'trigger_date', None)
+                if isinstance(val, str):
+                    try:
+                        return datetime.strptime(val.split(' ')[0], '%Y-%m-%d')
+                    except Exception:
+                        return None
+                if hasattr(val, 'strftime'):
+                    return val
+                return None
+
             last_c_point_date = None
+            last_valid_point_type = None
+            last_valid_point_date = None
+
             if historical_c_points:
-                # 历史C点已经按日期排序，取最后一个
                 last_c = historical_c_points[-1]
-                if isinstance(last_c, dict):
-                    last_c_point_date = last_c.get('trigger_date')
-                else:
-                    last_c_point_date = getattr(last_c, 'trigger_date', None)
-            
+                last_c_point_date = _extract_trigger_date(last_c)
+                if last_c_point_date:
+                    last_valid_point_type = 'C'
+                    last_valid_point_date = last_c_point_date
+
+            if historical_r_points:
+                last_r = historical_r_points[-1]
+                last_r_date = _extract_trigger_date(last_r)
+                # 如果最近的点是R且日期更晚，则覆盖 last_valid_point_type/date
+                if last_r_date and (last_valid_point_date is None or last_r_date > last_valid_point_date):
+                    last_valid_point_type = 'R'
+                    last_valid_point_date = last_r_date
+
             r_point_result = self._check_r_point(
                 full_stock_code,  # 🔥 使用带前缀的完整代码
                 current_kline['date'],
                 ma_data,
                 macd_data,
                 kline_data,
-                last_c_point_date  # 传入最近的C点日期
+                last_c_point_date,  # 传入最近的C点日期
+                last_valid_point_type=last_valid_point_type  # 传入最近有效点类型（允许插件2生效）
             )
             
             # 12. 不再需要清空缓存（全局缓存会自动管理）
@@ -650,7 +674,8 @@ class LatestCRPointService:
         ma_data: Dict,
         macd_data: Dict,
         kline_data: List[Dict],
-        c_point_date = None  # 最近的C点日期
+        c_point_date = None,  # 最近的C点日期
+        last_valid_point_type: Optional[str] = None  # 最近有效点类型（C/R）
     ) -> Dict:
         """检查R点"""
         try:
@@ -713,7 +738,7 @@ class LatestCRPointService:
                 macd_data,
                 current_index,
                 kline_objects,
-                last_valid_point_type=None  # 单日计算不维护序列，这里置None
+                last_valid_point_type=last_valid_point_type
             )
             
             return {
