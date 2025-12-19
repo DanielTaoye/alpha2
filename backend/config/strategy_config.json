@@ -4,7 +4,7 @@
     "nature_thresholds": {
       "短线": 90.0,
       "波段": 85.0,
-      "中长线": 70.0
+      "中长线": 90.0
     },
     "description": "策略1 C点触发阈值（基于赔率分+胜率分+插件）"
   },
@@ -13,7 +13,7 @@
     "nature_thresholds": {
       "短线": 80.0,
       "波段": 80.0,
-      "中长线": 70.0
+      "中长线": 75.0
     },
     "description": "策略2 C点触发阈值（基于MA+MACD+成交量+K线组合）"
   },
@@ -33,7 +33,7 @@
   },
   "market_type": "bull",
   "market_type_description": "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市",
-  "last_updated": "2025-12-19 13:32:00",
+  "last_updated": "2025-12-19 13:52:59",
   "market_type_rule": {
     "mode": "date_rule",
     "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",
