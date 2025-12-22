@@ -427,14 +427,14 @@ class RPointPluginService:
                                 f"条件5: 前15日涨幅{gain_15days:.2f}%+放量+{signal_desc}"
                             )
             
-            # === 条件6: 前20个交易日涨幅>40%（昨日收盘相对前20日收盘，窗口需21日） ===
+            # === 条件6: 前20个交易日涨幅>50%（昨日收盘相对前20日收盘，窗口需21日） ===
             if len(prev_data_list) >= 21:
                 latest_close = prev_data_list[0].close
                 prev_20_day = prev_data_list[20]
                 if latest_close and latest_close > 0 and prev_20_day.close and prev_20_day.close > 0:
                     gain_20days = (latest_close - prev_20_day.close) / prev_20_day.close * 100
-                    if gain_20days > 40:
-                        logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{gain_20days:.2f}%>40%, "
+                    if gain_20days > 50:
+                        logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{gain_20days:.2f}%>50%, "
                                     f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
                                     f"has_bearish_pattern={has_bearish_pattern}")
                         if is_volume_xyzh and (is_bearish_kline_with_amplitude or has_bearish_pattern):
