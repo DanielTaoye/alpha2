@@ -902,6 +902,15 @@ class CPointPluginService:
             if market_type != 'bull':
                 return CPointPluginResult("阳包阴", False, 0, "")
             
+            # 仅对波段/中长线股性生效，其他股性直接失效
+            date_str_nature = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            current_chance_nature = self._daily_chance_cache.get(date_str_nature)
+            if not current_chance_nature:
+                current_chance_nature = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str_nature)
+            stock_nature = getattr(current_chance_nature, "stock_nature", None) if current_chance_nature else None
+            if stock_nature not in ["波段", "中长线"]:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             
             # 获取当日数据
@@ -936,6 +945,23 @@ class CPointPluginService:
                             break
             
             if not r_point_in_range:
+                return CPointPluginResult("阳包阴", False, 0, "")
+            
+            # 特殊失效：若最近R由乖离率偏离条件5/6触发，则阳包阴失效（仅牛市、仅波段/中长线）
+            try:
+                r_plugins = getattr(r_point_in_range, "plugins", None) or []
+                deviation_56 = False
+                for p in r_plugins:
+                    name = p.get("pluginName") or p.get("plugin_name")
+                    triggered = p.get("triggered", False)
+                    reason = p.get("reason") or ""
+                    if triggered and name == "乖离率偏离" and ("条件5" in reason or "条件6" in reason):
+                        deviation_56 = True
+                        break
+                if deviation_56:
+                    return CPointPluginResult("阳包阴", False, 0, "")
+            except Exception:
+                # 出现异常时保持原逻辑，不让插件误发C
                 return CPointPluginResult("阳包阴", False, 0, "")
             
             # 检查R点之后是否有C点（前面最近的信号点必须是R，不能是C）
