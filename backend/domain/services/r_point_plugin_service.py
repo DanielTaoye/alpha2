@@ -315,11 +315,12 @@ class RPointPluginService:
                             f"条件1: 连续{consecutive_limits}个涨停+放量+{pattern_desc}"
                         )
             
-            # === 条件2: 前3日涨幅过大（起止收盘比） ===
+            # === 条件2: 前3个交易日涨幅过大（昨日收盘相对前三日收盘，窗口需4日） ===
             if len(prev_data_list) >= 4:
-                prev_3_day = prev_data_list[3]
-                if prev_3_day.close and prev_3_day.close > 0:
-                    gain_3days = (current_data.close - prev_3_day.close) / prev_3_day.close * 100
+                latest_close = prev_data_list[0].close  # 昨日
+                prev_3_day = prev_data_list[3]         # 往前第3个交易日（如周一）
+                if latest_close and latest_close > 0 and prev_3_day.close and prev_3_day.close > 0:
+                    gain_3days = (latest_close - prev_3_day.close) / prev_3_day.close * 100
                     threshold_3days = 15 if is_main_board else 20
                     if gain_3days > threshold_3days:
                         logger.debug(f"[R点-乖离率偏离-条件2] {stock_code} {date_str} 前3日涨幅{gain_3days:.2f}%>{threshold_3days}%, "
@@ -342,11 +343,12 @@ class RPointPluginService:
                                     f"条件2: 前3日涨幅{gain_3days:.2f}%+放量+{pattern_desc}"
                                 )
             
-            # === 条件3: 前5日涨幅过大（起止收盘比） ===
+            # === 条件3: 前5个交易日涨幅过大（昨日收盘相对前5日收盘，窗口需6日） ===
             if len(prev_data_list) >= 6:
-                prev_5_day = prev_data_list[5]
-                if prev_5_day.close and prev_5_day.close > 0:
-                    gain_5days = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
+                latest_close = prev_data_list[0].close  # 昨日
+                prev_5_day = prev_data_list[5]          # 往前第5个交易日
+                if latest_close and latest_close > 0 and prev_5_day.close and prev_5_day.close > 0:
+                    gain_5days = (latest_close - prev_5_day.close) / prev_5_day.close * 100
                     threshold_5days = 20 if is_main_board else 25
                     if gain_5days > threshold_5days:
                         logger.debug(f"[R点-乖离率偏离-条件3] {stock_code} {date_str} 前5日涨幅{gain_5days:.2f}%>{threshold_5days}%, "
@@ -369,12 +371,13 @@ class RPointPluginService:
                                     f"条件3: 前5日涨幅{gain_5days:.2f}%+放量+{pattern_desc}"
                                 )
             
-            # === 条件4: 连续5连阳+涨幅过大（起止收盘比） ===
+            # === 条件4: 连续5连阳+涨幅过大（昨日收盘相对前5日收盘，窗口需6日） ===
             if len(prev_data_list) >= 6:
                 all_bullish = all(prev_data_list[i].close >= prev_data_list[i].open for i in range(5))
+                latest_close = prev_data_list[0].close
                 prev_5_day = prev_data_list[5]
-                if all_bullish and prev_5_day.close and prev_5_day.close > 0:
-                    gain_5days_yang = (current_data.close - prev_5_day.close) / prev_5_day.close * 100
+                if all_bullish and latest_close and latest_close > 0 and prev_5_day.close and prev_5_day.close > 0:
+                    gain_5days_yang = (latest_close - prev_5_day.close) / prev_5_day.close * 100
                     threshold_yang = 20 if is_main_board else 25
                     if gain_5days_yang > threshold_yang:
                         logger.debug(f"[R点-乖离率偏离-条件4] {stock_code} {date_str} 5连阳涨幅{gain_5days_yang:.2f}%>{threshold_yang}%, "
@@ -397,11 +400,12 @@ class RPointPluginService:
                                     f"条件4: 5连阳涨幅{gain_5days_yang:.2f}%+放量+{pattern_desc}"
                                 )
             
-            # === 条件5: 前15日涨幅>50%（起止收盘比） ===
+            # === 条件5: 前15个交易日涨幅>50%（昨日收盘相对前15日收盘，窗口需16日） ===
             if len(prev_data_list) >= 16:
+                latest_close = prev_data_list[0].close
                 prev_15_day = prev_data_list[15]
-                if prev_15_day.close and prev_15_day.close > 0:
-                    gain_15days = (current_data.close - prev_15_day.close) / prev_15_day.close * 100
+                if latest_close and latest_close > 0 and prev_15_day.close and prev_15_day.close > 0:
+                    gain_15days = (latest_close - prev_15_day.close) / prev_15_day.close * 100
                     if gain_15days > 50:
                         logger.debug(f"[R点-乖离率偏离-条件5] {stock_code} {date_str} 前15日涨幅{gain_15days:.2f}%>50%, "
                                     f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
@@ -423,11 +427,12 @@ class RPointPluginService:
                                 f"条件5: 前15日涨幅{gain_15days:.2f}%+放量+{signal_desc}"
                             )
             
-            # === 条件6: 前20日涨幅>50%（起止收盘比） ===
+            # === 条件6: 前20个交易日涨幅>50%（昨日收盘相对前20日收盘，窗口需21日） ===
             if len(prev_data_list) >= 21:
+                latest_close = prev_data_list[0].close
                 prev_20_day = prev_data_list[20]
-                if prev_20_day.close and prev_20_day.close > 0:
-                    gain_20days = (current_data.close - prev_20_day.close) / prev_20_day.close * 100
+                if latest_close and latest_close > 0 and prev_20_day.close and prev_20_day.close > 0:
+                    gain_20days = (latest_close - prev_20_day.close) / prev_20_day.close * 100
                     if gain_20days > 50:
                         logger.debug(f"[R点-乖离率偏离-条件6] {stock_code} {date_str} 前20日涨幅{gain_20days:.2f}%>50%, "
                                     f"is_volume_xyzh={is_volume_xyzh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
