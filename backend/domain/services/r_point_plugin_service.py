@@ -176,6 +176,14 @@ class RPointPluginService:
                 logger.info(f"[R点插件-MACD中长线死叉+跌破支撑] {stock_code} {date}: {plugin11.reason}")
                 return True, triggered_plugins
 
+        # 插件12: 中长线顶背离（仅中长线股性）
+        if macd_data and current_index is not None and kline_data is not None:
+            plugin12 = self._check_macd_long_top_divergence(stock_code, date, macd_data, current_index, kline_data)
+            if plugin12.triggered:
+                triggered_plugins.append(plugin12)
+                logger.info(f"[R点插件-中长线顶背离] {stock_code} {date}: {plugin12.reason}")
+                return True, triggered_plugins
+
         # 插件10: 高位滞涨+空头组合
         if macd_data and current_index is not None:
             plugin10 = self._check_high_stagnation_bearish(stock_code, date, macd_data, current_index)
@@ -1588,6 +1596,197 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"插件11-MACD中长线死叉+跌破支撑检查异常: {e}")
             return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+    def _check_macd_long_top_divergence(self, stock_code: str, date: datetime,
+                                        macd_data: dict, current_index: int, kline_data: list) -> RPointPluginResult:
+        """
+        插件12: 中长线顶背离（仅中长线股性）
+
+        触发前置：
+        - 仅股性为“中长线”
+        - 当日满足：空头组合字段非空 或 三连阴（前天/昨天/今天均为阴线）
+
+        回溯逻辑（从当前日向前）：
+        1) 找到最近一次金叉G1（必须发生在今天之前；若最近一次交叉事件是死叉则不符合）
+           定义：DIF从下方上穿DEA，且前一日蓝柱(MACD<0)、当日红柱(MACD>0)、当日DIF>DEA
+        2) 找到G1之前最近一次死叉S1
+           定义：DIF从上方下穿DEA，且前一日红柱(MACD>0)、当日蓝柱(MACD<0)、当日DIF<DEA
+        3) 在S1之前找到最近的DIF局部高点H1，并取H1日最高价Price_H1
+           定义：往前数10根K线，当日DIF与前一日DIF均大于再往前8个交易日的DIF
+        4) 在G1之后、今天之前，找到DIF局部高点中DIF最大的日期H2，并取H2日最高价Price_H2
+        5) 若 Price_H2 > Price_H1，则判定为“顶背离”，触发R
+        """
+        plugin_name = "中长线顶背离"
+        try:
+            # 基础数据检查
+            if not macd_data or current_index is None or current_index <= 0:
+                return RPointPluginResult(plugin_name, False, "")
+            if not kline_data or current_index >= len(kline_data):
+                return RPointPluginResult(plugin_name, False, "")
+
+            dif_arr = macd_data.get('dif') if isinstance(macd_data, dict) else None
+            dea_arr = macd_data.get('dea') if isinstance(macd_data, dict) else None
+            macd_arr = macd_data.get('macd') if isinstance(macd_data, dict) else None
+            if not dif_arr or not dea_arr or not macd_arr:
+                return RPointPluginResult(plugin_name, False, "")
+            if current_index >= len(dif_arr) or current_index >= len(dea_arr) or current_index >= len(macd_arr):
+                return RPointPluginResult(plugin_name, False, "")
+
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else str(date)
+            current_chance = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            if not current_chance:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # 仅中长线
+            stock_nature = getattr(current_chance, "stock_nature", None) or "波段"
+            if stock_nature != "中长线":
+                return RPointPluginResult(plugin_name, False, "")
+
+            # 前置条件：空头组合 或 三连阴
+            has_bearish_combo = self._check_bearish_pattern(current_chance)
+            is_three_down = False
+            if current_index >= 2:
+                k0 = kline_data[current_index]
+                k1 = kline_data[current_index - 1]
+                k2 = kline_data[current_index - 2]
+                try:
+                    is_three_down = (k0.close < k0.open) and (k1.close < k1.open) and (k2.close < k2.open)
+                except Exception:
+                    is_three_down = False
+
+            if not (has_bearish_combo or is_three_down):
+                return RPointPluginResult(plugin_name, False, "")
+
+            # ---------- Step 1: 最近一次交叉事件必须是金叉 ----------
+            g1_idx = None
+            for i in range(current_index - 1, 0, -1):
+                # 金叉/死叉都要求 i-1 存在
+                if i - 1 < 0:
+                    break
+                dif_prev, dea_prev = dif_arr[i - 1], dea_arr[i - 1]
+                dif_curr, dea_curr = dif_arr[i], dea_arr[i]
+                macd_prev, macd_curr = macd_arr[i - 1], macd_arr[i]
+                if None in [dif_prev, dea_prev, dif_curr, dea_curr, macd_prev, macd_curr]:
+                    continue
+
+                # 死叉事件（最近一次如果是死叉，则不符合）
+                if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
+                    return RPointPluginResult(plugin_name, False, "")
+
+                # 金叉事件
+                if (dif_prev < dea_prev) and (dif_curr > dea_curr) and (macd_prev < 0) and (macd_curr > 0) and (dif_curr > dea_curr):
+                    g1_idx = i
+                    break
+
+            if g1_idx is None:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # ---------- Step 2: G1之前最近死叉S1 ----------
+            s1_idx = None
+            for i in range(g1_idx - 1, 0, -1):
+                if i - 1 < 0:
+                    break
+                dif_prev, dea_prev = dif_arr[i - 1], dea_arr[i - 1]
+                dif_curr, dea_curr = dif_arr[i], dea_arr[i]
+                macd_prev, macd_curr = macd_arr[i - 1], macd_arr[i]
+                if None in [dif_prev, dea_prev, dif_curr, dea_curr, macd_prev, macd_curr]:
+                    continue
+                if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
+                    s1_idx = i
+                    break
+            if s1_idx is None:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # ---------- Step 3: S1之前最近DIF局部高点H1 ----------
+            h1_idx = None
+            for j in range(s1_idx - 1, 8, -1):  # 至少需要 j-9 >= 0
+                if j - 9 < 0 or j - 1 < 0:
+                    continue
+                dif_j = dif_arr[j]
+                dif_j1 = dif_arr[j - 1]
+                if dif_j is None or dif_j1 is None:
+                    continue
+                prev8 = [dif_arr[j - k] for k in range(2, 10)]  # j-2..j-9
+                if any(v is None for v in prev8):
+                    continue
+                m = max(prev8)
+                if dif_j > m and dif_j1 > m:
+                    h1_idx = j
+                    break
+            if h1_idx is None:
+                return RPointPluginResult(plugin_name, False, "")
+
+            try:
+                price_h1 = float(getattr(kline_data[h1_idx], "high"))
+            except Exception:
+                return RPointPluginResult(plugin_name, False, "")
+            dif_h1 = dif_arr[h1_idx]
+            if dif_h1 is None:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # ---------- Step 4: G1之后、今天之前 DIF局部高点中DIF最大的H2 ----------
+            best_h2_idx = None
+            best_h2_dif = None
+            for j in range(g1_idx + 1, current_index):  # 排除今天
+                if j - 9 < 0 or j - 1 < 0:
+                    continue
+                dif_j = dif_arr[j]
+                dif_j1 = dif_arr[j - 1]
+                if dif_j is None or dif_j1 is None:
+                    continue
+                prev8 = [dif_arr[j - k] for k in range(2, 10)]
+                if any(v is None for v in prev8):
+                    continue
+                m = max(prev8)
+                if not (dif_j > m and dif_j1 > m):
+                    continue
+                if best_h2_dif is None or dif_j > best_h2_dif or (dif_j == best_h2_dif and (best_h2_idx is None or j > best_h2_idx)):
+                    best_h2_dif = dif_j
+                    best_h2_idx = j
+
+            if best_h2_idx is None:
+                return RPointPluginResult(plugin_name, False, "")
+
+            try:
+                price_h2 = float(getattr(kline_data[best_h2_idx], "high"))
+            except Exception:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # ---------- Step 5: 价格创新高 + DIF降低 => 顶背离 ----------
+            if not (price_h2 > price_h1):
+                return RPointPluginResult(plugin_name, False, "")
+            if best_h2_dif is None or not (best_h2_dif < dif_h1):
+                return RPointPluginResult(plugin_name, False, "")
+
+            t_g1 = getattr(kline_data[g1_idx], "time", None)
+            t_s1 = getattr(kline_data[s1_idx], "time", None)
+            t_h1 = getattr(kline_data[h1_idx], "time", None)
+            t_h2 = getattr(kline_data[best_h2_idx], "time", None)
+            t_g1s = self._to_date_str(t_g1) if t_g1 else f"idx{g1_idx}"
+            t_s1s = self._to_date_str(t_s1) if t_s1 else f"idx{s1_idx}"
+            t_h1s = self._to_date_str(t_h1) if t_h1 else f"idx{h1_idx}"
+            t_h2s = self._to_date_str(t_h2) if t_h2 else f"idx{best_h2_idx}"
+
+            precond = "空头组合" if has_bearish_combo else "三连阴"
+            bearish_desc = ""
+            if has_bearish_combo:
+                try:
+                    bearish_desc = f"({(current_chance.bearish_pattern or '').strip()})"
+                except Exception:
+                    bearish_desc = ""
+
+            reason = (
+                f"中长线+{precond}{bearish_desc}"
+                f"+G1({t_g1s})+S1({t_s1s})"
+                f"+H1({t_h1s},价高{price_h1:.2f},DIF{dif_h1:.4f})"
+                f"+H2({t_h2s},价高{price_h2:.2f},DIF{best_h2_dif:.4f})"
+                f"+价高创新高({price_h2:.2f}>{price_h1:.2f})且DIF降低({best_h2_dif:.4f}<{dif_h1:.4f})=>顶背离"
+            )
+            return RPointPluginResult(plugin_name, True, reason)
+
+        except Exception as e:
+            logger.error(f"插件12-中长线顶背离检查异常: {e}")
+            return RPointPluginResult(plugin_name, False, "")
 
     def _check_high_stagnation_bearish(self, stock_code: str, date: datetime,
                                        macd_data: dict, current_index: int) -> RPointPluginResult:
