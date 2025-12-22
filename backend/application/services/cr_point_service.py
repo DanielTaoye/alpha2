@@ -307,6 +307,7 @@ class CRPointService:
                 has_prev_valid_r = (last_valid_point_type == 'R' and
                                     last_valid_point_date is not None and
                                     (kline.time.date() - last_valid_point_date.date()).days == 1)
+                has_prev_valid_c = (last_valid_point_type == 'C')
                 
                 t_s20 = perf_counter()
                 is_strategy2_c, strategy2_score, strategy2_reason = self.strategy2_service.check_strategy2(
@@ -321,7 +322,8 @@ class CRPointService:
                     index=index,
                     prev_day_has_r=has_prev_valid_r,
                     strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty,
-                    stock_nature=resolved_nature
+                    stock_nature=resolved_nature,
+                    prev_has_c=has_prev_valid_c
                 )
                 t_s2_total += (perf_counter() - t_s20)
                 s2_calls += 1

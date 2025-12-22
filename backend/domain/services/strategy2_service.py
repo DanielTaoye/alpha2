@@ -29,7 +29,8 @@ class Strategy2Service:
                        index: int,
                        prev_day_has_r: bool = False,
                        strategy1_reject_by_penalty_plugins: bool = False,
-                       stock_nature: Optional[str] = None) -> Tuple[bool, float, str]:
+                       stock_nature: Optional[str] = None,
+                       prev_has_c: bool = False) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -94,6 +95,11 @@ class Strategy2Service:
         if strategy1_reject_by_penalty_plugins and pre_case4_score >= threshold:
             total_score -= 55
             details.append("策略2取消发C情形4扣55分(策略1被减分插件否决)")
+
+        # 新逻辑：若前面已有有效C（非R），短线/波段的策略2额外扣38分；中长线不受影响
+        if prev_has_c and (stock_nature is None or stock_nature in ["短线", "波段"]):
+            total_score -= 38
+            details.append("前有C，策略2额外扣38分(仅短线/波段)")
         
         # 判断是否触发
         is_triggered = total_score >= threshold
