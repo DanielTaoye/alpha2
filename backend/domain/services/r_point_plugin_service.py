@@ -129,9 +129,9 @@ class RPointPluginService:
             logger.info(f"[R点插件-基本面突发利空] {stock_code} {date}: {plugin4.reason}")
             return True, triggered_plugins
 
-        # 插件5: 上冲乏力
+        # 插件5: 上冲乏力（熊市特定逻辑）
         if c_point_date:
-            plugin5 = self._check_weak_breakout(stock_code, date, c_point_date)
+            plugin5 = self._check_weak_breakout(stock_code, date, c_point_date, last_valid_point_type)
             if plugin5.triggered:
                 triggered_plugins.append(plugin5)
                 logger.info(f"[R点插件-上冲乏力] {stock_code} {date}: {plugin5.reason}")
@@ -722,23 +722,38 @@ class RPointPluginService:
             logger.error(f"R点插件-基本面突发利空检查失败: {e}")
             return RPointPluginResult("基本面突发利空", False, "")
     
-    def _check_weak_breakout(self, stock_code: str, date: datetime, c_point_date: datetime) -> RPointPluginResult:
+    def _check_weak_breakout(self, stock_code: str, date: datetime, c_point_date: datetime,
+                             last_valid_point_type: Optional[str] = None) -> RPointPluginResult:
         """
-        插件4: 上冲乏力
+        插件4: 上冲乏力（现改为仅熊市生效）
         
-        条件: 
-        - 从发C日起累计涨幅>15% 
-        - 前一交易日日线赔率得分：短线<15分、波段<12分、中长线<10分（且不等于0）
-        - 当前股价距离压力线：0% < (压力线-股价)/股价 < 8%
-        - 压力线价格从数据库读取后需除以100（数据库存储格式：1660代表16.60元）
-        - 前日涨幅>6%/8% 
-        - 今日放量(AXYZH) 
-        - 特定K线
+        条件:
+        - 仅在熊市生效
+        - 最近有效信号必须是C（不是R），且传入了C点日期
+        - 从发C日（最低价）到今日收盘累计涨幅 > 15%
+        - 使用“今日前一交易日”的压力线：要求存在压力线且赔率>0
+        - 当前股价距压力线：0% < (压力线-今日收盘)/今日收盘 < 距离阈值（与“临近压力位滞涨”一致，可配置，默认10%）
+        - 前一日涨幅 ≥ 6%（主板）/ ≥8%（非主板）
+        - 今日放量（A/X/Y/Z/H 任一）
+        - 今日K线满足风险形态之一：
+            * 振幅>6%/8%的 冲高回落阳/阴线
+            * 振幅>6%/8%的 冲高回落阳/阴十字星
+            * 振幅>6%/8%的 高开低走
+            * 阴线跌幅 >3%（主板）/>5%（非主板）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else c_point_date
             
+            # 仅熊市生效
+            market_type = self.config_service.get_market_type(date)
+            if market_type != 'bear':
+                return RPointPluginResult("上冲乏力", False, "")
+
+            # 必须最近有效信号是C
+            if last_valid_point_type != 'C':
+                return RPointPluginResult("上冲乏力", False, "")
+
             # 判断主板还是非主板（统一规则）
             is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
             
@@ -756,8 +771,8 @@ class RPointPluginService:
             if not current_data:
                 return RPointPluginResult("上冲乏力", False, "")
             
-            # 计算从C点到今日的累计涨幅
-            cumulative_gain = ((current_data.close - c_data.close) / c_data.close * 100) if c_data.close else 0
+            # 计算从C点“最低价”到今日收盘的累计涨幅
+            cumulative_gain = ((current_data.close - c_data.low) / c_data.low * 100) if c_data.low else 0
             
             if cumulative_gain <= 15:
                 return RPointPluginResult("上冲乏力", False, "")
@@ -772,7 +787,7 @@ class RPointPluginService:
             # 获取股性
             stock_nature = current_chance.stock_nature or "波段"  # 默认波段
             
-            # 获取前一交易日数据，使用前一交易日的赔率得分
+            # 获取前一交易日数据，使用前一交易日的赔率得分/压力线
             prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             if len(prev_dates) < 1:
                 return RPointPluginResult("上冲乏力", False, "")
@@ -785,24 +800,24 @@ class RPointPluginService:
                 return RPointPluginResult("上冲乏力", False, "")
             
             # 检查前一交易日的赔率（根据股性判断）
-            # 要求：赔率得分不等于0，且小于阈值
+            # 要求：赔率得分不等于0，且小于阈值（同时用来判断“有压力线”）
             day_win_ratio_score = prev_chance.day_win_ratio_score or 0
             win_ratio_threshold = self._get_win_ratio_threshold_for_weak_breakout(stock_nature)
             
             if not (0 < day_win_ratio_score < win_ratio_threshold):
                 return RPointPluginResult("上冲乏力", False, "")
             
-            # 检查当前股价距离压力线的距离
-            # 要求：0% < (压力线-股价)/股价 < 8%
+            # 检查当前股价距离压力线的距离（阈值与“临近压力位滞涨”一致，可配置）
+            distance_threshold = self.config_service.get_pressure_stagnation_distance_threshold() or 8.0
             if prev_chance.pressure_price and prev_chance.pressure_price > 0:
                 close_price = current_data.close
                 # 压力线价格需要除以100（数据库存储格式：1660代表16.60元）
                 pressure_price_actual = prev_chance.pressure_price / 100.0
                 distance_pct = (pressure_price_actual - close_price) / close_price * 100
                 
-                # 如果不在0%-8%的范围内，不触发插件
-                if not (0 < distance_pct < 8):
-                    logger.debug(f"[上冲乏力] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-8%范围内")
+                # 如果不在0%-阈值的范围内，不触发插件
+                if not (0 < distance_pct < distance_threshold):
+                    logger.debug(f"[上冲乏力] {stock_code} {date_str} 股价{close_price:.2f}距离压力线{pressure_price_actual:.2f}的距离{distance_pct:.2f}%不在0%-{distance_threshold}%范围内")
                     return RPointPluginResult("上冲乏力", False, "")
             else:
                 # 没有压力线数据，不触发插件
@@ -836,15 +851,14 @@ class RPointPluginService:
                 # 计算振幅
                 amplitude = self._calculate_amplitude(current_data, stock_code)
                 
-                # 计算压力线距离
-                close_price = current_data.close
-                pressure_price_actual = prev_chance.pressure_price / 100.0
-                distance_pct = (pressure_price_actual - close_price) / close_price * 100
-                
                 return RPointPluginResult(
                     "上冲乏力",
                     True,
-                    f"从C点涨幅{cumulative_gain:.2f}%+前日赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold},股价{close_price:.2f}距压力线{pressure_price_actual:.2f}仅{distance_pct:.2f}%)+昨日涨{yesterday_change:.2f}%+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
+                    f"熊市上冲乏力: 从C日低点涨幅{cumulative_gain:.2f}%"
+                    f"+前日赔率(股性:{stock_nature},{day_win_ratio_score:.1f}<{win_ratio_threshold})"
+                    f"+股价距压{distance_pct:.2f}%<{distance_threshold}%"
+                    f"+昨日涨{yesterday_change:.2f}%"
+                    f"+今日放量+空头K线({pattern_desc},振幅{amplitude:.2f}%)"
                 )
             
             return RPointPluginResult("上冲乏力", False, "")

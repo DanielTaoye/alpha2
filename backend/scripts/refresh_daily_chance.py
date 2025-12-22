@@ -193,6 +193,35 @@ def calculate_volume_type(table_name: str, volume: float) -> str:
         return ''
 
 
+def try_append_volume_s(conn, table_name: str, current_volume: float) -> bool:
+    """
+    兜底判定S型量：当日成交量 >= 前一日成交量的1.2倍则视为S
+    仅在量型中尚未包含S时补充，避免遗漏。
+    """
+    if not current_volume or current_volume <= 0:
+        return False
+    try:
+        cursor = conn.cursor()
+        sql = f"""
+            SELECT cheng_jiao_liang
+            FROM `{table_name}`
+            WHERE peroid_type = '1day'
+            ORDER BY shi_jian DESC
+            LIMIT 2
+        """
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        # rows[0] 是最近一条（通常是昨日），rows[1] 更早
+        if rows and len(rows) >= 1:
+            prev_volume = rows[0][0] if rows[0] and len(rows[0]) >= 1 else None
+            if prev_volume and prev_volume > 0:
+                ratio = current_volume / prev_volume
+                return ratio >= 1.2
+    except Exception as e:
+        logger.debug(f"S型量兜底判定失败: {table_name}, {e}")
+    return False
+
+
 def calculate_patterns(stock_code: str, table_name: str, date_str: str) -> Tuple[str, str]:
     """计算多头和空头组合"""
     bullish_pattern = ''
@@ -273,6 +302,14 @@ def process_stock(conn, stock: Dict) -> bool:
         
         # 3. 计算数据
         volume_type = calculate_volume_type(table_name, volume_for_calc)
+        # 兜底补S型：如果量型里没有S，且当日量是前一日的1.2倍，则补充S
+        if volume_type:
+            volume_types = [t.strip() for t in volume_type.split(',') if t.strip()]
+        else:
+            volume_types = []
+        if 'S' not in volume_types and try_append_volume_s(conn, table_name, volume):
+            volume_types.append('S')
+        volume_type = ','.join(volume_types) if volume_types else ''
         bullish_pattern, bearish_pattern = calculate_patterns(stock_code, table_name, date_only)
         
         # 4. 写入数据库（UPSERT）
