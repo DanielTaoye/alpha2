@@ -333,6 +333,29 @@ class CRPointService:
                                     (kline.time.date() - last_valid_point_date.date()).days == 1)
                 has_prev_valid_c = (last_valid_point_type == 'C')
                 
+                # 近4个交易日窗口（含当日）
+                window_dates = set()
+                for j in range(max(0, index - 3), index + 1):
+                    try:
+                        window_dates.add(kline_data[j].time.date())
+                    except Exception:
+                        continue
+                # 是否近3日有R
+                has_r_last3 = any(
+                    p.trigger_date and getattr(p.trigger_date, "date", lambda: None)() in window_dates
+                    for p in r_points
+                )
+                # 是否近3日有策略1的C（含当日 is_c_point）
+                has_s1_c_last3 = False
+                if is_c_point:
+                    has_s1_c_last3 = True
+                else:
+                    has_s1_c_last3 = any(
+                        p.trigger_date and getattr(p.trigger_date, "date", lambda: None)() in window_dates
+                        for p in c_points
+                    )
+                penalty_after_r_without_s1c_last3 = has_r_last3 and (not has_s1_c_last3)
+                
                 t_s20 = perf_counter()
                 is_strategy2_c, strategy2_score, strategy2_reason = self.strategy2_service.check_strategy2(
                     stock_code=stock_code,
@@ -348,7 +371,8 @@ class CRPointService:
                     strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty,
                     stock_nature=resolved_nature,
                     prev_has_c=has_prev_valid_c,
-                    penalty_after_strategy2_or_golden=has_strategy2_or_golden_since_last_r
+                    penalty_after_strategy2_or_golden=has_strategy2_or_golden_since_last_r,
+                    penalty_after_r_without_s1c_last3=penalty_after_r_without_s1c_last3
                 )
                 t_s2_total += (perf_counter() - t_s20)
                 s2_calls += 1

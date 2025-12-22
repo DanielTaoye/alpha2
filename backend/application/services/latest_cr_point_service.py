@@ -670,7 +670,9 @@ class LatestCRPointService:
                 prev_day_has_r=False,
                 strategy1_reject_by_penalty_plugins=False,
                 stock_nature=stock_nature,
-                prev_has_c=False  # 单日计算未维护CR序列，这里默认没有前序C
+                prev_has_c=False,  # 单日计算未维护CR序列，这里默认没有前序C
+                penalty_after_strategy2_or_golden=False,
+                penalty_after_r_without_s1c_last3=False
             )
             
             return {

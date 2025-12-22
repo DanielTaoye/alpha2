@@ -31,7 +31,8 @@ class Strategy2Service:
                        strategy1_reject_by_penalty_plugins: bool = False,
                        stock_nature: Optional[str] = None,
                        prev_has_c: bool = False,
-                       penalty_after_strategy2_or_golden: bool = False) -> Tuple[bool, float, str]:
+                       penalty_after_strategy2_or_golden: bool = False,
+                       penalty_after_r_without_s1c_last3: bool = False) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -106,6 +107,11 @@ class Strategy2Service:
         if stock_nature == "中长线" and penalty_after_strategy2_or_golden:
             total_score -= 42
             details.append("中长线：已有策略2/金色C，策略2额外扣42分")
+        
+        # 中长线：近3日内出现过R，且近3日（含当日）无策略1的C，则策略2扣47分
+        if stock_nature == "中长线" and penalty_after_r_without_s1c_last3:
+            total_score -= 47
+            details.append("中长线：近3日有R且无策略1C，策略2扣47分")
         
         # 判断是否触发
         is_triggered = total_score >= threshold
