@@ -168,6 +168,14 @@ class RPointPluginService:
                 logger.info(f"[R点插件-趋势向下+未放量跌破支撑+MACD死叉] {stock_code} {date}: {plugin9.reason}")
                 return True, triggered_plugins
 
+        # 插件11: MACD中长线死叉+跌破支撑
+        if macd_data and current_index is not None:
+            plugin11 = self._check_macd_long_dead_cross_break_support(stock_code, date, macd_data, current_index)
+            if plugin11.triggered:
+                triggered_plugins.append(plugin11)
+                logger.info(f"[R点插件-MACD中长线死叉+跌破支撑] {stock_code} {date}: {plugin11.reason}")
+                return True, triggered_plugins
+
         # 插件10: 高位滞涨+空头组合
         if macd_data and current_index is not None:
             plugin10 = self._check_high_stagnation_bearish(stock_code, date, macd_data, current_index)
@@ -1494,6 +1502,87 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"插件8-趋势向下+未放量跌破支撑+MACD死叉检查异常: {e}")
             return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+
+    def _check_macd_long_dead_cross_break_support(self, stock_code: str, date: datetime,
+                                                   macd_data: dict, current_index: int) -> RPointPluginResult:
+        """
+        插件11: MACD中长线死叉+跌破支撑（仅中长线股性）
+
+        条件：
+        - 股性：中长线
+        - MACD死叉：今天往前3个交易日内出现 DIF 由上向下穿越 DEA
+        - 成交量类型非空（任意类型即可）
+        - 跌破前一日支撑：今日收盘 < 前一日支撑位（数据库存放100倍）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+
+            current_data = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
+            current_chance = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            if not current_data or not current_chance:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            if len(prev_dates) < 1:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+            prev_date_str = prev_dates[0]
+            prev_chance = self._daily_chance_cache.get(prev_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            prev_data = self._daily_cache.get(prev_date_str) or self.daily_repo.find_by_date(stock_code, prev_date_str)
+            if not prev_chance or not prev_data:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            # 仅中长线
+            stock_nature = getattr(current_chance, "stock_nature", None) or "波段"
+            if stock_nature != "中长线":
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            # 成交量类型非空
+            if not current_chance.volume_type:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            # MACD死叉：近3个交易日内，定义为：当日 DIF<DEA 且 MACD<0，前一日 MACD>0（红柱→蓝柱）
+            dif_arr = macd_data.get('dif') if macd_data else None
+            dea_arr = macd_data.get('dea') if macd_data else None
+            macd_arr = macd_data.get('macd') if macd_data else None
+            if not dif_arr or not dea_arr or not macd_arr:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            dead_cross = False
+            start_idx = max(1, current_index - 2)
+            end_idx = current_index
+            for i in range(start_idx, end_idx + 1):
+                if i >= len(dif_arr) or i >= len(dea_arr):
+                    continue
+                if dif_arr[i] is None or dea_arr[i] is None or dif_arr[i - 1] is None or dea_arr[i - 1] is None:
+                    continue
+                # 红柱→蓝柱且当日 DIF<DEA
+                macd_prev = macd_arr[i - 1] if i - 1 < len(macd_arr) else None
+                macd_curr = macd_arr[i] if i < len(macd_arr) else None
+                if macd_prev is None or macd_curr is None:
+                    continue
+                if macd_prev > 0 and macd_curr < 0 and dif_arr[i] < dea_arr[i]:
+                    dead_cross = True
+                    break
+
+            if not dead_cross:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            # 跌破前一日支撑
+            if not prev_chance.support_price:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+            support_price = prev_chance.support_price / 100.0
+            if current_data.close >= support_price:
+                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
+
+            reason = (
+                f"中长线+MACD近3日死叉+量型({current_chance.volume_type})"
+                f"+跌破前日支撑({support_price:.2f}<收盘{current_data.close:.2f})"
+            )
+            return RPointPluginResult("MACD中长线死叉+跌破支撑", True, reason)
+
+        except Exception as e:
+            logger.error(f"插件11-MACD中长线死叉+跌破支撑检查异常: {e}")
+            return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
 
     def _check_high_stagnation_bearish(self, stock_code: str, date: datetime,
                                        macd_data: dict, current_index: int) -> RPointPluginResult:
