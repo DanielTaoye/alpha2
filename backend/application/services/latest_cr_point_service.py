@@ -385,7 +385,9 @@ class LatestCRPointService:
                             'score': strategy1_result.get('score', 0),
                             'base_score': strategy1_result.get('base_score', 0),
                             'plugins': (strategy1_result.get('plugins') or []) + [{
+                                "pluginName": "MACD蓝柱拒绝",
                                 "plugin_name": "MACD蓝柱拒绝",
+                                "scoreAdjustment": 0,
                                 "reason": "中长线要求MACD>0（红柱），当前MACD<=0，策略1发C被取消",
                                 "triggered": True
                             }],

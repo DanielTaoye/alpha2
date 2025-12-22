@@ -1541,10 +1541,15 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                     result += `<span style="color: #2196F3; font-size: 11px;">🔌 触发插件:</span><br/>`;
                                     s1Data.plugins.forEach(plugin => {
                                         const icon = plugin.scoreAdjustment < 0 ? '⚠️' : '✅';
-                                        result += `<span style="color: #2196F3; font-size: 10px; margin-left: 10px;">${icon} ${plugin.pluginName}</span><br/>`;
+                                        const pluginName = (plugin.pluginName === "MACD蓝柱拒绝") ? "中长线MACD减分" : plugin.pluginName;
+                                        result += `<span style="color: #2196F3; font-size: 10px; margin-left: 10px;">${icon} ${pluginName}</span><br/>`;
                                         result += `<span style="color: #64B5F6; font-size: 9px; margin-left: 15px;">${plugin.reason}</span><br/>`;
-                                        if (plugin.scoreAdjustment !== 0 && plugin.scoreAdjustment !== -999) {
-                                            const scoreText = plugin.scoreAdjustment > 0 ? `+${plugin.scoreAdjustment}` : plugin.scoreAdjustment;
+                                        const adj = Number(plugin.scoreAdjustment);
+                                        if (!Number.isFinite(adj) || adj === 0 || adj === -999) {
+                                            // undefined/NaN/非数字或标记值时，显示0分
+                                            result += `<span style="color: #64B5F6; font-size: 9px; margin-left: 15px;">分数: 0分</span><br/>`;
+                                        } else {
+                                            const scoreText = adj > 0 ? `+${adj}` : adj;
                                             result += `<span style="color: #64B5F6; font-size: 9px; margin-left: 15px;">分数: ${scoreText}分</span><br/>`;
                                         }
                                     });

@@ -263,7 +263,9 @@ class CRPointService:
                         # 记录拒绝原因到插件列表，兼容前端展示
                         c_plugins = (c_plugins or []).copy()
                         c_plugins.append({
+                            "pluginName": "MACD蓝柱拒绝",
                             "plugin_name": "MACD蓝柱拒绝",
+                            "scoreAdjustment": 0,
                             "reason": "中长线要求MACD>0（红柱），当前MACD<=0，策略1发C被取消",
                             "triggered": True
                         })
