@@ -128,6 +128,7 @@ class CPointPluginService:
                         volume=p.get("volume"),
                         high_price=p.get("high_price") or p.get("highPrice"),
                         close_price=p.get("close_price") or p.get("closePrice"),
+                        plugins=p.get("plugins"),
                     )
                 )
         return normalized
@@ -185,35 +186,43 @@ class CPointPluginService:
             adjusted_score += plugin4.score_adjustment
             logger.info(f"[插件-不追涨] {stock_code} {date}: {plugin4.reason}, 扣分{abs(plugin4.score_adjustment)}")
         
-        # 插件5: 急跌抢反弹（直接发C）
-        plugin5 = self._check_sharp_drop_rebound(stock_code, date)
-        if plugin5.triggered:
-            triggered_plugins.append(plugin5)
-            logger.info(f"[插件-急跌抢反弹] {stock_code} {date}: {plugin5.reason}, 强制发C")
+        # 插件5: 乖离率R后不发C（减分插件）
+        if normalized_r_points is not None:
+            deviation_plugin = self._check_deviation_r_penalty(stock_code, date, normalized_r_points)
+            if deviation_plugin.triggered:
+                triggered_plugins.append(deviation_plugin)
+                adjusted_score += deviation_plugin.score_adjustment
+                logger.info(f"[插件-乖离率R后不发C] {stock_code} {date}: {deviation_plugin.reason}, 扣分{abs(deviation_plugin.score_adjustment)}")
+        
+        # 插件6: 急跌抢反弹（直接发C）
+        plugin6 = self._check_sharp_drop_rebound(stock_code, date)
+        if plugin6.triggered:
+            triggered_plugins.append(plugin6)
+            logger.info(f"[插件-急跌抢反弹] {stock_code} {date}: {plugin6.reason}, 强制发C")
             return adjusted_score, triggered_plugins, True  # 强制发C，保持原分数
         
-        # 插件6: R后回支撑位发C（直接发C）
+        # 插件7: R后回支撑位发C（直接发C）
         if normalized_r_points is not None:
-            plugin6 = self._check_r_back_to_support(stock_code, date, normalized_r_points)
-            if plugin6.triggered:
-                triggered_plugins.append(plugin6)
-                logger.info(f"[插件-R后回支撑位] {stock_code} {date}: {plugin6.reason}, 强制发C")
-                return adjusted_score, triggered_plugins, True
-        
-        # 插件7: 阳包阴发C（直接发C）
-        if normalized_r_points is not None:
-            plugin7 = self._check_yang_bao_yin(stock_code, date, normalized_r_points, normalized_c_points)
+            plugin7 = self._check_r_back_to_support(stock_code, date, normalized_r_points)
             if plugin7.triggered:
                 triggered_plugins.append(plugin7)
-                logger.info(f"[插件-阳包阴] {stock_code} {date}: {plugin7.reason}, 强制发C")
+                logger.info(f"[插件-R后回支撑位] {stock_code} {date}: {plugin7.reason}, 强制发C")
                 return adjusted_score, triggered_plugins, True
         
-        # 插件8: 横盘修整后突破发C（直接发C）
-        if normalized_r_points is not None and normalized_c_points is not None:
-            plugin8 = self._check_consolidation_breakout(stock_code, date, normalized_r_points, normalized_c_points)
+        # 插件8: 阳包阴发C（直接发C）
+        if normalized_r_points is not None:
+            plugin8 = self._check_yang_bao_yin(stock_code, date, normalized_r_points, normalized_c_points)
             if plugin8.triggered:
                 triggered_plugins.append(plugin8)
-                logger.info(f"[插件-横盘修整后突破] {stock_code} {date}: {plugin8.reason}, 强制发C")
+                logger.info(f"[插件-阳包阴] {stock_code} {date}: {plugin8.reason}, 强制发C")
+                return adjusted_score, triggered_plugins, True
+        
+        # 插件9: 横盘修整后突破发C（直接发C）
+        if normalized_r_points is not None and normalized_c_points is not None:
+            plugin9 = self._check_consolidation_breakout(stock_code, date, normalized_r_points, normalized_c_points)
+            if plugin9.triggered:
+                triggered_plugins.append(plugin9)
+                logger.info(f"[插件-横盘修整后突破] {stock_code} {date}: {plugin9.reason}, 强制发C")
                 return adjusted_score, triggered_plugins, True
         
         return adjusted_score, triggered_plugins, False
@@ -534,6 +543,67 @@ class CPointPluginService:
         except Exception as e:
             logger.error(f"插件-不追涨检查失败: {e}")
             return CPointPluginResult("不追涨", False, 0, "")
+    
+    def _check_deviation_r_penalty(self, stock_code: str, date: datetime, historical_r_points: List) -> CPointPluginResult:
+        """
+        插件5: 乖离率R后不发C（减分）
+        
+        条件：
+        1. 前一个交易日出现有效R点
+        2. 该R点由“乖离率偏离”插件触发
+        
+        结果：策略1当日C分数扣43分（全部股性适用）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str)
+            if not prev_dates and stock_code:
+                prev_dates = self._get_previous_trading_dates(stock_code, date, 1)
+            if not prev_dates:
+                return CPointPluginResult("乖离率R后不发C", False, 0, "")
+            
+            prev_trading_date = prev_dates[0]
+            last_r_point = None
+            for r_point in reversed(historical_r_points):
+                r_date = getattr(r_point, "trigger_date", None)
+                if not r_date:
+                    continue
+                r_date_str = r_date.strftime('%Y-%m-%d') if isinstance(r_date, datetime) else str(r_date)
+                if r_date_str == prev_trading_date:
+                    last_r_point = r_point
+                    break
+                # 历史列表按时间升序传入，倒序查找到更早日期可提前结束
+                if r_date_str < prev_trading_date:
+                    break
+            
+            if not last_r_point:
+                return CPointPluginResult("乖离率R后不发C", False, 0, "")
+            
+            plugins = getattr(last_r_point, "plugins", None) or []
+            deviation_reason = ""
+            for plugin in plugins:
+                try:
+                    name = plugin.get("pluginName") or plugin.get("plugin_name")
+                    triggered = plugin.get("triggered", False)
+                    if triggered and name == "乖离率偏离":
+                        deviation_reason = plugin.get("reason") or ""
+                        break
+                except Exception:
+                    continue
+            
+            if not deviation_reason:
+                return CPointPluginResult("乖离率R后不发C", False, 0, "")
+            
+            return CPointPluginResult(
+                "乖离率R后不发C",
+                True,
+                -43,
+                f"昨日R由乖离率偏离触发: {deviation_reason}"
+            )
+        
+        except Exception as e:
+            logger.error(f"插件-乖离率R后不发C检查失败: {e}")
+            return CPointPluginResult("乖离率R后不发C", False, 0, "")
     
     def _get_previous_trading_dates_from_cache(self, current_date_str: str) -> List[str]:
         """

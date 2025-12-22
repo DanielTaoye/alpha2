@@ -32,7 +32,8 @@ class Strategy2Service:
                        stock_nature: Optional[str] = None,
                        prev_has_c: bool = False,
                        penalty_after_strategy2_or_golden: bool = False,
-                       penalty_after_r_without_s1c_last3: bool = False) -> Tuple[bool, float, str]:
+                       penalty_after_r_without_s1c_last3: bool = False,
+                       prev_day_deviation_r: bool = False) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -47,6 +48,7 @@ class Strategy2Service:
             daily_data_30: 前30个交易日数据（用于判断低位）
             index: 当前K线在数据中的索引
             strategy1_reject_by_penalty_plugins: 策略1被减分插件否决（赔率高胜率低/风险K线/不追涨）
+            prev_day_deviation_r: 前一交易日是否为“乖离率偏离”导致的R
             
         Returns:
             (是否触发, 总分, 详细原因)
@@ -84,6 +86,11 @@ class Strategy2Service:
         
         # 从配置读取触发阈值（支持股性）
         threshold = self.config_service.get_strategy2_threshold(stock_nature)
+        
+        # 新减分：昨日R由乖离率偏离触发，今日策略2扣43分（全部股性适用）
+        if prev_day_deviation_r:
+            total_score -= 43
+            details.append("昨日R因乖离率偏离，策略2扣43分")
         
         # 情形3：前一日刚发R，且当日原始分数达到阈值，扣45分
         # 先记录未扣前得分用于判断“符合发C条件”

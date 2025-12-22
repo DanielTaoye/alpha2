@@ -332,6 +332,24 @@ class CRPointService:
                                     last_valid_point_date is not None and
                                     (kline.time.date() - last_valid_point_date.date()).days == 1)
                 has_prev_valid_c = (last_valid_point_type == 'C')
+                prev_day_deviation_r = False
+                if has_prev_valid_r and last_valid_point_date is not None:
+                    for rp in reversed(r_points):
+                        r_date = getattr(rp, "trigger_date", None)
+                        if not r_date:
+                            continue
+                        if r_date.date() == last_valid_point_date.date():
+                            plugins = getattr(rp, "plugins", None) or []
+                            for plugin in plugins:
+                                try:
+                                    name = plugin.get("pluginName") or plugin.get("plugin_name")
+                                    triggered = plugin.get("triggered", False)
+                                    if triggered and name == "乖离率偏离":
+                                        prev_day_deviation_r = True
+                                        break
+                                except Exception:
+                                    continue
+                            break
                 
                 # 近4个交易日窗口（含当日）
                 window_dates = set()
@@ -372,7 +390,8 @@ class CRPointService:
                     stock_nature=resolved_nature,
                     prev_has_c=has_prev_valid_c,
                     penalty_after_strategy2_or_golden=has_strategy2_or_golden_since_last_r,
-                    penalty_after_r_without_s1c_last3=penalty_after_r_without_s1c_last3
+                    penalty_after_r_without_s1c_last3=penalty_after_r_without_s1c_last3,
+                    prev_day_deviation_r=prev_day_deviation_r
                 )
                 t_s2_total += (perf_counter() - t_s20)
                 s2_calls += 1
