@@ -30,7 +30,8 @@ class Strategy2Service:
                        prev_day_has_r: bool = False,
                        strategy1_reject_by_penalty_plugins: bool = False,
                        stock_nature: Optional[str] = None,
-                       prev_has_c: bool = False) -> Tuple[bool, float, str]:
+                       prev_has_c: bool = False,
+                       penalty_after_strategy2_or_golden: bool = False) -> Tuple[bool, float, str]:
         """
         检查策略2是否触发C点
         
@@ -100,6 +101,11 @@ class Strategy2Service:
         if prev_has_c and (stock_nature is None or stock_nature in ["短线", "波段"]):
             total_score -= 38
             details.append("前有C，策略2额外扣38分(仅短线/波段)")
+
+        # 中长线：如果本轮之前（自上次R以来）已出现策略2的C或金色C，则策略2额外扣42分
+        if stock_nature == "中长线" and penalty_after_strategy2_or_golden:
+            total_score -= 42
+            details.append("中长线：已有策略2/金色C，策略2额外扣42分")
         
         # 判断是否触发
         is_triggered = total_score >= threshold

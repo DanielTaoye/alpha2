@@ -372,6 +372,25 @@ class LatestCRPointService:
                 historical_r_points,  # 传入历史R点
                 stock_nature=resolved_nature
             )
+
+            # 中长线：MACD需为红柱(MACD>0)，否则强制取消策略1的C
+            if resolved_nature == "中长线" and macd_data:
+                macd_arr = macd_data.get('macd') if isinstance(macd_data, dict) else None
+                if macd_arr and len(macd_arr) > 0:
+                    macd_val = macd_arr[-1]  # 最新一日在末尾
+                    if macd_val is not None and macd_val <= 0:
+                        strategy1_result = {
+                            'is_c_point': False,
+                            'is_rejected': True,
+                            'score': strategy1_result.get('score', 0),
+                            'base_score': strategy1_result.get('base_score', 0),
+                            'plugins': (strategy1_result.get('plugins') or []) + [{
+                                "plugin_name": "MACD蓝柱拒绝",
+                                "reason": "中长线要求MACD>0（红柱），当前MACD<=0，策略1发C被取消",
+                                "triggered": True
+                            }],
+                            'threshold': strategy1_result.get('threshold', 0)
+                        }
             logger.info(f"  🔥 策略1计算结果: 基础分={strategy1_result.get('base_score', 0):.2f}, 最终分={strategy1_result.get('score', 0):.2f}")
             
             # 9. 获取多头K线组合（用于策略2的K线组合评分）

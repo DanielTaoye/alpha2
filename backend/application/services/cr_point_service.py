@@ -190,6 +190,8 @@ class CRPointService:
         strategy1_scores = {}  # 记录所有K线的策略1评分和插件信息 {date_str: {score, base_score, plugins}}
         last_c_point_date: Optional[datetime] = None  # 记录最近的C点日期（用于R点判断）
         last_c_point_type: Optional[str] = None       # 记录最近C点的类型（C=策略1，C_STRATEGY2=策略2）
+        # 记录自上次R以来是否出现过策略2的C或金色C（用于中长线策略2惩罚）
+        has_strategy2_or_golden_since_last_r: bool = False
         
         # CR关系校验：记录最后一个有效点的类型、日期和索引
         last_valid_point_type: Optional[str] = None  # 'C' 或 'R'
@@ -249,6 +251,26 @@ class CRPointService:
                 'is_c_point': is_c_point,
                 'is_rejected': is_rejected
             }
+
+            # 中长线股性：MACD必须为红柱(MACD>0)才能发策略1的C；蓝柱(<=0)则强制取消
+            if resolved_nature == "中长线" and macd_data:
+                macd_arr = macd_data.get('macd') if isinstance(macd_data, dict) else None
+                if macd_arr is not None and index < len(macd_arr):
+                    macd_val = macd_arr[index]
+                    if macd_val is not None and macd_val <= 0:
+                        is_c_point = False
+                        is_rejected = True
+                        # 记录拒绝原因到插件列表，兼容前端展示
+                        c_plugins = (c_plugins or []).copy()
+                        c_plugins.append({
+                            "plugin_name": "MACD蓝柱拒绝",
+                            "reason": "中长线要求MACD>0（红柱），当前MACD<=0，策略1发C被取消",
+                            "triggered": True
+                        })
+                        # 更新记录
+                        strategy1_scores[date_str]['is_c_point'] = False
+                        strategy1_scores[date_str]['is_rejected'] = True
+                        strategy1_scores[date_str]['plugins'] = c_plugins
             
             # 计算ABC（用于记录）
             abc = self.strategy_service.calculate_abc(
@@ -323,7 +345,8 @@ class CRPointService:
                     prev_day_has_r=has_prev_valid_r,
                     strategy1_reject_by_penalty_plugins=strategy1_reject_by_penalty,
                     stock_nature=resolved_nature,
-                    prev_has_c=has_prev_valid_c
+                    prev_has_c=has_prev_valid_c,
+                    penalty_after_strategy2_or_golden=has_strategy2_or_golden_since_last_r
                 )
                 t_s2_total += (perf_counter() - t_s20)
                 s2_calls += 1
@@ -390,6 +413,9 @@ class CRPointService:
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
                     last_valid_point_index = index
+                    # 若为金色C，标记（用于中长线策略2惩罚）
+                    if is_golden:
+                        has_strategy2_or_golden_since_last_r = True
                 else:
                     # 检查是否为金色C点（即使被拒绝，也标记）
                     is_golden = self._check_golden_c_point(
@@ -474,6 +500,8 @@ class CRPointService:
                     last_valid_point_type = 'C'
                     last_valid_point_date = kline.time
                     last_valid_point_index = index
+                    # 策略2的C视为触发“只发一次”的标记；金色与否都算
+                    has_strategy2_or_golden_since_last_r = True
                 else:
                     # 检查是否为金色C点（即使被拒绝，也标记）
                     is_golden = self._check_golden_c_point(
@@ -566,6 +594,8 @@ class CRPointService:
                     last_valid_point_type = 'R'
                     last_valid_point_date = kline.time
                     last_valid_point_index = None  # R点不参与C点间隔计算
+                    # R出现后，重置策略2/金色C的标记
+                    has_strategy2_or_golden_since_last_r = False
                 else:
                     # 因CR关系规则被拒绝的R点（记录在rejected_c_points中）
                     rejection_reason = "上一个点是R点，不允许RR连续出现"
