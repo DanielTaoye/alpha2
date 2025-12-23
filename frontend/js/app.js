@@ -386,6 +386,34 @@ function renderStockView(stockCode, stockName, tableName, stockNature = null) {
             <button class="backtest-btn" id="backtestBtn" onclick="runBacktest()">
                 📊 运行回测
             </button>
+            <div class="backtest-config" style="margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size: 12px; color:#8899aa;">回测开始日期</div>
+                    <input id="btStartDate" type="month" style="padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size: 12px; color:#8899aa;">回测结束日期</div>
+                    <input id="btEndDate" type="month" style="padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size: 12px; color:#8899aa;">C后X交易日卖出(可选)</div>
+                    <input id="btExitAfterDays" type="number" min="1" placeholder="例如：5" style="padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size: 12px; color:#8899aa;">仅回测金色C</div>
+                    <label style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
+                        <input id="btOnlyGolden" type="checkbox" style="width:16px; height:16px;">
+                        <span style="font-size: 13px;">只回测 isGolden=true 的C点</span>
+                    </label>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="font-size: 12px; color:#8899aa;">回测引擎</div>
+                    <select id="btEngine" style="padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
+                        <option value="legacy">legacy(现有逻辑)</option>
+                        <option value="backtrader">backtrader</option>
+                    </select>
+                </div>
+            </div>
             <div class="backtest-hint" style="text-align: center; color: #8899aa; font-size: 13px; margin-top: 10px;">
                 💡 回测功能仅支持日K线，会在切换到日K线时自动启用
             </div>
@@ -2995,6 +3023,21 @@ async function runBacktest() {
         console.log('  R点详情:', crPointsData.r_points);
         
         // 调用回测API
+        const startMonth = document.getElementById('btStartDate')?.value || '';
+        const endMonth = document.getElementById('btEndDate')?.value || '';
+        const exitAfterDaysRaw = document.getElementById('btExitAfterDays')?.value;
+        const onlyGoldenC = !!document.getElementById('btOnlyGolden')?.checked;
+        const engine = document.getElementById('btEngine')?.value || 'legacy';
+
+        const backtestConfig = {
+            // month input: YYYY-MM -> 转成 YYYY-MM-01 / YYYY-MM-31(粗略)，服务端按字符串比较
+            startDate: startMonth ? `${startMonth}-01` : null,
+            endDate: endMonth ? `${endMonth}-31` : null,
+            exitAfterDays: exitAfterDaysRaw ? parseInt(exitAfterDaysRaw, 10) : null,
+            onlyGoldenC,
+            engine
+        };
+
         const response = await fetch(`${API_BASE_URL}/backtest`, {
             method: 'POST',
             headers: {
@@ -3004,7 +3047,8 @@ async function runBacktest() {
                 stockCode: currentStockCode,
                 tableName: currentTableName,
                 cPoints: allCPoints,
-                rPoints: crPointsData.r_points
+                rPoints: crPointsData.r_points,
+                backtestConfig
             })
         });
         
@@ -3021,8 +3065,8 @@ async function runBacktest() {
                         ${result.message || '回测失败'}
                     </p>
                     <div style="margin-top: 20px; padding: 15px; background: rgba(255,107,107,0.1); border-radius: 8px; font-size: 13px; color: #ffa07a;">
-                        <strong>💡 提示：</strong><br>
-                        1. 该股票可能没有30分钟K线数据<br>
+                        <strong>提示：</strong><br>
+                        1. 该股票可能没有日K线(1day)数据<br>
                         2. 尝试选择其他股票进行回测<br>
                         3. 或联系管理员检查数据同步
                     </div>
@@ -3062,7 +3106,7 @@ function displayBacktestResult(data) {
                     1. 该股票数据库中没有30分钟K线数据<br>
                     2. C点触发日期之后没有30分钟K线数据<br>
                     3. 数据不完整<br><br>
-                    回测需要30分钟K线数据来计算买卖价格
+                    回测需要日K线(1day)数据来计算买卖价格
                 </p>
             </div>
         `;
@@ -3096,6 +3140,10 @@ function displayBacktestResult(data) {
                 <div class="summary-item ${summary.total_return >= 0 ? 'positive' : 'negative'}">
                     <span class="summary-label">累计收益率</span>
                     <span class="summary-value">${summary.total_return >= 0 ? '+' : ''}${summary.total_return || 0}%</span>
+                </div>
+                <div class="summary-item ${summary.return_sum >= 0 ? 'positive' : 'negative'}">
+                    <span class="summary-label">收益率总和</span>
+                    <span class="summary-value">${summary.return_sum >= 0 ? '+' : ''}${summary.return_sum || 0}%</span>
                 </div>
                 <div class="summary-item positive">
                     <span class="summary-label">最大收益</span>
@@ -3133,8 +3181,13 @@ function displayBacktestResult(data) {
                             <th>序号</th>
                             <th>C点日期</th>
                             <th>策略</th>
+                            <th>C分数</th>
+                            <th>金色C</th>
+                            <th>买入时间</th>
                             <th>买入价</th>
                             <th>R点日期</th>
+                            <th>卖出原因</th>
+                            <th>卖出时间</th>
                             <th>卖出价</th>
                             <th>收益率</th>
                             <th>持仓天数</th>
@@ -3148,15 +3201,34 @@ function displayBacktestResult(data) {
         const returnClass = trade.return_rate > 0 ? 'positive' : (trade.return_rate < 0 ? 'negative' : '');
         const statusText = trade.status === 'holding' ? '持仓中' : '已完成';
         const statusClass = trade.status === 'holding' ? 'holding' : 'completed';
+        const cScoreText = (trade.c_strategy1_score !== undefined && trade.c_strategy1_score !== null)
+            ? `S1:${trade.c_strategy1_score}`
+            : '';
+        const cScoreText2 = (trade.c_strategy2_score !== undefined && trade.c_strategy2_score !== null)
+            ? ` S2:${trade.c_strategy2_score}`
+            : '';
+        const goldenText = trade.c_is_golden ? '是' : '否';
+
+        const cPlugins = Array.isArray(trade.c_plugins) ? trade.c_plugins : [];
+        const rPlugins = Array.isArray(trade.r_plugins) ? trade.r_plugins : [];
+        const cPluginNames = cPlugins.filter(p => p && p.triggered).map(p => p.pluginName || p.plugin_name).filter(Boolean);
+        const rPluginNames = rPlugins.filter(p => p && p.triggered).map(p => p.pluginName || p.plugin_name).filter(Boolean);
+        const cPluginTitle = cPlugins.length ? cPlugins.map(p => `${p.pluginName || p.plugin_name}(${p.triggered ? '触发' : '未触发'}): ${p.reason || ''}`).join('\n') : '';
+        const rPluginTitle = rPlugins.length ? rPlugins.map(p => `${p.pluginName || p.plugin_name}(${p.triggered ? '触发' : '未触发'}): ${p.reason || ''}`).join('\n') : '';
         
         html += `
             <tr>
                 <td>${index + 1}</td>
                 <td>${trade.c_date}</td>
-                <td>${trade.c_strategy}</td>
+                <td title="${cPluginTitle.replaceAll('"', '&quot;')}">${trade.c_strategy}</td>
+                <td style="font-size:12px;">${cScoreText}${cScoreText2}</td>
+                <td>${goldenText}</td>
+                <td style="font-size:12px;">${trade.buy_time || '-'}</td>
                 <td>¥${trade.buy_price}</td>
                 <td>${trade.r_date || '-'}</td>
-                <td>${trade.sell_price ? '¥' + trade.sell_price : '-'}</td>
+                <td style="font-size:12px;">${trade.exit_reason || '-'}</td>
+                <td style="font-size:12px;">${trade.sell_time || '-'}</td>
+                <td title="${rPluginTitle.replaceAll('"', '&quot;')}">${trade.sell_price ? '¥' + trade.sell_price : '-'}</td>
                 <td class="${returnClass}">${trade.return_rate !== null ? (trade.return_rate >= 0 ? '+' : '') + trade.return_rate + '%' : '-'}</td>
                 <td>${trade.days !== null ? trade.days + '天' : '-'}</td>
                 <td><span class="status-badge ${statusClass}">${statusText}${trade.status === 'holding' && trade.return_rate !== null ? ' (浮盈亏' + (trade.return_rate >= 0 ? '+' : '') + trade.return_rate + '%)' : ''}</span></td>

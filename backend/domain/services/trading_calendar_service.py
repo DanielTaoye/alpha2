@@ -142,6 +142,42 @@ class TradingCalendarService:
         # 如果今天是交易日，直接返回
         if cls.is_trading_day(today):
             return today.strftime('%Y-%m-%d')
+
+    # =====================
+    # 交易日工具（回测/调度通用）
+    # =====================
+    @classmethod
+    def get_next_trading_day(cls, from_date: date) -> date:
+        """
+        获取 from_date 之后（不含当日）的下一个交易日
+        """
+        d = from_date + timedelta(days=1)
+        for _ in range(366):  # 最多查一年，避免死循环
+            if cls.is_trading_day(d):
+                return d
+            d += timedelta(days=1)
+        return d
+
+    @classmethod
+    def add_trading_days(cls, from_date: date, trading_days: int) -> date:
+        """
+        从 from_date 开始往后推进 N 个交易日，返回对应日期（不要求 from_date 自身是交易日）
+
+        例：
+        - trading_days=0：返回 from_date（原样）
+        - trading_days=1：返回 from_date 之后的第1个交易日
+        """
+        if trading_days <= 0:
+            return from_date
+
+        d = from_date
+        remaining = trading_days
+        for _ in range(trading_days + 366):  # 预留冗余
+            d = cls.get_next_trading_day(d)
+            remaining -= 1
+            if remaining <= 0:
+                return d
+        return d
         
         # 否则往前查找最近的交易日
         if cls._calendar_df is None:

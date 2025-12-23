@@ -1,9 +1,11 @@
 """回测服务"""
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from infrastructure.persistence.database import DatabaseConnection
 from infrastructure.logging.logger import get_logger
 import pymysql
+from domain.services.trading_calendar_service import TradingCalendarService
+import pandas as pd
 
 logger = get_logger(__name__)
 
@@ -12,7 +14,8 @@ class BacktestService:
     """回测服务 - 计算C点买入R点卖出的收益率"""
     
     def calculate_backtest(self, stock_code: str, table_name: str, 
-                          c_points: List[Dict], r_points: List[Dict]) -> Dict[str, Any]:
+                          c_points: List[Dict], r_points: List[Dict],
+                          backtest_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         计算回测结果
         
@@ -26,9 +29,30 @@ class BacktestService:
             回测结果
         """
         try:
+            backtest_config = backtest_config or {}
+            start_date = (backtest_config.get('startDate') or '').strip() or None
+            end_date = (backtest_config.get('endDate') or '').strip() or None
+            only_golden_c = bool(backtest_config.get('onlyGoldenC', False))
+            exit_after_days = backtest_config.get('exitAfterDays')
+            engine = (backtest_config.get('engine') or 'legacy').strip().lower()
+
+            # exitAfterDays: None/"" -> None
+            try:
+                if exit_after_days is None or exit_after_days == '':
+                    exit_after_days_int: Optional[int] = None
+                else:
+                    exit_after_days_int = int(exit_after_days)
+                    if exit_after_days_int <= 0:
+                        exit_after_days_int = None
+            except Exception:
+                exit_after_days_int = None
+
             logger.info(f"="*60)
             logger.info(f"开始回测: 股票代码={stock_code}, 表名={table_name}")
             logger.info(f"C点数量: {len(c_points)}, R点数量: {len(r_points)}")
+            logger.info(
+                f"回测配置: engine={engine}, startDate={start_date}, endDate={end_date}, onlyGoldenC={only_golden_c}, exitAfterDays={exit_after_days_int}"
+            )
             
             if not c_points:
                 logger.warning("没有C点数据，无法回测")
@@ -39,29 +63,34 @@ class BacktestService:
                     'summary': {}
                 }
             
-            # 先检查表中是否有30分钟K线数据
-            has_30min_data = self._check_30min_data(table_name)
-            if not has_30min_data:
-                logger.error(f"❌ 表{table_name}中没有30分钟K线数据（peroid_type='30min'）")
+            # 先检查表中是否有日K线数据（peroid_type='1day'）
+            has_1day_data = self._check_1day_data(table_name)
+            if not has_1day_data:
+                logger.error(f"❌ 表{table_name}中没有日K线数据（peroid_type='1day'）")
                 return {
                     'success': False,
-                    'message': '该股票数据库中没有30分钟K线数据，无法进行回测',
+                    'message': '该股票数据库中没有日K线数据（1day），无法进行回测',
                     'trades': [],
                     'summary': {}
                 }
             
             # 按日期排序C点和R点
-            sorted_c_points = sorted(c_points, key=lambda x: x['triggerDate'])
-            sorted_r_points = sorted(r_points, key=lambda x: x['triggerDate'])
+            sorted_c_points = sorted(c_points, key=lambda x: x.get('triggerDate') or '')
+            sorted_r_points = sorted(r_points, key=lambda x: x.get('triggerDate') or '')
+
+            # 过滤：时间区间 + 金色C
+            sorted_c_points = self._filter_c_points(sorted_c_points, start_date, end_date, only_golden_c)
+            sorted_r_points = self._filter_points_by_date(sorted_r_points, start_date, end_date)
             
             # 合并所有C点和R点，按时间排序，创建CR序列
             cr_sequence = []
             for c in sorted_c_points:
-                cr_sequence.append({'type': 'C', 'date': c['triggerDate'], 'data': c})
+                cr_sequence.append({'type': 'C', 'date': c.get('triggerDate'), 'data': c})
             for r in sorted_r_points:
-                cr_sequence.append({'type': 'R', 'date': r['triggerDate'], 'data': r})
+                cr_sequence.append({'type': 'R', 'date': r.get('triggerDate'), 'data': r})
             
             # 按日期排序
+            cr_sequence = [x for x in cr_sequence if x.get('date')]
             cr_sequence.sort(key=lambda x: x['date'])
             
             logger.info(f"CR序列: {[x['type'] + x['date'] for x in cr_sequence]}")
@@ -70,77 +99,131 @@ class BacktestService:
             trades = []
             current_c = None  # 当前持仓的C点
             
-            for idx, point in enumerate(cr_sequence):
-                if point['type'] == 'C':
-                    if current_c is None:
-                        # 这是一个新的C点（之前没有持仓）
-                        current_c = point['data']
-                        c_date = point['date']
-                        logger.info(f"新C点: {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
-                    else:
-                        # 已经有持仓了，这是连续的C点，忽略
-                        logger.info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c['triggerDate']}）")
-                        
-                elif point['type'] == 'R':
-                    if current_c is None:
-                        # 没有对应的C点，忽略这个R点
-                        logger.warning(f"忽略无效R点: {point['date']}（没有对应的C点）")
+            # 回测出口模式：默认按R点卖；如配置 exitAfterDays 则按“C后X交易日”卖
+            if exit_after_days_int is None:
+                for point in cr_sequence:
+                    if point['type'] == 'C':
+                        if current_c is None:
+                            current_c = point['data']
+                            c_date = point['date']
+                            logger.info(f"新C点: {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
+                        else:
+                            logger.info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c.get('triggerDate')}）")
+                    elif point['type'] == 'R':
+                        if current_c is None:
+                            logger.warning(f"忽略无效R点: {point['date']}（没有对应的C点）")
+                            continue
+
+                        c_date = current_c.get('triggerDate')
+                        r_date = point['date']
+                        logger.info(f"找到配对: C{c_date} -> R{r_date}")
+
+                        # 买入价：次个交易日的日K开盘价（peroid_type='1day'）
+                        buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date)
+                        if buy is None:
+                            logger.warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
+                            current_c = None
+                            continue
+                        # 卖出价：次个交易日的日K开盘价（peroid_type='1day'）
+                        sell = self._get_next_trading_day_1day_open_with_time(table_name, r_date)
+                        if sell is None:
+                            logger.warning(f"⚠️ 无法获取R点{r_date}后的卖出价，跳过此交易")
+                            current_c = None
+                            continue
+
+                        buy_price, buy_time = buy
+                        sell_price, sell_time = sell
+
+                        return_rate = ((sell_price - buy_price) / buy_price) * 100
+                        c_datetime = datetime.strptime(c_date, '%Y-%m-%d')
+                        r_datetime = datetime.strptime(r_date, '%Y-%m-%d')
+                        days = (r_datetime - c_datetime).days
+
+                        trades.append(self._build_trade_row(
+                            current_c=current_c,
+                            buy_price=buy_price,
+                            buy_time=buy_time,
+                            exit_point=point.get('data'),
+                            exit_trigger_date=r_date,
+                            sell_price=sell_price,
+                            sell_time=sell_time,
+                            return_rate=return_rate,
+                            status='completed',
+                            days=days,
+                            exit_reason='R点卖出'
+                        ))
+
+                        logger.info(
+                        f"✅ 交易完成: C{c_date}买{buy_price}({buy_time}) -> R{r_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%, {days}天"
+                        )
+                        current_c = None
+            else:
+                # 仅按C点序列做交易（忽略R点）
+                calendar = TradingCalendarService()
+                for point in cr_sequence:
+                    if point['type'] != 'C':
                         continue
-                    
-                    # 找到了C-R配对
-                    c_date = current_c['triggerDate']
-                    r_date = point['date']
-                    
-                    logger.info(f"找到配对: C{c_date} -> R{r_date}")
-                    
-                    # 获取C点后第二天第一根30分钟K线的开盘价作为买入价
-                    buy_price = self._get_next_day_30min_open(table_name, c_date)
-                    
-                    if buy_price is None:
+                    if current_c is not None:
+                        logger.info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c.get('triggerDate')}）")
+                        continue
+
+                    current_c = point['data']
+                    c_date = point['date']
+                    logger.info(f"新C点(按X天卖出模式): {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
+
+                    buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date)
+                    if buy is None:
                         logger.warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
-                        current_c = None  # 清除当前C点
+                        current_c = None
                         continue
-                    
-                    # 获取R点后第二天第一根30分钟K线的开盘价作为卖出价
-                    sell_price = self._get_next_day_30min_open(table_name, r_date)
-                    
-                    if sell_price is None:
-                        logger.warning(f"⚠️ 无法获取R点{r_date}后的卖出价，跳过此交易")
-                        current_c = None  # 清除当前C点
+
+                    buy_price, buy_time = buy
+                    # 以“买入执行日”为起点，加X个交易日，在该日的日K开盘价卖出
+                    try:
+                        buy_exec_date = datetime.strptime(buy_time.split(' ')[0], '%Y-%m-%d').date()
+                    except Exception:
+                        buy_exec_date = datetime.strptime(c_date, '%Y-%m-%d').date()
+
+                    sell_exec_date: date = calendar.add_trading_days(buy_exec_date, exit_after_days_int)
+                    sell_trigger_date = sell_exec_date.strftime('%Y-%m-%d')
+                    sell = self._get_1day_open_on_date(table_name, sell_trigger_date)
+                    if sell is None:
+                        logger.warning(f"⚠️ 无法获取卖出日{sell_trigger_date}的卖出价，跳过此交易")
+                        current_c = None
                         continue
-                    
-                    # 计算收益率
+
+                    sell_price, sell_time = sell
                     return_rate = ((sell_price - buy_price) / buy_price) * 100
-                    
-                    # 计算持仓天数
-                    c_datetime = datetime.strptime(c_date, '%Y-%m-%d')
-                    r_datetime = datetime.strptime(r_date, '%Y-%m-%d')
-                    days = (r_datetime - c_datetime).days
-                    
-                    trades.append({
-                        'c_date': c_date,
-                        'c_strategy': current_c.get('strategyName', ''),
-                        'buy_price': round(buy_price, 2),
-                        'r_date': r_date,
-                        'sell_price': round(sell_price, 2),
-                        'return_rate': round(return_rate, 2),
-                        'status': 'completed',
-                        'days': days
-                    })
-                    
-                    logger.info(f"✅ 交易完成: C{c_date}买{buy_price} -> R{r_date}卖{sell_price}, 收益率{return_rate:.2f}%, {days}天")
-                    
-                    # 清除当前C点（已经卖出）
+                    days = (sell_exec_date - buy_exec_date).days
+
+                    trades.append(self._build_trade_row(
+                        current_c=current_c,
+                        buy_price=buy_price,
+                        buy_time=buy_time,
+                        exit_point=None,
+                        exit_trigger_date=sell_trigger_date,
+                        sell_price=sell_price,
+                        sell_time=sell_time,
+                        return_rate=return_rate,
+                        status='completed',
+                        days=days,
+                        exit_reason=f'C点后{exit_after_days_int}个交易日卖出'
+                    ))
+
+                    logger.info(
+                        f"✅ 交易完成(按X天): C{c_date}买{buy_price}({buy_time}) -> {sell_trigger_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%"
+                    )
                     current_c = None
             
             # 检查是否还有未卖出的C点（持仓中）
             if current_c is not None:
                 c_date = current_c['triggerDate']
-                buy_price = self._get_next_day_30min_open(table_name, c_date)
+                buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date)
                 
-                if buy_price is not None:
-                    # 获取最新价格（日K线的最新收盘价）
-                    current_price = self._get_latest_price(table_name)
+                if buy is not None:
+                    buy_price, buy_time = buy
+                    # 获取最新价格（日K线的最新收盘价，或截止到endDate）
+                    current_price = self._get_latest_price(table_name) if end_date is None else self._get_latest_price_up_to(table_name, end_date)
                     
                     if current_price is not None:
                         # 计算当前收益率
@@ -153,31 +236,53 @@ class BacktestService:
                         
                         logger.info(f"持仓中: C{c_date}买{buy_price}，当前价{current_price}，浮动盈亏{return_rate:.2f}%，持仓{days}天")
                         
-                        trades.append({
-                            'c_date': c_date,
-                            'c_strategy': current_c.get('strategyName', ''),
-                            'buy_price': round(buy_price, 2),
-                            'r_date': '持仓中',
-                            'sell_price': round(current_price, 2),
-                            'return_rate': round(return_rate, 2),
-                            'status': 'holding',
-                            'days': days
-                        })
+                        trades.append(self._build_trade_row(
+                            current_c=current_c,
+                            buy_price=buy_price,
+                            buy_time=buy_time,
+                            exit_point=None,
+                            exit_trigger_date='持仓中',
+                            sell_price=current_price,
+                            sell_time=None,
+                            return_rate=return_rate,
+                            status='holding',
+                            days=days,
+                            exit_reason='持仓中'
+                        ))
                     else:
                         logger.warning(f"无法获取最新价格，持仓{c_date}不计入统计")
-                        trades.append({
-                            'c_date': c_date,
-                            'c_strategy': current_c.get('strategyName', ''),
-                            'buy_price': round(buy_price, 2),
-                            'r_date': None,
-                            'sell_price': None,
-                            'return_rate': None,
-                            'status': 'holding',
-                            'days': None
-                        })
+                        trades.append(self._build_trade_row(
+                            current_c=current_c,
+                            buy_price=buy_price,
+                            buy_time=buy_time,
+                            exit_point=None,
+                            exit_trigger_date=None,
+                            sell_price=None,
+                            sell_time=None,
+                            return_rate=None,
+                            status='holding',
+                            days=None,
+                            exit_reason='持仓中(无最新价)'
+                        ))
             
             # 计算汇总统计
             summary = self._calculate_summary(trades)
+            summary['return_sum'] = summary.get('total_return', 0)  # 兼容：收益率总和（不平均）
+            summary['config'] = {
+                'engine': engine,
+                'startDate': start_date,
+                'endDate': end_date,
+                'onlyGoldenC': only_golden_c,
+                'exitAfterDays': exit_after_days_int
+            }
+
+            # 可选：使用 backtrader 引擎复算组合层面收益（不改变每笔交易定价规则）
+            if engine == 'backtrader':
+                try:
+                    summary['engine_meta'] = self._run_backtrader_engine(table_name, trades)
+                except Exception as e:
+                    logger.error(f"backtrader 引擎运行失败，回退为legacy输出: {e}", exc_info=True)
+                    summary['engine_meta'] = {'engine': 'backtrader', 'success': False, 'message': str(e)}
             
             return {
                 'success': True,
@@ -196,6 +301,7 @@ class BacktestService:
     
     def _check_30min_data(self, table_name: str) -> bool:
         """
+        （已弃用）检查表中是否有30分钟K线数据
         检查表中是否有30分钟K线数据
         
         Args:
@@ -227,6 +333,33 @@ class BacktestService:
             
         except Exception as e:
             logger.error(f"检查30分钟K线数据失败: {e}", exc_info=True)
+            return False
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _check_1day_data(self, table_name: str) -> bool:
+        """
+        检查表中是否有日K线数据（peroid_type='1day'）
+        """
+        conn = None
+        try:
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor()
+            query = f"""
+                SELECT COUNT(*) as count
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                LIMIT 1
+            """
+            cursor.execute(query)
+            result = cursor.fetchone()
+            count = result[0] if result else 0
+            logger.info(f"表{table_name}中日K线数据（peroid_type='1day'）数量: {count}")
+            return count > 0
+        except Exception as e:
+            logger.error(f"检查日K线数据失败: {e}", exc_info=True)
             return False
         finally:
             if conn:
@@ -340,6 +473,363 @@ class BacktestService:
             if conn:
                 cursor.close()
                 conn.close()
+
+    def _get_next_day_30min_open_with_time(self, table_name: str, trigger_date: str) -> Optional[tuple[float, str]]:
+        """
+        获取触发日期后第二天第一根30分钟K线的开盘价与时间戳
+        """
+        conn = None
+        try:
+            trigger_dt = datetime.strptime(trigger_date, '%Y-%m-%d')
+            next_day = trigger_dt + timedelta(days=1)
+            next_day_str = next_day.strftime('%Y-%m-%d 00:00:00')
+
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            query = f"""
+                SELECT kai_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '30min'
+                  AND shi_jian >= %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query, (next_day_str,))
+            result = cursor.fetchone()
+            if result and result.get('kai_pan_jia') is not None and result.get('shi_jian') is not None:
+                return float(result['kai_pan_jia']), str(result['shi_jian'])
+            return None
+        except Exception as e:
+            logger.error(f"获取30分钟K线开盘价/时间失败: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _get_first_30min_open_on_date(self, table_name: str, day_str: str) -> Optional[tuple[float, str]]:
+        """
+        获取指定日期当天第一根30分钟K线开盘价与时间戳（shi_jian >= day 00:00:00）
+        """
+        conn = None
+        try:
+            start_ts = f"{day_str} 00:00:00"
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT kai_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '30min'
+                  AND shi_jian >= %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query, (start_ts,))
+            result = cursor.fetchone()
+            if result and result.get('kai_pan_jia') is not None and result.get('shi_jian') is not None:
+                return float(result['kai_pan_jia']), str(result['shi_jian'])
+            return None
+        except Exception as e:
+            logger.error(f"获取指定日30分钟首根开盘价/时间失败: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _get_next_trading_day_1day_open_with_time(self, table_name: str, trigger_date: str) -> Optional[tuple[float, str]]:
+        """
+        获取触发日期后“次个交易日”的日K开盘价与时间戳（peroid_type='1day'）
+        """
+        conn = None
+        try:
+            trigger_dt = datetime.strptime(trigger_date, '%Y-%m-%d').date()
+            next_trade_date = TradingCalendarService.get_next_trading_day(trigger_dt)
+            day_str = next_trade_date.strftime('%Y-%m-%d')
+
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT kai_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND DATE(shi_jian) = %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query, (day_str,))
+            result = cursor.fetchone()
+            if result and result.get('kai_pan_jia') is not None and result.get('shi_jian') is not None:
+                return float(result['kai_pan_jia']), str(result['shi_jian'])
+            return None
+        except Exception as e:
+            logger.error(f"获取次个交易日日K开盘价/时间失败: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _get_1day_open_on_date(self, table_name: str, day_str: str) -> Optional[tuple[float, str]]:
+        """
+        获取指定交易日 day_str 的日K开盘价与时间戳（peroid_type='1day'）
+        """
+        conn = None
+        try:
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT kai_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND DATE(shi_jian) = %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query, (day_str,))
+            result = cursor.fetchone()
+            if result and result.get('kai_pan_jia') is not None and result.get('shi_jian') is not None:
+                return float(result['kai_pan_jia']), str(result['shi_jian'])
+            return None
+        except Exception as e:
+            logger.error(f"获取指定日K开盘价/时间失败: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _get_latest_price_up_to(self, table_name: str, end_date: str) -> Optional[float]:
+        """
+        获取截止到 end_date（含）最近的日K收盘价
+        """
+        conn = None
+        try:
+            end_ts = f"{end_date} 23:59:59"
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT shou_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian <= %s
+                ORDER BY shi_jian DESC
+                LIMIT 1
+            """
+            cursor.execute(query, (end_ts,))
+            result = cursor.fetchone()
+            if result and result.get('shou_pan_jia') is not None:
+                return float(result['shou_pan_jia'])
+            return None
+        except Exception as e:
+            logger.error(f"获取截止日最新价格失败: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _load_1day_df(self, table_name: str, start_ts: str, end_ts: str) -> pd.DataFrame:
+        """
+        从数据库加载 1day OHLCV，返回适配 backtrader 的 DataFrame（index=datetime）
+        """
+        conn = None
+        try:
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, cheng_jiao_liang
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian >= %s
+                  AND shi_jian <= %s
+                ORDER BY shi_jian ASC
+            """
+            cursor.execute(query, (start_ts, end_ts))
+            rows = cursor.fetchall() or []
+            if not rows:
+                return pd.DataFrame()
+
+            df = pd.DataFrame(rows)
+            df['datetime'] = pd.to_datetime(df['shi_jian'])
+            df = df.set_index('datetime')
+            df = df.rename(columns={
+                'kai_pan_jia': 'open',
+                'zui_gao_jia': 'high',
+                'zui_di_jia': 'low',
+                'shou_pan_jia': 'close',
+                'cheng_jiao_liang': 'volume',
+            })
+            df = df[['open', 'high', 'low', 'close', 'volume']].copy()
+            df['openinterest'] = 0
+            for col in ['open', 'high', 'low', 'close', 'volume', 'openinterest']:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            return df
+        finally:
+            if conn:
+                cursor.close()
+                conn.close()
+
+    def _run_backtrader_engine(self, table_name: str, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        用 backtrader 跑一遍“预定买卖时间点”的订单，输出组合层面的收益信息。
+        """
+        try:
+            import backtrader as bt
+        except Exception as e:
+            return {'engine': 'backtrader', 'success': False, 'message': f'ImportError: {e}'}
+
+        buy_times: List[datetime] = []
+        sell_times: List[datetime] = []
+        for t in trades:
+            bt_buy = t.get('buy_time')
+            bt_sell = t.get('sell_time')
+            if bt_buy:
+                try:
+                    buy_times.append(datetime.strptime(bt_buy, '%Y-%m-%d %H:%M:%S'))
+                except Exception:
+                    pass
+            if bt_sell:
+                try:
+                    sell_times.append(datetime.strptime(bt_sell, '%Y-%m-%d %H:%M:%S'))
+                except Exception:
+                    pass
+
+        if not buy_times:
+            return {'engine': 'backtrader', 'success': False, 'message': '无有效buy_time，无法运行引擎'}
+
+        start_dt = min(buy_times)
+        end_dt = max(sell_times) if sell_times else max(buy_times)
+        start_ts = (start_dt - timedelta(days=5)).strftime('%Y-%m-%d %H:%M:%S')
+        end_ts = (end_dt + timedelta(days=5)).strftime('%Y-%m-%d %H:%M:%S')
+
+        df = self._load_1day_df(table_name, start_ts, end_ts)
+        if df.empty:
+            return {'engine': 'backtrader', 'success': False, 'message': '1day数据为空，无法运行引擎'}
+
+        buy_dates = set([d.date() for d in buy_times])
+        sell_dates = set([d.date() for d in sell_times])
+
+        class _ScheduledOrderStrategy(bt.Strategy):
+            def __init__(self):
+                self._buy_dates = buy_dates
+                self._sell_dates = sell_dates
+                self._orders_log = []
+
+            def next_open(self):
+                dt0 = self.data.datetime.datetime(0).replace(tzinfo=None)
+                day = dt0.date()
+                if day in self._sell_dates and self.position.size:
+                    self.sell(size=self.position.size)
+                if day in self._buy_dates and not self.position.size:
+                    self.buy(size=1)
+
+            def notify_order(self, order):
+                if order.status in [order.Completed]:
+                    self._orders_log.append({
+                        'dt': self.data.datetime.datetime(0).strftime('%Y-%m-%d %H:%M:%S'),
+                        'type': 'BUY' if order.isbuy() else 'SELL',
+                        'price': float(order.executed.price),
+                        'size': float(order.executed.size),
+                        'value': float(order.executed.value),
+                    })
+
+        cerebro = bt.Cerebro(cheat_on_open=True, stdstats=False)
+        data = bt.feeds.PandasData(dataname=df)
+        cerebro.adddata(data)
+        cerebro.addstrategy(_ScheduledOrderStrategy)
+
+        cerebro.broker.setcash(100000.0)
+        cerebro.broker.setcommission(commission=0.0)
+
+        results = cerebro.run()
+        strat = results[0]
+        final_value = float(cerebro.broker.getvalue())
+        pnl = final_value - 100000.0
+
+        return {
+            'engine': 'backtrader',
+            'success': True,
+            'initial_cash': 100000.0,
+            'final_value': round(final_value, 2),
+            'pnl': round(pnl, 2),
+            'orders': getattr(strat, '_orders_log', []),
+            'data_range': {'start': start_ts, 'end': end_ts},
+        }
+
+    @staticmethod
+    def _filter_points_by_date(points: List[Dict[str, Any]], start_date: Optional[str], end_date: Optional[str]) -> List[Dict[str, Any]]:
+        if not start_date and not end_date:
+            return points
+        out = []
+        for p in points:
+            d = (p.get('triggerDate') or '').strip()
+            if not d:
+                continue
+            if start_date and d < start_date:
+                continue
+            if end_date and d > end_date:
+                continue
+            out.append(p)
+        return out
+
+    def _filter_c_points(self, c_points: List[Dict[str, Any]], start_date: Optional[str], end_date: Optional[str], only_golden: bool) -> List[Dict[str, Any]]:
+        pts = self._filter_points_by_date(c_points, start_date, end_date)
+        if not only_golden:
+            return pts
+        out = []
+        for p in pts:
+            if bool(p.get('isGolden', False)):
+                out.append(p)
+        return out
+
+    @staticmethod
+    def _build_trade_row(
+        current_c: Dict[str, Any],
+        buy_price: float,
+        buy_time: Optional[str],
+        exit_point: Optional[Dict[str, Any]],
+        exit_trigger_date: Optional[str],
+        sell_price: Optional[float],
+        sell_time: Optional[str],
+        return_rate: Optional[float],
+        status: str,
+        days: Optional[int],
+        exit_reason: str,
+    ) -> Dict[str, Any]:
+        """
+        统一 trade 输出结构，方便前端展示“触发原因/插件/交易时间”
+        """
+        r_plugins = []
+        r_strategy = ''
+        if exit_point:
+            r_strategy = exit_point.get('strategyName', '') or ''
+            r_plugins = exit_point.get('plugins', []) or []
+
+        return {
+            # 兼容旧字段
+            'c_date': current_c.get('triggerDate'),
+            'c_strategy': current_c.get('strategyName', ''),
+            'buy_price': round(buy_price, 2) if buy_price is not None else None,
+            'r_date': exit_trigger_date,
+            'sell_price': round(sell_price, 2) if sell_price is not None else None,
+            'return_rate': round(return_rate, 2) if return_rate is not None else None,
+            'status': status,
+            'days': days,
+
+            # 新增：交易时间/原因/插件
+            'buy_time': buy_time,
+            'sell_time': sell_time,
+            'exit_reason': exit_reason,
+            'c_point_type': current_c.get('pointType'),
+            'c_is_golden': bool(current_c.get('isGolden', False)),
+            'c_strategy1_score': current_c.get('strategy1Score'),
+            'c_strategy2_score': current_c.get('strategy2Score'),
+            'c_plugins': current_c.get('plugins', []) or [],
+            'r_strategy': r_strategy,
+            'r_plugins': r_plugins,
+        }
     
     def _calculate_summary(self, trades: List[Dict]) -> Dict[str, Any]:
         """

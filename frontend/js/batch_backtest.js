@@ -4,6 +4,65 @@ const API_BASE_URL = '/api';
 let allStockGroups = {};
 let isRunning = false;
 
+function getSelectedMode() {
+    const modeEl = document.querySelector('input[name="btMode"]:checked');
+    return modeEl ? modeEl.value : 'group';
+}
+
+function bindModeUI() {
+    const radios = document.querySelectorAll('input[name="btMode"]');
+    const csvFile = document.getElementById('csvFile');
+    const csvHint = document.getElementById('csvHint');
+    const strategySelect = document.getElementById('strategySelect');
+    if (!radios.length) return;
+
+    const refresh = () => {
+        const mode = getSelectedMode();
+        const isCsv = mode === 'csv';
+        if (csvFile) csvFile.style.display = isCsv ? 'inline-block' : 'none';
+        if (csvHint) csvHint.style.display = isCsv ? 'inline-block' : 'none';
+        if (strategySelect) strategySelect.disabled = isCsv;
+    };
+
+    radios.forEach(r => r.addEventListener('change', refresh));
+    refresh();
+}
+
+async function readCsvStocks(file) {
+    const text = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result || '');
+        reader.onerror = () => reject(new Error('读取CSV失败'));
+        reader.readAsText(file, 'utf-8');
+    });
+
+    const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+
+    // 简单CSV解析：支持 header（code/stockCode）或第一列直接是代码
+    const header = lines[0].split(',').map(s => s.trim());
+    const hasHeader = header.some(h => ['code', 'stockcode', 'stock_code'].includes(h.toLowerCase()));
+    const codeIdx = hasHeader
+        ? header.findIndex(h => ['code', 'stockcode', 'stock_code'].includes(h.toLowerCase()))
+        : 0;
+
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+    const codes = [];
+    for (const line of dataLines) {
+        const cols = line.split(',').map(s => s.trim());
+        const code = (cols[codeIdx] || '').replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
+        if (code) codes.push(code);
+    }
+
+    // 去重
+    const uniq = Array.from(new Set(codes));
+    return uniq.map(code => ({
+        code,
+        name: code,
+        table_name: `basic_data_${code.toLowerCase()}`
+    }));
+}
+
 // 初始化
 async function init() {
     try {
@@ -15,6 +74,7 @@ async function init() {
         if (result.code === 200) {
             allStockGroups = result.data;
             updateStatus(true, `系统就绪 - 已加载 ${getTotalStockCount()} 支股票`);
+            bindModeUI();
         } else {
             throw new Error(result.message || '获取数据失败');
         }
@@ -66,21 +126,51 @@ async function startBatchBacktest() {
     const strategySelect = document.getElementById('strategySelect');
     const stockLimit = parseInt(document.getElementById('stockLimit').value) || 20;
     const strategy = strategySelect.value;
+
+    // 回测配置（与个股页一致）
+    const startMonth = document.getElementById('btStartDate')?.value || '';
+    const endMonth = document.getElementById('btEndDate')?.value || '';
+    const exitAfterDaysRaw = document.getElementById('btExitAfterDays')?.value;
+    const onlyGoldenC = !!document.getElementById('btOnlyGolden')?.checked;
+    const engine = document.getElementById('btEngine')?.value || 'legacy';
+
+    const backtestConfig = {
+        startDate: startMonth ? `${startMonth}-01` : null,
+        endDate: endMonth ? `${endMonth}-31` : null,
+        exitAfterDays: exitAfterDaysRaw ? parseInt(exitAfterDaysRaw, 10) : null,
+        onlyGoldenC,
+        engine
+    };
     
-    if (!strategy) {
+    const mode = getSelectedMode();
+    if (mode === 'group' && !strategy) {
         showError('请选择股性分组');
         return;
     }
 
     // 获取股票列表
     let stocks = [];
-    if (strategy === 'all') {
-        // 合并所有策略的股票
-        for (const strategyStocks of Object.values(allStockGroups)) {
-            stocks = stocks.concat(strategyStocks);
+    if (mode === 'csv') {
+        const csvFile = document.getElementById('csvFile');
+        const file = csvFile?.files?.[0];
+        if (!file) {
+            showError('请选择CSV文件');
+            return;
+        }
+        stocks = await readCsvStocks(file);
+        if (stocks.length === 0) {
+            showError('CSV里没有解析到股票代码');
+            return;
         }
     } else {
-        stocks = allStockGroups[strategy] || [];
+        if (strategy === 'all') {
+            // 合并所有策略的股票
+            for (const strategyStocks of Object.values(allStockGroups)) {
+                stocks = stocks.concat(strategyStocks);
+            }
+        } else {
+            stocks = allStockGroups[strategy] || [];
+        }
     }
     
     if (stocks.length === 0) {
@@ -116,7 +206,8 @@ async function startBatchBacktest() {
         updateProgress(progress, `正在回测: ${stock.name} (${stock.code}) - ${i + 1}/${selectedStocks.length}`);
         
         try {
-            const result = await backtestSingleStock(stock);
+            const nature = mode === 'csv' ? (strategy || '波段') : strategy;
+            const result = await backtestSingleStock(stock, nature, backtestConfig);
             if (result.success) {
                 successCount++;
                 results.push({
@@ -153,14 +244,14 @@ async function startBatchBacktest() {
     
     // 恢复按钮
     runBtn.disabled = false;
-    runBtn.innerHTML = '🚀 开始批量回测';
+    runBtn.innerHTML = '开始批量回测';
     isRunning = false;
     
     updateStatus(true, '回测完成');
 }
 
 // 回测单个股票
-async function backtestSingleStock(stock) {
+async function backtestSingleStock(stock, stockNature, backtestConfig) {
     try {
         console.log('开始回测股票:', stock.code, stock.name);
         
@@ -169,7 +260,8 @@ async function backtestSingleStock(stock) {
             stockCode: stock.code,
             stockName: stock.name,
             tableName: stock.table_name,
-            period: 'day'
+            period: 'day',
+            stockNature: stockNature
         };
         
         console.log('CR分析请求参数:', requestBody);
@@ -225,7 +317,8 @@ async function backtestSingleStock(stock) {
                 stockCode: stock.code,
                 tableName: stock.table_name,
                 cPoints: cPoints,
-                rPoints: rPoints
+                rPoints: rPoints,
+                backtestConfig
             })
         });
         
@@ -286,7 +379,7 @@ function displayResults(results, successCount, failCount) {
     successResults.forEach(r => {
         if (r.data && r.data.summary) {
             totalTrades += r.data.summary.total_trades || 0;
-            totalReturnSum += r.data.summary.total_return || 0;
+            totalReturnSum += (r.data.summary.return_sum ?? r.data.summary.total_return ?? 0);
             avgReturnSum += r.data.summary.avg_return || 0;
             winRateSum += r.data.summary.win_rate || 0;
         }
@@ -299,6 +392,8 @@ function displayResults(results, successCount, failCount) {
     document.getElementById('totalStocks').textContent = results.length;
     document.getElementById('avgReturn').textContent = avgReturn + '%';
     document.getElementById('avgReturn').className = avgReturn >= 0 ? 'positive' : 'negative';
+    document.getElementById('returnSumAll').textContent = totalReturnSum.toFixed(2) + '%';
+    document.getElementById('returnSumAll').className = totalReturnSum >= 0 ? 'positive' : 'negative';
     document.getElementById('totalTrades').textContent = totalTrades;
     document.getElementById('avgWinRate').textContent = avgWinRate + '%';
     document.getElementById('successCount').textContent = successCount;

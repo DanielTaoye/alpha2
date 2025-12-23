@@ -33,6 +33,7 @@ class BacktestController:
             table_name = data.get('tableName')
             c_points = data.get('cPoints', [])
             r_points = data.get('rPoints', [])
+            backtest_config = data.get('backtestConfig') or data.get('config') or {}
             
             if not stock_code:
                 return jsonify(ResponseBuilder.error('股票代码不能为空')), 400
@@ -44,7 +45,7 @@ class BacktestController:
             
             # 执行回测
             result = self.backtest_service.calculate_backtest(
-                stock_code, table_name, c_points, r_points
+                stock_code, table_name, c_points, r_points, backtest_config=backtest_config
             )
             
             if result['success']:

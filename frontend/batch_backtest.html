@@ -272,9 +272,54 @@
             </div>
 
             <div class="control-row">
+                <label class="control-label">回测模式:</label>
+                <label style="display:flex; align-items:center; gap:8px; color:#333;">
+                    <input type="radio" name="btMode" value="group" checked>
+                    按股性分组
+                </label>
+                <label style="display:flex; align-items:center; gap:8px; color:#333;">
+                    <input type="radio" name="btMode" value="csv">
+                    CSV自定义
+                </label>
+                <input type="file" id="csvFile" accept=".csv,text/csv" style="margin-left: 10px; display:none;">
+                <span id="csvHint" style="color:#666; font-size:14px; display:none;">CSV第一列填股票代码（或包含code/stockCode列）</span>
+            </div>
+
+            <div class="control-row">
                 <label class="control-label">股票数量限制:</label>
                 <input type="number" class="stock-limit-input" id="stockLimit" value="20" min="1" max="100">
                 <span style="color: #666; font-size: 14px;">支（默认20支，可调整）</span>
+            </div>
+
+            <div class="control-row">
+                <label class="control-label">回测时间:</label>
+                <input type="month" class="stock-limit-input" id="btStartDate" style="width: 160px;">
+                <span style="color:#666; font-size:14px;">到</span>
+                <input type="month" class="stock-limit-input" id="btEndDate" style="width: 160px;">
+                <span style="color:#666; font-size:14px;">（可选）</span>
+            </div>
+
+            <div class="control-row">
+                <label class="control-label">卖出规则:</label>
+                <input type="number" class="stock-limit-input" id="btExitAfterDays" style="width: 160px;" min="1" placeholder="C后X交易日卖">
+                <span style="color:#666; font-size:14px;">留空=按R点卖出</span>
+            </div>
+
+            <div class="control-row">
+                <label class="control-label">筛选:</label>
+                <label style="display:flex; align-items:center; gap:8px; color:#333;">
+                    <input type="checkbox" id="btOnlyGolden">
+                    仅回测金色C
+                </label>
+                <span style="color:#666; font-size:14px;">（isGolden=true）</span>
+            </div>
+
+            <div class="control-row">
+                <label class="control-label">引擎:</label>
+                <select class="strategy-select" id="btEngine" style="max-width: 280px;">
+                    <option value="legacy">legacy(现有逻辑)</option>
+                    <option value="backtrader">backtrader</option>
+                </select>
             </div>
 
             <div class="control-row">
@@ -310,6 +355,10 @@
                     <div class="stat-item">
                         <div class="stat-label">平均收益率</div>
                         <div class="stat-value" id="avgReturn">0%</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">收益率总和</div>
+                        <div class="stat-value" id="returnSumAll">0%</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-label">总交易次数</div>
