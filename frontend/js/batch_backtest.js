@@ -399,6 +399,7 @@ function displayResults(results, successCount, failCount) {
     let totalReturnSum = 0;
     let avgReturnSum = 0;
     let winRateSum = 0;
+    let holdingDaysSum = 0;
     
     successResults.forEach(r => {
         if (r.data && r.data.summary) {
@@ -406,11 +407,13 @@ function displayResults(results, successCount, failCount) {
             totalReturnSum += (r.data.summary.return_sum ?? r.data.summary.total_return ?? 0);
             avgReturnSum += r.data.summary.avg_return || 0;
             winRateSum += r.data.summary.win_rate || 0;
+            holdingDaysSum += r.data.summary.avg_holding_days || 0;
         }
     });
     
     const avgReturn = successResults.length > 0 ? (avgReturnSum / successResults.length).toFixed(2) : 0;
     const avgWinRate = successResults.length > 0 ? (winRateSum / successResults.length).toFixed(2) : 0;
+    const avgHoldingDaysStocks = successResults.length > 0 ? (holdingDaysSum / successResults.length).toFixed(2) : 0;
     
     // 更新汇总卡片
     document.getElementById('totalStocks').textContent = results.length;
@@ -422,6 +425,7 @@ function displayResults(results, successCount, failCount) {
     document.getElementById('avgWinRate').textContent = avgWinRate + '%';
     document.getElementById('successCount').textContent = successCount;
     document.getElementById('failCount').textContent = failCount;
+    document.getElementById('avgHoldingDaysStocks').textContent = `${avgHoldingDaysStocks}天`;
     
     // 填充表格
     const tableBody = document.getElementById('resultsTableBody');
@@ -437,32 +441,30 @@ function displayResults(results, successCount, failCount) {
             const winRate = summary.win_rate || 0;
             const maxReturn = summary.max_return || 0;
             const minReturn = summary.min_return || 0;
+            const avgHoldingDays = summary.avg_holding_days || 0;
             
-            // 创建每个单元格
             const cells = [
                 index + 1,
                 result.stock?.code || '未知',
-                result.stock?.name || '未知',
                 summary.total_trades || 0,
                 `<span class="${totalReturn >= 0 ? 'positive' : 'negative'}">${totalReturn.toFixed(2)}%</span>`,
                 `<span class="${avgReturn >= 0 ? 'positive' : 'negative'}">${avgReturn.toFixed(2)}%</span>`,
                 `${winRate.toFixed(2)}%`,
                 `<span class="positive">${maxReturn.toFixed(2)}%</span>`,
                 `<span class="negative">${minReturn.toFixed(2)}%</span>`,
+                `${avgHoldingDays.toFixed(2)}天`,
                 '<span style="color: #27ae60; font-weight: bold;">✓ 成功</span>'
             ];
             
             row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('');
         } else {
-            // 失败的情况
             const cells = [
                 index + 1,
-                result.stock.code || '未知',
-                result.stock.name || '未知'
+                result.stock.code || '未知'
             ];
             
             row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('') + 
-                `<td colspan="7" style="color: #999;">
+                `<td colspan="8" style="color: #999;">
                     <span style="color: #e74c3c; font-weight: bold;">✗ 失败</span> - ${result.error || '未知错误'}
                 </td>`;
         }
