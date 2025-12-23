@@ -796,6 +796,10 @@ body {
     background: #1e2a3a;
 }
 
+#avgReturn #returnSumAll{
+    font-size: x-large;
+}
+
 .trades-table .positive {
     color: #ef5350;  /* 红色表示盈利（中国股市习惯）*/
     font-weight: bold;
