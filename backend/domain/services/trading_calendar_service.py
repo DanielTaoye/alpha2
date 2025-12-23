@@ -142,7 +142,7 @@ class TradingCalendarService:
         # 如果今天是交易日，直接返回
         if cls.is_trading_day(today):
             return today.strftime('%Y-%m-%d')
-
+        
     # =====================
     # 交易日工具（回测/调度通用）
     # =====================

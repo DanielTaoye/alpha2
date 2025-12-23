@@ -154,7 +154,7 @@ class BacktestService:
                         ))
 
                         logger.info(
-                        f"✅ 交易完成: C{c_date}买{buy_price}({buy_time}) -> R{r_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%, {days}天"
+                            f"✅ 交易完成: C{c_date}买{buy_price}({buy_time}) -> R{r_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%, {days}天"
                         )
                         current_c = None
             else:
@@ -176,7 +176,7 @@ class BacktestService:
                         logger.warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
                         current_c = None
                         continue
-
+                    
                     buy_price, buy_time = buy
                     # 以“买入执行日”为起点，加X个交易日，在该日的日K开盘价卖出
                     try:
@@ -191,11 +191,11 @@ class BacktestService:
                         logger.warning(f"⚠️ 无法获取卖出日{sell_trigger_date}的卖出价，跳过此交易")
                         current_c = None
                         continue
-
+                    
                     sell_price, sell_time = sell
                     return_rate = ((sell_price - buy_price) / buy_price) * 100
                     days = (sell_exec_date - buy_exec_date).days
-
+                    
                     trades.append(self._build_trade_row(
                         current_c=current_c,
                         buy_price=buy_price,
@@ -209,7 +209,7 @@ class BacktestService:
                         days=days,
                         exit_reason=f'C点后{exit_after_days_int}个交易日卖出'
                     ))
-
+                    
                     logger.info(
                         f"✅ 交易完成(按X天): C{c_date}买{buy_price}({buy_time}) -> {sell_trigger_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%"
                     )

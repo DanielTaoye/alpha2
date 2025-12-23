@@ -396,10 +396,6 @@ function renderStockView(stockCode, stockName, tableName, stockNature = null) {
                     <input id="btEndDate" type="month" style="padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
                 </div>
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                    <div style="font-size: 12px; color:#8899aa;">C后X交易日卖出(可选)</div>
-                    <input id="btExitAfterDays" type="number" min="1" placeholder="例如：5" style="padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
-                </div>
-                <div style="display:flex; flex-direction:column; gap:6px;">
                     <div style="font-size: 12px; color:#8899aa;">仅回测金色C</div>
                     <label style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.15); color:#fff;">
                         <input id="btOnlyGolden" type="checkbox" style="width:16px; height:16px;">
@@ -3025,7 +3021,6 @@ async function runBacktest() {
         // 调用回测API
         const startMonth = document.getElementById('btStartDate')?.value || '';
         const endMonth = document.getElementById('btEndDate')?.value || '';
-        const exitAfterDaysRaw = document.getElementById('btExitAfterDays')?.value;
         const onlyGoldenC = !!document.getElementById('btOnlyGolden')?.checked;
         const engine = document.getElementById('btEngine')?.value || 'legacy';
 
@@ -3033,7 +3028,6 @@ async function runBacktest() {
             // month input: YYYY-MM -> 转成 YYYY-MM-01 / YYYY-MM-31(粗略)，服务端按字符串比较
             startDate: startMonth ? `${startMonth}-01` : null,
             endDate: endMonth ? `${endMonth}-31` : null,
-            exitAfterDays: exitAfterDaysRaw ? parseInt(exitAfterDaysRaw, 10) : null,
             onlyGoldenC,
             engine
         };
@@ -3137,10 +3131,6 @@ function displayBacktestResult(data) {
                     <span class="summary-label">平均收益率</span>
                     <span class="summary-value">${summary.avg_return >= 0 ? '+' : ''}${summary.avg_return || 0}%</span>
                 </div>
-                <div class="summary-item ${summary.total_return >= 0 ? 'positive' : 'negative'}">
-                    <span class="summary-label">累计收益率</span>
-                    <span class="summary-value">${summary.total_return >= 0 ? '+' : ''}${summary.total_return || 0}%</span>
-                </div>
                 <div class="summary-item ${summary.return_sum >= 0 ? 'positive' : 'negative'}">
                     <span class="summary-label">收益率总和</span>
                     <span class="summary-value">${summary.return_sum >= 0 ? '+' : ''}${summary.return_sum || 0}%</span>
@@ -3156,14 +3146,6 @@ function displayBacktestResult(data) {
                 <div class="summary-item">
                     <span class="summary-label">平均持仓天数</span>
                     <span class="summary-value">${summary.avg_holding_days || 0}天</span>
-                </div>
-                <div class="summary-item positive">
-                    <span class="summary-label">盈利笔数</span>
-                    <span class="summary-value">${summary.win_count || 0}</span>
-                </div>
-                <div class="summary-item negative">
-                    <span class="summary-label">亏损笔数</span>
-                    <span class="summary-value">${summary.loss_count || 0}</span>
                 </div>
                 <div class="summary-item ${summary.holding_return >= 0 ? 'positive' : 'negative'}">
                     <span class="summary-label">持仓浮动盈亏</span>
@@ -3201,6 +3183,12 @@ function displayBacktestResult(data) {
         const returnClass = trade.return_rate > 0 ? 'positive' : (trade.return_rate < 0 ? 'negative' : '');
         const statusText = trade.status === 'holding' ? '持仓中' : '已完成';
         const statusClass = trade.status === 'holding' ? 'holding' : 'completed';
+        const strategyLabel = (() => {
+            if (trade.c_is_golden) return '金色C';
+            const type = (trade.c_point_type || '').toUpperCase();
+            if (type === 'C_STRATEGY2') return '策略2 C';
+            return '策略1 C';
+        })();
         const cScoreText = (trade.c_strategy1_score !== undefined && trade.c_strategy1_score !== null)
             ? `S1:${trade.c_strategy1_score}`
             : '';
@@ -3220,7 +3208,7 @@ function displayBacktestResult(data) {
             <tr>
                 <td>${index + 1}</td>
                 <td>${trade.c_date}</td>
-                <td title="${cPluginTitle.replaceAll('"', '&quot;')}">${trade.c_strategy}</td>
+                <td title="${cPluginTitle.replaceAll('"', '&quot;')}">${strategyLabel}</td>
                 <td style="font-size:12px;">${cScoreText}${cScoreText2}</td>
                 <td>${goldenText}</td>
                 <td style="font-size:12px;">${trade.buy_time || '-'}</td>
