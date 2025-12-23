@@ -3,6 +3,7 @@ const API_BASE_URL = '/api';
 
 let allStockGroups = {};
 let isRunning = false;
+let importedStocksCache = [];
 
 async function readCsvStocks(file) {
     const text = await new Promise((resolve, reject) => {
@@ -11,32 +12,91 @@ async function readCsvStocks(file) {
         reader.onerror = () => reject(new Error('读取CSV失败'));
         reader.readAsText(file, 'utf-8');
     });
-
     const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    if (lines.length === 0) return [];
+    return parseRowsToStocks(lines.map(line => line.split(',').map(s => s.trim())));
+}
 
-    // 简单CSV解析：支持 header（code/stockCode）或第一列直接是代码
-    const header = lines[0].split(',').map(s => s.trim());
+function parseRowsToStocks(rows) {
+    if (!rows || rows.length === 0) return [];
+    const header = rows[0].map(s => s.trim());
     const hasHeader = header.some(h => ['code', 'stockcode', 'stock_code'].includes(h.toLowerCase()));
     const codeIdx = hasHeader
         ? header.findIndex(h => ['code', 'stockcode', 'stock_code'].includes(h.toLowerCase()))
         : 0;
-
-    const dataLines = hasHeader ? lines.slice(1) : lines;
+    const dataRows = hasHeader ? rows.slice(1) : rows;
     const codes = [];
-    for (const line of dataLines) {
-        const cols = line.split(',').map(s => s.trim());
+    for (const cols of dataRows) {
         const code = (cols[codeIdx] || '').replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
         if (code) codes.push(code);
     }
-
-    // 去重
     const uniq = Array.from(new Set(codes));
     return uniq.map(code => ({
         code,
         name: code,
         table_name: `basic_data_${code.toLowerCase()}`
     }));
+}
+
+async function readExcelStocks(file) {
+    const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(new Uint8Array(e.target.result));
+        reader.onerror = () => reject(new Error('读取Excel失败'));
+        reader.readAsArrayBuffer(file);
+    });
+    const wb = XLSX.read(data, { type: 'array' });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) return [];
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
+    // rows 形如 [ [col1,col2,...], ... ]
+    return parseRowsToStocks(rows);
+}
+
+async function readFileStocks(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (ext === 'csv') {
+        return readCsvStocks(file);
+    }
+    if (ext === 'xlsx' || ext === 'xls') {
+        if (typeof XLSX === 'undefined') {
+            throw new Error('Excel解析库未加载');
+        }
+        return readExcelStocks(file);
+    }
+    throw new Error('仅支持 CSV / XLSX / XLS');
+}
+
+function renderImportSummary(stocks) {
+    const el = document.getElementById('importSummary');
+    if (!el) return;
+    if (!stocks || stocks.length === 0) {
+        el.textContent = '尚未导入文件或文件为空';
+        el.style.color = '#e74c3c';
+        return;
+    }
+    const preview = stocks.slice(0, 10).map(s => s.code).join(', ');
+    const more = stocks.length > 10 ? ` ... 共${stocks.length}只` : ` 共${stocks.length}只`;
+    el.textContent = `已导入股票: ${preview}${more}`;
+    el.style.color = '#333';
+}
+
+async function handleFileChange(ev) {
+    const file = ev.target.files?.[0];
+    if (!file) {
+        importedStocksCache = [];
+        renderImportSummary([]);
+        return;
+    }
+    try {
+        const stocks = await readFileStocks(file);
+        importedStocksCache = stocks;
+        renderImportSummary(stocks);
+    } catch (err) {
+        importedStocksCache = [];
+        renderImportSummary([]);
+        showError(err.message || '文件解析失败');
+    }
 }
 
 // 初始化
@@ -57,6 +117,11 @@ async function init() {
         console.error('初始化失败:', error);
         updateStatus(false, '服务器连接失败');
         showError('系统初始化失败: ' + error.message);
+    }
+    // 绑定文件选择监听，实时展示导入摘要
+    const fileInput = document.getElementById('csvFile');
+    if (fileInput) {
+        fileInput.addEventListener('change', handleFileChange);
     }
 }
 
@@ -123,13 +188,18 @@ async function startBatchBacktest() {
     let stocks = [];
     const csvFile = document.getElementById('csvFile');
     const file = csvFile?.files?.[0];
-    if (!file) {
-        showError('请选择CSV文件');
-        return;
+    if (importedStocksCache.length === 0) {
+        if (!file) {
+            showError('请选择文件');
+            return;
+        }
+        stocks = await readFileStocks(file);
+        importedStocksCache = stocks;
+    } else {
+        stocks = importedStocksCache;
     }
-    stocks = await readCsvStocks(file);
     if (stocks.length === 0) {
-        showError('CSV里没有解析到股票代码');
+        showError('文件里没有解析到股票代码');
         return;
     }
 

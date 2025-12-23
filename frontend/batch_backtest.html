@@ -261,10 +261,11 @@
             <h2 style="margin-bottom: 20px; color: #333;">回测参数设置</h2>
             
             <div class="control-row">
-                <label class="control-label">CSV导入股票:</label>
-                <input type="file" id="csvFile" accept=".csv,text/csv" style="margin-left: 10px;">
-                <span id="csvHint" style="color:#666; font-size:14px;">CSV第一列或含表头 code/stockCode/stock_code</span>
+                <label class="control-label">导入股票文件:</label>
+                <input type="file" id="csvFile" accept=".csv,.xlsx,.xls" style="margin-left: 10px;">
+                <span id="csvHint" style="color:#666; font-size:14px;">CSV/Excel，第一列或含表头 code/stockCode/stock_code</span>
             </div>
+            <div id="importSummary" style="margin: 8px 0 16px 0; color: #666; font-size: 14px;">尚未导入文件</div>
 
             <div class="control-row">
                 <label class="control-label">选择股性:</label>
@@ -387,6 +388,7 @@
     </div>
 
     <script src="js/batch_backtest.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </body>
 </html>
 
