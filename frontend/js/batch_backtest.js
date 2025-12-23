@@ -4,30 +4,6 @@ const API_BASE_URL = '/api';
 let allStockGroups = {};
 let isRunning = false;
 
-function getSelectedMode() {
-    const modeEl = document.querySelector('input[name="btMode"]:checked');
-    return modeEl ? modeEl.value : 'group';
-}
-
-function bindModeUI() {
-    const radios = document.querySelectorAll('input[name="btMode"]');
-    const csvFile = document.getElementById('csvFile');
-    const csvHint = document.getElementById('csvHint');
-    const strategySelect = document.getElementById('strategySelect');
-    if (!radios.length) return;
-
-    const refresh = () => {
-        const mode = getSelectedMode();
-        const isCsv = mode === 'csv';
-        if (csvFile) csvFile.style.display = isCsv ? 'inline-block' : 'none';
-        if (csvHint) csvHint.style.display = isCsv ? 'inline-block' : 'none';
-        if (strategySelect) strategySelect.disabled = isCsv;
-    };
-
-    radios.forEach(r => r.addEventListener('change', refresh));
-    refresh();
-}
-
 async function readCsvStocks(file) {
     const text = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -74,7 +50,6 @@ async function init() {
         if (result.code === 200) {
             allStockGroups = result.data;
             updateStatus(true, `系统就绪 - 已加载 ${getTotalStockCount()} 支股票`);
-            bindModeUI();
         } else {
             throw new Error(result.message || '获取数据失败');
         }
@@ -124,63 +99,42 @@ async function startBatchBacktest() {
     }
 
     const strategySelect = document.getElementById('strategySelect');
-    const stockLimit = parseInt(document.getElementById('stockLimit').value) || 20;
     const strategy = strategySelect.value;
 
     // 回测配置（与个股页一致）
-    const startMonth = document.getElementById('btStartDate')?.value || '';
-    const endMonth = document.getElementById('btEndDate')?.value || '';
-    const exitAfterDaysRaw = document.getElementById('btExitAfterDays')?.value;
+    const startDate = document.getElementById('btStartDate')?.value || '';
+    const endDate = document.getElementById('btEndDate')?.value || '';
     const onlyGoldenC = !!document.getElementById('btOnlyGolden')?.checked;
     const engine = document.getElementById('btEngine')?.value || 'legacy';
 
     const backtestConfig = {
-        startDate: startMonth ? `${startMonth}-01` : null,
-        endDate: endMonth ? `${endMonth}-31` : null,
-        exitAfterDays: exitAfterDaysRaw ? parseInt(exitAfterDaysRaw, 10) : null,
+        startDate: startDate || null,
+        endDate: endDate || null,
         onlyGoldenC,
         engine
     };
-    
-    const mode = getSelectedMode();
-    if (mode === 'group' && !strategy) {
-        showError('请选择股性分组');
+
+    if (!strategy) {
+        showError('请选择股性分组（用于套用阈值）');
         return;
     }
 
     // 获取股票列表
     let stocks = [];
-    if (mode === 'csv') {
-        const csvFile = document.getElementById('csvFile');
-        const file = csvFile?.files?.[0];
-        if (!file) {
-            showError('请选择CSV文件');
-            return;
-        }
-        stocks = await readCsvStocks(file);
-        if (stocks.length === 0) {
-            showError('CSV里没有解析到股票代码');
-            return;
-        }
-    } else {
-        if (strategy === 'all') {
-            // 合并所有策略的股票
-            for (const strategyStocks of Object.values(allStockGroups)) {
-                stocks = stocks.concat(strategyStocks);
-            }
-        } else {
-            stocks = allStockGroups[strategy] || [];
-        }
+    const csvFile = document.getElementById('csvFile');
+    const file = csvFile?.files?.[0];
+    if (!file) {
+        showError('请选择CSV文件');
+        return;
     }
-    
+    stocks = await readCsvStocks(file);
     if (stocks.length === 0) {
-        showError('该分组没有股票数据');
+        showError('CSV里没有解析到股票代码');
         return;
     }
 
-    // 限制股票数量
-    const selectedStocks = stocks.slice(0, stockLimit);
-    
+    const selectedStocks = stocks; // 不再截断数量
+
     isRunning = true;
     
     // 显示进度条
@@ -206,7 +160,7 @@ async function startBatchBacktest() {
         updateProgress(progress, `正在回测: ${stock.name} (${stock.code}) - ${i + 1}/${selectedStocks.length}`);
         
         try {
-            const nature = mode === 'csv' ? (strategy || '波段') : strategy;
+            const nature = strategy || '波段';
             const result = await backtestSingleStock(stock, nature, backtestConfig);
             if (result.success) {
                 successCount++;
