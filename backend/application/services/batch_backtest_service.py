@@ -54,7 +54,7 @@ class BatchBacktestService:
         stock_nature: str,
         backtest_config: Dict[str, Any],
         period: str = "day",
-        concurrency: int = 2,
+        concurrency: int = 10,
     ) -> str:
         job_id = uuid4().hex
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -126,7 +126,7 @@ class BatchBacktestService:
         concurrency: int,
     ):
         try:
-            conc = max(1, min(int(concurrency or 1), 8))
+            conc = max(1, min(int(concurrency or 1), 10))
             logger.info(f"[batch_backtest] job={job_id} start, total={len(stocks)}, concurrency={conc}")
 
             def worker(idx_stock):

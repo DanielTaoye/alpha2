@@ -205,7 +205,7 @@ async function startBatchBacktest() {
 
     const strategySelect = document.getElementById('strategySelect');
     const strategy = strategySelect.value;
-    const concurrency = clampInt(document.getElementById('btConcurrency')?.value, 1, 12, 4);
+    const concurrency = clampInt(document.getElementById('btConcurrency')?.value, 1, 12, 10);
 
     // 回测配置（与个股页一致）
     const startDate = document.getElementById('btStartDate')?.value || '';
