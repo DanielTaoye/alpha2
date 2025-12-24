@@ -332,47 +332,46 @@ class CRPointService:
                                     last_valid_point_date is not None and
                                     (kline.time.date() - last_valid_point_date.date()).days == 1)
                 has_prev_valid_c = (last_valid_point_type == 'C')
-                # 近6个交易日内是否有“乖离率偏离”触发的R
+                # 近6个交易日内是否有“乖离率偏离”触发的R（用于策略2扣43分）
+                # 说明：这里直接基于 kline_data 的索引取“前6个交易日”（不含当日），避免依赖额外的交易日缓存/DB查询。
                 prev_day_deviation_r = False
                 window_dates_for_r = set()
                 try:
-                    prev_dates_for_r = self._get_previous_trading_dates_from_cache(kline.time.strftime('%Y-%m-%d'))
-                    window_dates_for_r = set(prev_dates_for_r[:6])
+                    start_idx = max(0, index - 6)
+                    for j in range(start_idx, index):  # 不含当日
+                        window_dates_for_r.add(kline_data[j].time.strftime('%Y-%m-%d'))
                 except Exception:
                     window_dates_for_r = set()
-                if not window_dates_for_r and stock_code:
-                    try:
-                        alt_prev_dates = self._get_previous_trading_dates(stock_code, kline.time, 6)
-                        window_dates_for_r = set(alt_prev_dates)
-                    except Exception:
-                        window_dates_for_r = set()
                 
                 if window_dates_for_r:
-                    for rp in reversed(r_points):
-                        r_date = getattr(rp, "trigger_date", None)
-                        if not r_date:
-                            continue
-                        r_date_date = r_date.date() if hasattr(r_date, "date") else None
-                        if r_date_date is None:
-                            continue
-                        if r_date.strftime('%Y-%m-%d') not in window_dates_for_r:
-                            # 历史列表按时间升序传入，倒序到更早即可跳出
-                            if r_date_date < kline.time.date():
-                                # 若日期已小于最早窗口则可继续，但不能break，因为window_dates_for_r可能不排序。
-                                pass
-                            continue
-                        plugins = getattr(rp, "plugins", None) or []
-                        for plugin in plugins:
-                            try:
-                                name = plugin.get("pluginName") or plugin.get("plugin_name")
-                                triggered = plugin.get("triggered", False)
-                                if triggered and name == "乖离率偏离":
-                                    prev_day_deviation_r = True
-                                    break
-                            except Exception:
+                    # 既检查“有效R点”，也检查“被CR关系否决的R点”（R_REJECTED）
+                    # 因为业务上“出现过乖离率偏离触发的R”即应触发扣分。
+                    def _scan_points(points) -> bool:
+                        for rp in reversed(points):
+                            r_date = getattr(rp, "trigger_date", None)
+                            if not r_date:
                                 continue
-                        if prev_day_deviation_r:
-                            break
+                            r_date_str = r_date.strftime('%Y-%m-%d') if hasattr(r_date, "strftime") else str(r_date)[:10]
+                            if r_date_str not in window_dates_for_r:
+                                continue
+                            plugins = getattr(rp, "plugins", None) or []
+                            for plugin in plugins:
+                                try:
+                                    name = plugin.get("pluginName") or plugin.get("plugin_name") or ""
+                                    triggered = plugin.get("triggered", True)  # 若缺失triggered字段，默认视为触发
+                                    reason_txt = plugin.get("reason") or ""
+                                    if triggered and ("乖离率偏离" in name or "乖离率偏离" in reason_txt):
+                                        return True
+                                except Exception:
+                                    continue
+                        return False
+
+                    prev_day_deviation_r = _scan_points(r_points)
+                    if not prev_day_deviation_r:
+                        rejected_r_points = [p for p in rejected_c_points if getattr(p, "point_type", "") == "R_REJECTED"]
+                        prev_day_deviation_r = _scan_points(rejected_r_points)
+
+                # 已完成窗口扫描，无需额外处理
                 
                 # 近4个交易日窗口（含当日）
                 window_dates = set()
