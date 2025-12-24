@@ -5,6 +5,15 @@ let allStockGroups = {};
 let isRunning = false;
 let importedStocksCache = [];
 
+function clampInt(v, min, max, fallback) {
+    const n = Number.parseInt(String(v), 10);
+    if (Number.isNaN(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+}
+
+// 旧版：前端并发跑每只股票的 cr_analysis/backtest
+// 现已改为“后端批处理任务”，保留 backtestSingleStock 仅用于调试单股
+
 // fetch with timeout (ms)
 async function fetchWithTimeout(url, options = {}, timeout = 20000) {
     const controller = new AbortController();
@@ -15,6 +24,25 @@ async function fetchWithTimeout(url, options = {}, timeout = 20000) {
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function fetchJsonWithRetry(url, options, timeoutMs, retries = 1) {
+    let lastErr = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const resp = await fetchWithTimeout(url, options, timeoutMs);
+            return resp;
+        } catch (err) {
+            lastErr = err;
+            // 超时/网络抖动：做一次退避重试，避免“并发瞬间排队”导致全灭
+            if (err && err.name === 'AbortError' && attempt < retries) {
+                await sleep(800 * (attempt + 1));
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw lastErr;
 }
 
 async function readCsvStocks(file) {
@@ -177,6 +205,7 @@ async function startBatchBacktest() {
 
     const strategySelect = document.getElementById('strategySelect');
     const strategy = strategySelect.value;
+    const concurrency = clampInt(document.getElementById('btConcurrency')?.value, 1, 12, 4);
 
     // 回测配置（与个股页一致）
     const startDate = document.getElementById('btStartDate')?.value || '';
@@ -230,53 +259,63 @@ async function startBatchBacktest() {
     runBtn.disabled = true;
     runBtn.innerHTML = '<span class="loading-spinner"></span> 回测中...';
     
-    // 执行批量回测
-    const results = [];
+    // 执行批量回测（推荐：由后端统一调度，前端只轮询进度，避免前端高并发/大量HTTP请求）
     let successCount = 0;
     let failCount = 0;
-    
-    for (let i = 0; i < selectedStocks.length; i++) {
-        const stock = selectedStocks[i];
-        const progress = ((i + 1) / selectedStocks.length * 100).toFixed(1);
-        
-        updateProgress(progress, `正在回测: ${stock.name} (${stock.code}) - ${i + 1}/${selectedStocks.length}`);
-        
-        try {
-            const nature = strategy || '波段';
-            const result = await backtestSingleStock(stock, nature, backtestConfig);
-            if (result.success) {
-                successCount++;
-                results.push({
-                    stock: stock,
-                    data: result.data,
-                    success: true
-                });
-            } else {
-                failCount++;
-                results.push({
-                    stock: stock,
-                    error: result.message,
-                    success: false
-                });
-            }
-        } catch (error) {
-            failCount++;
-            results.push({
-                stock: stock,
-                error: error.message,
-                success: false
-            });
+    let skippedCount = 0;
+
+    const nature = strategy || '波段';
+    const startResp = await fetchJsonWithRetry(`${API_BASE_URL}/batch_backtest/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            stocks: selectedStocks,
+            stockNature: nature,
+            period: 'day',
+            concurrency,
+            backtestConfig
+        })
+    }, 60000, 0);
+
+    const startJson = await startResp.json();
+    if (!startJson || startJson.code !== 200 || !startJson.data || !startJson.data.jobId) {
+        throw new Error(startJson?.message || '启动批量回测失败');
+    }
+
+    const jobId = startJson.data.jobId;
+
+    // 轮询任务状态
+    let results = [];
+    while (true) {
+        await sleep(800);
+        const stResp = await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/status/${jobId}`, {}, 20000);
+        const stJson = await stResp.json();
+        if (!stJson || stJson.code !== 200) {
+            continue;
         }
-        
-        // 避免请求过快
-        await sleep(100);
+        const st = stJson.data || {};
+        const finished = st.finished || 0;
+        const total = st.total || selectedStocks.length;
+        const progress = total > 0 ? ((finished) / total * 100).toFixed(1) : '0.0';
+        updateProgress(progress, `后端任务处理中：已完成 ${finished}/${total}（并发=${concurrency}）`);
+
+        if (Array.isArray(st.results)) {
+            results = st.results.filter(Boolean);
+        }
+
+        if (st.done) {
+            successCount = st.success || 0;
+            failCount = st.failed || 0;
+            skippedCount = st.skipped || 0;
+            break;
+        }
     }
     
     // 隐藏进度条
     progressContainer.style.display = 'none';
     
     // 显示结果
-    displayResults(results, successCount, failCount);
+    displayResults(results, successCount, failCount, skippedCount);
     
     // 恢复按钮
     runBtn.disabled = false;
@@ -286,10 +325,14 @@ async function startBatchBacktest() {
     updateStatus(true, '回测完成');
 }
 
-// 回测单个股票
+// 回测单个股票（调试用：批量回测已改为后端任务）
 async function backtestSingleStock(stock, stockNature, backtestConfig) {
     try {
         console.log('开始回测股票:', stock.code, stock.name);
+
+        // 批量场景：接口计算时间可能明显 > 20s（尤其是排队/单线程后端）
+        // 这里统一把单请求超时拉长，减少误判
+        const requestTimeoutMs = 60000;
         
         // 首先获取CR点数据
         const requestBody = {
@@ -297,18 +340,21 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
             stockName: stock.name,
             tableName: stock.table_name,
             period: 'day',
-            stockNature: stockNature
+            stockNature: stockNature,
+            // 传给后端用于按区间截断K线范围，加速 /cr_analysis
+            startDate: backtestConfig?.startDate || null,
+            endDate: backtestConfig?.endDate || null
         };
         
         console.log('CR分析请求参数:', requestBody);
         
-        const crResponse = await fetchWithTimeout(`${API_BASE_URL}/cr_analysis`, {
+        const crResponse = await fetchJsonWithRetry(`${API_BASE_URL}/cr_analysis`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(requestBody)
-        }, 20000);
+        }, requestTimeoutMs, 1);
         
         console.log('CR分析响应状态:', crResponse.status, crResponse.statusText);
         
@@ -340,13 +386,14 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         if (mergedCPoints.length === 0) {
             console.warn('没有C点数据，跳过回测');
             return {
-                success: false,
-                message: '没有C点数据'
+                success: true,
+                skipped: true,
+                message: '没有C点数据(已跳过)'
             };
         }
         
         // 执行回测
-        const backtestResponse = await fetchWithTimeout(`${API_BASE_URL}/backtest`, {
+        const backtestResponse = await fetchJsonWithRetry(`${API_BASE_URL}/backtest`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -358,7 +405,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
                 rPoints: rPoints,
                 backtestConfig
             })
-        }, 20000);
+        }, requestTimeoutMs, 1);
         
         // 检查响应是否是JSON
         const contentType2 = backtestResponse.headers.get('content-type');
@@ -374,12 +421,14 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
             const tradesArr = backtestResult.data && Array.isArray(backtestResult.data.trades) ? backtestResult.data.trades : [];
             if (!tradesArr.length) {
                 return {
-                    success: false,
-                    message: '无CR配对，已跳过'
+                    success: true,
+                    skipped: true,
+                    message: '无CR配对(已跳过)'
                 };
             }
             return {
                 success: true,
+                skipped: false,
                 data: backtestResult.data
             };
         } else {
@@ -394,7 +443,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         if (error.name === 'AbortError') {
             return {
                 success: false,
-                message: '接口超时(20s)'
+                message: '接口超时(60s)'
             };
         }
         return {
@@ -415,7 +464,7 @@ function updateProgress(percent, text) {
 }
 
 // 显示结果
-function displayResults(results, successCount, failCount) {
+function displayResults(results, successCount, failCount, skippedCount = 0) {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'block';
     
@@ -452,6 +501,11 @@ function displayResults(results, successCount, failCount) {
     document.getElementById('avgWinRate').textContent = avgWinRate + '%';
     document.getElementById('successCount').textContent = successCount;
     document.getElementById('failCount').textContent = failCount;
+    // 复用“失败股票数”卡片的 title 不改UI结构：在数字后面附带跳过数（避免大改页面）
+    const failEl = document.getElementById('failCount');
+    if (failEl && skippedCount > 0) {
+        failEl.textContent = `${failCount}（跳过${skippedCount}）`;
+    }
     document.getElementById('avgHoldingDaysStocks').textContent = `${avgHoldingDaysStocks}天`;
     
     // 填充表格
@@ -461,7 +515,16 @@ function displayResults(results, successCount, failCount) {
     results.forEach((result, index) => {
         const row = document.createElement('tr');
         
-        if (result.success && result.data && result.data.summary) {
+        if (result.success && result.skipped) {
+            const cells = [
+                index + 1,
+                result.stock?.code || '未知',
+            ];
+            row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('') +
+                `<td colspan="8" style="color: #999;">
+                    <span style="color: #f39c12; font-weight: bold;">⏭ 跳过</span> - ${result.message || '无可回测的CR配对'}
+                </td>`;
+        } else if (result.success && result.data && result.data.summary) {
             const summary = result.data.summary;
             const totalReturn = summary.total_return || 0;
             const avgReturn = summary.avg_return || 0;

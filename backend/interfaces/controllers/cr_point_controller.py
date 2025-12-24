@@ -52,6 +52,8 @@ class CRPointController:
             table_name = data.get('tableName')
             period = data.get('period', 'day')
             stock_nature = data.get('stockNature') or data.get('stock_nature')
+            start_date_str = (data.get('startDate') or '').strip() or None
+            end_date_str = (data.get('endDate') or '').strip() or None
             
             if not stock_code:
                 return jsonify(ResponseBuilder.error('股票代码不能为空')), 400
@@ -63,7 +65,37 @@ class CRPointController:
             
             # 🔥 获取K线数据及技术指标（排除今天的数据，只计算历史）
             t_kline_0 = perf_counter()
-            result = self.kline_service.get_kline_data(table_name, period, exclude_today=True)
+            # 批量回测性能优化：如果传入 startDate/endDate，则只取区间数据（并往前补一段缓冲用于指标/插件）
+            # 说明：缓冲天数越大越准但越慢；这里取180天在速度和稳定性之间折中
+            from datetime import datetime, timedelta
+            start_dt = None
+            end_dt = None
+            limit = 2000
+            try:
+                if end_date_str:
+                    end_dt = datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1) - timedelta(seconds=1)
+                if start_date_str:
+                    raw_start = datetime.strptime(start_date_str, '%Y-%m-%d')
+                    start_dt = raw_start - timedelta(days=180)
+                    # 按范围动态调高limit，避免范围稍大时被2000截断
+                    if end_dt:
+                        span_days = max(1, int((end_dt - start_dt).days) + 1)
+                        limit = min(8000, max(800, span_days))
+                    else:
+                        limit = 4000
+            except Exception:
+                start_dt = None
+                end_dt = None
+                limit = 2000
+
+            result = self.kline_service.get_kline_data(
+                table_name,
+                period,
+                exclude_today=True,
+                start_date=start_dt,
+                end_date=end_dt,
+                limit=limit,
+            )
             t_kline_1 = perf_counter()
             kline_data_list = result.get('kline_data', [])
             macd_data = result.get('macd', {})

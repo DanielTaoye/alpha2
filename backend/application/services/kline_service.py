@@ -18,7 +18,15 @@ class KLineApplicationService:
         self.macd_service = MACDService()
         self.ma_service = MAService()
     
-    def get_kline_data(self, table_name: str, period_type: str, exclude_today: bool = False) -> Dict[str, any]:
+    def get_kline_data(
+        self,
+        table_name: str,
+        period_type: str,
+        exclude_today: bool = False,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 2000,
+    ) -> Dict[str, any]:
         """
         获取K线数据及技术指标
         
@@ -30,16 +38,18 @@ class KLineApplicationService:
         Returns:
             包含K线数据和技术指标的字典
         """
-        # 根据周期类型计算时间范围
-        days = PeriodService.get_time_range_days(period_type)
-        start_date = datetime.now() - timedelta(days=days)
+        # 根据周期类型计算时间范围（允许外部指定start/end覆盖，便于批量回测按区间提速）
+        if start_date is None:
+            days = PeriodService.get_time_range_days(period_type)
+            start_date = datetime.now() - timedelta(days=days)
         
         # 获取数据
         kline_list = self.kline_repository.get_kline_data(
             table_name=table_name,
             period_type=period_type,
             start_date=start_date,
-            limit=2000
+            end_date=end_date,
+            limit=limit
         )
         
         # 🔥 如果需要排除今天，过滤掉今天的数据
@@ -48,6 +58,10 @@ class KLineApplicationService:
             today = date.today()
             kline_list = [k for k in kline_list if k.time.date() < today]
             logger.info(f"排除今天的数据后，剩余 {len(kline_list)} 条K线数据")
+
+        # 如果指定了end_date，额外做一次兜底过滤（避免数据库时区/类型导致边界误差）
+        if end_date is not None and kline_list:
+            kline_list = [k for k in kline_list if k.time <= end_date]
         
         # 转换为字典列表
         kline_data = [kline.to_dict() for kline in kline_list]

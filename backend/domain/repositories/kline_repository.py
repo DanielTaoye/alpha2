@@ -9,8 +9,14 @@ class IKLineRepository(ABC):
     """K线数据仓储接口"""
     
     @abstractmethod
-    def get_kline_data(self, table_name: str, period_type: str, 
-                      start_date: datetime, limit: int = 2000) -> List[KLineData]:
+    def get_kline_data(
+        self,
+        table_name: str,
+        period_type: str,
+        start_date: datetime,
+        end_date: Optional[datetime] = None,
+        limit: int = 2000
+    ) -> List[KLineData]:
         """
         获取K线数据
         
@@ -18,6 +24,7 @@ class IKLineRepository(ABC):
             table_name: 表名
             period_type: 周期类型
             start_date: 开始日期
+            end_date: 结束日期（可选）
             limit: 数据条数限制
             
         Returns:

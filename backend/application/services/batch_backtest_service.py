@@ -1,0 +1,308 @@
+"""批量回测服务：后端统一调度 CR分析 + 回测，并提供任务进度查询
+
+设计目标：
+- 前端只发一次“股票列表+参数”，避免前端高并发打爆后端/数据库
+- 后端在后台线程执行，前端轮询任务进度
+- 结果结构尽量复用现有前端展示（success/skipped/data/summary/message）
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+from datetime import datetime, timedelta
+from threading import Lock, Thread
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from infrastructure.logging.logger import get_logger
+from application.services.kline_service import KLineApplicationService
+from application.services.cr_point_service import CRPointService
+from application.services.backtest_service import BacktestService
+from infrastructure.persistence.kline_repository_impl import KLineRepositoryImpl
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class BatchJobStatus:
+    job_id: str
+    created_at: str
+    updated_at: str
+    done: bool
+    cancelled: bool
+    total: int
+    finished: int
+    success: int
+    failed: int
+    skipped: int
+    message: str
+    results: List[Dict[str, Any]]
+
+
+class BatchBacktestService:
+    """管理批量回测任务（内存态，重启服务后任务会丢失）"""
+
+    _lock = Lock()
+    _jobs: Dict[str, BatchJobStatus] = {}
+    _cancel_flags: Dict[str, bool] = {}
+
+    @classmethod
+    def start_job(
+        cls,
+        stocks: List[Dict[str, Any]],
+        stock_nature: str,
+        backtest_config: Dict[str, Any],
+        period: str = "day",
+        concurrency: int = 2,
+    ) -> str:
+        job_id = uuid4().hex
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = BatchJobStatus(
+            job_id=job_id,
+            created_at=now,
+            updated_at=now,
+            done=False,
+            cancelled=False,
+            total=len(stocks),
+            finished=0,
+            success=0,
+            failed=0,
+            skipped=0,
+            message="running",
+            results=[{} for _ in range(len(stocks))],
+        )
+        with cls._lock:
+            cls._jobs[job_id] = status
+            cls._cancel_flags[job_id] = False
+
+        t = Thread(
+            target=cls._run_job,
+            args=(job_id, stocks, stock_nature, backtest_config, period, concurrency),
+            daemon=True,
+        )
+        t.start()
+        return job_id
+
+    @classmethod
+    def cancel_job(cls, job_id: str) -> bool:
+        with cls._lock:
+            if job_id not in cls._jobs:
+                return False
+            cls._cancel_flags[job_id] = True
+            return True
+
+    @classmethod
+    def get_status(cls, job_id: str) -> Optional[Dict[str, Any]]:
+        with cls._lock:
+            st = cls._jobs.get(job_id)
+            if not st:
+                return None
+            return asdict(st)
+
+    @classmethod
+    def _set_status(cls, job_id: str, **kwargs):
+        with cls._lock:
+            st = cls._jobs.get(job_id)
+            if not st:
+                return
+            for k, v in kwargs.items():
+                setattr(st, k, v)
+            st.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @classmethod
+    def _is_cancelled(cls, job_id: str) -> bool:
+        with cls._lock:
+            return bool(cls._cancel_flags.get(job_id, False))
+
+    @classmethod
+    def _run_job(
+        cls,
+        job_id: str,
+        stocks: List[Dict[str, Any]],
+        stock_nature: str,
+        backtest_config: Dict[str, Any],
+        period: str,
+        concurrency: int,
+    ):
+        try:
+            conc = max(1, min(int(concurrency or 1), 8))
+            logger.info(f"[batch_backtest] job={job_id} start, total={len(stocks)}, concurrency={conc}")
+
+            def worker(idx_stock):
+                idx, stock = idx_stock
+                if cls._is_cancelled(job_id):
+                    return idx, {
+                        "stock": stock,
+                        "success": True,
+                        "skipped": True,
+                        "message": "已取消(未执行)",
+                    }
+                return idx, cls._run_single(stock, stock_nature, backtest_config, period)
+
+            finished = 0
+            succ = 0
+            fail = 0
+            skip = 0
+            results = [None for _ in range(len(stocks))]
+
+            with ThreadPoolExecutor(max_workers=conc) as ex:
+                futures = [ex.submit(worker, (i, s)) for i, s in enumerate(stocks)]
+                for fut in as_completed(futures):
+                    idx, res = fut.result()
+                    results[idx] = res
+                    finished += 1
+                    if res.get("success") and res.get("skipped"):
+                        skip += 1
+                    elif res.get("success"):
+                        succ += 1
+                    else:
+                        fail += 1
+                    cls._set_status(
+                        job_id,
+                        finished=finished,
+                        success=succ,
+                        failed=fail,
+                        skipped=skip,
+                        results=results,
+                        message="running",
+                    )
+                    if cls._is_cancelled(job_id):
+                        break
+
+            cancelled = cls._is_cancelled(job_id)
+            cls._set_status(
+                job_id,
+                done=True,
+                cancelled=cancelled,
+                message="cancelled" if cancelled else "done",
+                results=results,
+            )
+            logger.info(f"[batch_backtest] job={job_id} done, finished={finished}, success={succ}, failed={fail}, skipped={skip}, cancelled={cancelled}")
+        except Exception as e:
+            logger.error(f"[batch_backtest] job={job_id} crashed: {e}", exc_info=True)
+            cls._set_status(job_id, done=True, message=f"error: {e}")
+
+    @staticmethod
+    def _parse_date_range(backtest_config: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+        start_date = (backtest_config.get("startDate") or "").strip() or None
+        end_date = (backtest_config.get("endDate") or "").strip() or None
+        return start_date, end_date
+
+    @classmethod
+    def _run_single(
+        cls,
+        stock: Dict[str, Any],
+        stock_nature: str,
+        backtest_config: Dict[str, Any],
+        period: str,
+    ) -> Dict[str, Any]:
+        stock_code = stock.get("code") or stock.get("stockCode") or stock.get("stock_code")
+        stock_name = stock.get("name") or stock.get("stockName") or ""
+        table_name = stock.get("table_name") or stock.get("tableName")
+
+        if not stock_code or not table_name:
+            return {"stock": stock, "success": False, "message": "缺少股票代码或表名"}
+
+        # 为了线程安全：每个任务都创建独立实例（CRPointService 内部有缓存）
+        kline_service = KLineApplicationService(KLineRepositoryImpl())
+        cr_service = CRPointService()
+        backtest_service = BacktestService()
+
+        start_date_str, end_date_str = cls._parse_date_range(backtest_config)
+
+        # 复用 controller 的“区间 + 缓冲”逻辑：只取区间数据，避免全量重算
+        start_dt = None
+        end_dt = None
+        limit = 2000
+        try:
+            if end_date_str:
+                end_dt = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+            if start_date_str:
+                raw_start = datetime.strptime(start_date_str, "%Y-%m-%d")
+                start_dt = raw_start - timedelta(days=180)
+                if end_dt:
+                    span_days = max(1, int((end_dt - start_dt).days) + 1)
+                    limit = min(8000, max(800, span_days))
+                else:
+                    limit = 4000
+        except Exception:
+            start_dt = None
+            end_dt = None
+            limit = 2000
+
+        # 1) 取K线 + 指标
+        kl = kline_service.get_kline_data(
+            table_name=table_name,
+            period_type=period,
+            exclude_today=True,
+            start_date=start_dt,
+            end_date=end_dt,
+            limit=limit,
+        )
+        kline_list = kl.get("kline_data") or []
+        if not kline_list:
+            return {"stock": stock, "success": False, "message": "K线数据为空"}
+
+        macd_data = kl.get("macd") or {}
+        ma_data = kl.get("ma") or {}
+
+        # 2) 转KLineData对象
+        from domain.models.kline import KLineData
+
+        kline_objects: List[KLineData] = []
+        for k in kline_list:
+            try:
+                kline_objects.append(
+                    KLineData(
+                        time=datetime.strptime(k["time"], "%Y-%m-%d %H:%M:%S"),
+                        open=k["open"],
+                        high=k["high"],
+                        low=k["low"],
+                        close=k["close"],
+                        volume=k["volume"],
+                        liangbi=k.get("liangbi", 0),
+                        weibi=k.get("weibi", 0),
+                    )
+                )
+            except Exception:
+                continue
+
+        # 3) CR分析（返回 dict，包含 c_points/r_points/strategy2_c_points）
+        cr = cr_service.analyze_cr_points(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            kline_data=kline_objects,
+            ma_data=ma_data,
+            macd_data=macd_data,
+            volume_types=None,
+            bullish_patterns=None,
+            stock_nature=stock_nature,
+        )
+
+        c_points = cr.get("c_points") or []
+        c_points_s2 = cr.get("strategy2_c_points") or []
+        merged_c = list(c_points) + list(c_points_s2)
+        r_points = cr.get("r_points") or []
+
+        if not merged_c:
+            return {"stock": stock, "success": True, "skipped": True, "message": "没有C点(已跳过)"}
+
+        # 4) 回测
+        bt = backtest_service.calculate_backtest(
+            stock_code=stock_code,
+            table_name=table_name,
+            c_points=merged_c,
+            r_points=r_points,
+            backtest_config=backtest_config,
+        )
+        if not bt.get("success"):
+            return {"stock": stock, "success": False, "message": bt.get("message") or "回测失败"}
+
+        trades = bt.get("trades") or []
+        if not trades:
+            return {"stock": stock, "success": True, "skipped": True, "message": "无CR配对(已跳过)"}
+
+        return {"stock": stock, "success": True, "skipped": False, "data": bt}
+
+

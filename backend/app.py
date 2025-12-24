@@ -19,6 +19,7 @@ from interfaces.controllers.cr_point_controller import CRPointController
 from interfaces.controllers.daily_chance_controller import DailyChanceController
 from interfaces.controllers.config_controller import ConfigController
 from interfaces.controllers.backtest_controller import BacktestController
+from interfaces.controllers.batch_backtest_controller import BatchBacktestController
 from interfaces.controllers.latest_cr_point_controller import LatestCRPointController
 from interfaces.controllers.cache_controller import CacheController
 from interfaces.controllers.high_score_controller import HighScoreController
@@ -40,6 +41,7 @@ cr_point_controller = CRPointController()
 daily_chance_controller = DailyChanceController()
 config_controller = ConfigController()
 backtest_controller = BacktestController()
+batch_backtest_controller = BatchBacktestController()
 latest_cr_point_controller = LatestCRPointController()
 cache_controller = CacheController()
 high_score_controller = HighScoreController()
@@ -254,6 +256,28 @@ def run_backtest():
     return backtest_controller.run_backtest()
 
 
+@app.route('/api/batch_backtest/start', methods=['POST', 'OPTIONS'])
+def batch_backtest_start():
+    """启动批量回测（后端后台任务）"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    return batch_backtest_controller.start()
+
+
+@app.route('/api/batch_backtest/status/<job_id>', methods=['GET'])
+def batch_backtest_status(job_id: str):
+    """查询批量回测任务状态"""
+    return batch_backtest_controller.status(job_id)
+
+
+@app.route('/api/batch_backtest/cancel/<job_id>', methods=['POST', 'OPTIONS'])
+def batch_backtest_cancel(job_id: str):
+    """取消批量回测任务"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    return batch_backtest_controller.cancel(job_id)
+
+
 if __name__ == '__main__':
     logger.info("=" * 50)
     logger.info("阿尔法策略2.0系统启动")
@@ -315,7 +339,8 @@ if __name__ == '__main__':
         app.run(
             host=SERVER_CONFIG['host'],
             port=SERVER_CONFIG['port'],
-            debug=SERVER_CONFIG['debug']
+            debug=SERVER_CONFIG['debug'],
+            threaded=True
         )
     except Exception as e:
         logger.error(f"应用启动失败: {str(e)}", exc_info=True)

@@ -304,6 +304,18 @@
             </div>
 
             <div class="control-row">
+                <label class="control-label">并发数:</label>
+                <select class="strategy-select" id="btConcurrency" style="max-width: 280px;">
+                    <option value="1">1（串行，最稳）</option>
+                    <option value="2" selected>2（推荐）</option>
+                    <option value="4">4</option>
+                    <option value="6">6</option>
+                    <option value="8">8（可能压垮后端/数据库）</option>
+                </select>
+                <span style="color:#666; font-size:14px;">建议先用2，稳定后再逐步调大</span>
+            </div>
+
+            <div class="control-row">
                 <button class="run-btn" id="runBtn" onclick="startBatchBacktest()">
                     🚀 开始批量回测
                 </button>
@@ -391,7 +403,7 @@
         <p>© 2025 阿尔法策略2.0系统 | 数据仅供参考，不构成投资建议</p>
     </div>
 
-    <script src="js/batch_backtest.js"></script>
+    <script src="js/batch_backtest.js?v=20251224-1"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </body>
 </html>

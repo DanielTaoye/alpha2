@@ -13,7 +13,7 @@ class KLineRepositoryImpl(IKLineRepository):
     """K线数据仓储实现"""
     
     def get_kline_data(self, table_name: str, period_type: str, 
-                      start_date: datetime, limit: int = 2000) -> List[KLineData]:
+                      start_date: datetime, end_date: Optional[datetime] = None, limit: int = 2000) -> List[KLineData]:
         """获取K线数据"""
         period_code = PeriodService.get_period_code(period_type)
         
@@ -21,16 +21,28 @@ class KLineRepositoryImpl(IKLineRepository):
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
         try:
-            query = f"""
-                SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
-                       cheng_jiao_liang, liang_bi, wei_bi
-                FROM {table_name}
-                WHERE peroid_type = %s AND shi_jian >= %s
-                ORDER BY shi_jian DESC
-                LIMIT %s
-            """
-            
-            cursor.execute(query, (period_code, start_date, limit))
+            if end_date is None:
+                query = f"""
+                    SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
+                           cheng_jiao_liang, liang_bi, wei_bi
+                    FROM {table_name}
+                    WHERE peroid_type = %s AND shi_jian >= %s
+                    ORDER BY shi_jian DESC
+                    LIMIT %s
+                """
+                cursor.execute(query, (period_code, start_date, limit))
+            else:
+                query = f"""
+                    SELECT shi_jian, kai_pan_jia, zui_gao_jia, zui_di_jia, shou_pan_jia, 
+                           cheng_jiao_liang, liang_bi, wei_bi
+                    FROM {table_name}
+                    WHERE peroid_type = %s
+                      AND shi_jian >= %s
+                      AND shi_jian <= %s
+                    ORDER BY shi_jian DESC
+                    LIMIT %s
+                """
+                cursor.execute(query, (period_code, start_date, end_date, limit))
             results = cursor.fetchall()
             
             # 反转顺序，从旧到新
