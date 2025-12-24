@@ -525,7 +525,7 @@ class RPointPluginService:
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
-            amplitude_threshold = 5  # 临时统一降至5%
+            amplitude_threshold = 6 if is_main_board else 8
             decline_threshold = 3 if is_main_board else 5
             distance_threshold = self.config_service.get_pressure_stagnation_distance_threshold() or 8.0
             
@@ -2112,8 +2112,8 @@ class RPointPluginService:
         # C: 下影线 = min(开盘价, 收盘价) - 最低价
         C_shadow = min(O, C) - L
         
-        # 临时下调空头分歧K线的振幅门槛到 5%
-        amplitude_threshold = 5
+        # 振幅门槛：主板6%，非主板8%
+        amplitude_threshold = 6 if is_main_board else 8
 
         # 1. 冲高回落阳线（需要振幅>6%/8% -> 5% 临时调整）
         if self._check_bullish_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
@@ -2167,7 +2167,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 5  # 临时统一降至5%
+        amplitude_threshold = 6 if is_main_board else 8
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2194,7 +2194,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 5  # 临时统一降至5%
+        amplitude_threshold = 6 if is_main_board else 8
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2221,7 +2221,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 5  # 临时统一降至5%
+        amplitude_threshold = 6 if is_main_board else 8
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2247,7 +2247,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 5  # 临时统一降至5%
+        amplitude_threshold = 6 if is_main_board else 8
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2273,7 +2273,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 5  # 临时统一降至5%
+        amplitude_threshold = 6 if is_main_board else 8
         if amplitude <= amplitude_threshold:
             return False
         
