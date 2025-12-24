@@ -549,47 +549,55 @@ class CPointPluginService:
         插件5: 乖离率R后不发C（减分）
         
         条件：
-        1. 前一个交易日出现有效R点
+        1. 近6个交易日内出现有效R点
         2. 该R点由“乖离率偏离”插件触发
         
-        结果：策略1当日C分数扣43分（全部股性适用）
+        结果：策略1/策略2当日C分数扣43分（全部股性适用）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
             if not prev_dates and stock_code:
-                prev_dates = self._get_previous_trading_dates(stock_code, date, 1)
+                prev_dates = self._get_previous_trading_dates(stock_code, date, 6)
             if not prev_dates:
                 return CPointPluginResult("乖离率R后不发C", False, 0, "")
             
-            prev_trading_date = prev_dates[0]
-            last_r_point = None
-            for r_point in reversed(historical_r_points):
-                r_date = getattr(r_point, "trigger_date", None)
-                if not r_date:
-                    continue
-                r_date_str = r_date.strftime('%Y-%m-%d') if isinstance(r_date, datetime) else str(r_date)
-                if r_date_str == prev_trading_date:
-                    last_r_point = r_point
-                    break
-                # 历史列表按时间升序传入，倒序查找到更早日期可提前结束
-                if r_date_str < prev_trading_date:
-                    break
-            
-            if not last_r_point:
-                return CPointPluginResult("乖离率R后不发C", False, 0, "")
-            
-            plugins = getattr(last_r_point, "plugins", None) or []
+            # 近6个交易日（含最近的前一交易日）
+            check_dates = prev_dates[:6]
             deviation_reason = ""
-            for plugin in plugins:
-                try:
-                    name = plugin.get("pluginName") or plugin.get("plugin_name")
-                    triggered = plugin.get("triggered", False)
-                    if triggered and name == "乖离率偏离":
-                        deviation_reason = plugin.get("reason") or ""
+            hit_r_date = None
+            
+            for target_date in check_dates:
+                last_r_point = None
+                for r_point in reversed(historical_r_points):
+                    r_date = getattr(r_point, "trigger_date", None)
+                    if not r_date:
+                        continue
+                    r_date_str = r_date.strftime('%Y-%m-%d') if isinstance(r_date, datetime) else str(r_date)
+                    if r_date_str == target_date:
+                        last_r_point = r_point
                         break
-                except Exception:
+                    # 历史列表按时间升序传入，倒序查找到更早日期可提前结束
+                    if r_date_str < target_date:
+                        break
+                
+                if not last_r_point:
                     continue
+                
+                plugins = getattr(last_r_point, "plugins", None) or []
+                for plugin in plugins:
+                    try:
+                        name = plugin.get("pluginName") or plugin.get("plugin_name")
+                        triggered = plugin.get("triggered", False)
+                        if triggered and name == "乖离率偏离":
+                            deviation_reason = plugin.get("reason") or ""
+                            hit_r_date = target_date
+                            break
+                    except Exception:
+                        continue
+                
+                if deviation_reason:
+                    break
             
             if not deviation_reason:
                 return CPointPluginResult("乖离率R后不发C", False, 0, "")
@@ -598,7 +606,7 @@ class CPointPluginService:
                 "乖离率R后不发C",
                 True,
                 -43,
-                f"昨日R由乖离率偏离触发: {deviation_reason}"
+                f"近6日内R({hit_r_date})由乖离率偏离触发: {deviation_reason}"
             )
         
         except Exception as e:

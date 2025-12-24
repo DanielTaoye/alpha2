@@ -332,23 +332,46 @@ class CRPointService:
                                     last_valid_point_date is not None and
                                     (kline.time.date() - last_valid_point_date.date()).days == 1)
                 has_prev_valid_c = (last_valid_point_type == 'C')
+                # 近6个交易日内是否有“乖离率偏离”触发的R
                 prev_day_deviation_r = False
-                if has_prev_valid_r and last_valid_point_date is not None:
+                window_dates_for_r = set()
+                try:
+                    prev_dates_for_r = self._get_previous_trading_dates_from_cache(kline.time.strftime('%Y-%m-%d'))
+                    window_dates_for_r = set(prev_dates_for_r[:6])
+                except Exception:
+                    window_dates_for_r = set()
+                if not window_dates_for_r and stock_code:
+                    try:
+                        alt_prev_dates = self._get_previous_trading_dates(stock_code, kline.time, 6)
+                        window_dates_for_r = set(alt_prev_dates)
+                    except Exception:
+                        window_dates_for_r = set()
+                
+                if window_dates_for_r:
                     for rp in reversed(r_points):
                         r_date = getattr(rp, "trigger_date", None)
                         if not r_date:
                             continue
-                        if r_date.date() == last_valid_point_date.date():
-                            plugins = getattr(rp, "plugins", None) or []
-                            for plugin in plugins:
-                                try:
-                                    name = plugin.get("pluginName") or plugin.get("plugin_name")
-                                    triggered = plugin.get("triggered", False)
-                                    if triggered and name == "乖离率偏离":
-                                        prev_day_deviation_r = True
-                                        break
-                                except Exception:
-                                    continue
+                        r_date_date = r_date.date() if hasattr(r_date, "date") else None
+                        if r_date_date is None:
+                            continue
+                        if r_date.strftime('%Y-%m-%d') not in window_dates_for_r:
+                            # 历史列表按时间升序传入，倒序到更早即可跳出
+                            if r_date_date < kline.time.date():
+                                # 若日期已小于最早窗口则可继续，但不能break，因为window_dates_for_r可能不排序。
+                                pass
+                            continue
+                        plugins = getattr(rp, "plugins", None) or []
+                        for plugin in plugins:
+                            try:
+                                name = plugin.get("pluginName") or plugin.get("plugin_name")
+                                triggered = plugin.get("triggered", False)
+                                if triggered and name == "乖离率偏离":
+                                    prev_day_deviation_r = True
+                                    break
+                            except Exception:
+                                continue
+                        if prev_day_deviation_r:
                             break
                 
                 # 近4个交易日窗口（含当日）

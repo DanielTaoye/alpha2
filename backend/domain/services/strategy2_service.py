@@ -48,7 +48,7 @@ class Strategy2Service:
             daily_data_30: 前30个交易日数据（用于判断低位）
             index: 当前K线在数据中的索引
             strategy1_reject_by_penalty_plugins: 策略1被减分插件否决（赔率高胜率低/风险K线/不追涨）
-            prev_day_deviation_r: 前一交易日是否为“乖离率偏离”导致的R
+            prev_day_deviation_r: 近6个交易日内是否有“乖离率偏离”触发的R
             
         Returns:
             (是否触发, 总分, 详细原因)
@@ -87,10 +87,10 @@ class Strategy2Service:
         # 从配置读取触发阈值（支持股性）
         threshold = self.config_service.get_strategy2_threshold(stock_nature)
         
-        # 新减分：昨日R由乖离率偏离触发，今日策略2扣43分（全部股性适用）
+        # 新减分：近6日内有乖离率偏离触发的R，今日策略2扣43分（全部股性适用）
         if prev_day_deviation_r:
             total_score -= 43
-            details.append("昨日R因乖离率偏离，策略2扣43分")
+            details.append("近6日有乖离率偏离R，策略2扣43分")
         
         # 情形3：前一日刚发R，且当日原始分数达到阈值，扣45分
         # 先记录未扣前得分用于判断“符合发C条件”

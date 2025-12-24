@@ -109,7 +109,7 @@ class RPointPluginService:
         #     return True, triggered_plugins
         
         # 插件1: 乖离率偏离
-        plugin1 = self._check_deviation(stock_code, date)
+        plugin1 = self._check_deviation(stock_code, date, ma_data, current_index)
         if plugin1.triggered:
             triggered_plugins.append(plugin1)
             logger.info(f"[R点插件-乖离率偏离] {stock_code} {date}: {plugin1.reason}")
@@ -201,17 +201,20 @@ class RPointPluginService:
 
         return False, triggered_plugins
     
-    def _check_deviation(self, stock_code: str, date: datetime) -> RPointPluginResult:
+    def _check_deviation(self, stock_code: str, date: datetime,
+                         ma_data: Optional[dict] = None,
+                         current_index: Optional[int] = None) -> RPointPluginResult:
         """
         插件1: 乖离率偏离
         
-        包含6个子条件：
+        包含7个子条件：
         1. 连续2个以上涨停
         2. 前3日累计涨幅过大
         3. 前5日累计涨幅过大
         4. 连续5连阳+阶段涨幅过大
         5. 前15日累计涨幅过大
         6. 前20日累计涨幅过大
+        7. 当日收盘价相对MA10偏离>15%
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -235,6 +238,21 @@ class RPointPluginService:
             if not current_chance:
                 logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 无daily_chance数据，跳过检查")
                 return RPointPluginResult("乖离率偏离", False, "")
+            
+            # 子条件7：当日收盘价相对MA10偏离>15%
+            if ma_data is not None and current_index is not None:
+                ma10_list = ma_data.get('ma10')
+                if ma10_list is not None and current_index < len(ma10_list):
+                    ma10_today = ma10_list[current_index]
+                    close_price = getattr(current_data, 'close', None)
+                    if ma10_today is not None and ma10_today != 0 and close_price is not None:
+                        deviation = (close_price - ma10_today) / ma10_today
+                        if deviation > 0.15:
+                            return RPointPluginResult(
+                                "乖离率偏离",
+                                True,
+                                f"条件7: 收盘价偏离MA10 {deviation*100:.2f}%>15%"
+                            )
             
             # 获取历史数据（需要至少21个前序交易日，用于“前20日+1”基准价）
             prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
