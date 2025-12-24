@@ -265,11 +265,11 @@ class Strategy2Service:
         """
         计算成交量得分：最高30分
         
-        异常量（EF）任意一种：0分（优先级最高）
-        温和放量（ABCD）任意一种：30分
-        其他特殊型（H）：21分（70%权重）
-        XY型放量：21分（策略2专用）
-        中长线 + S型额外加分：+10
+        规则优先级：
+        - 异常量（E/F）：0分（最高优先级，直接返回）
+        - 温和放量（A/B/C/D）：30分（若同时有S仍为30分）
+        - 特殊型（H）或XY型：21分（若同时有S仍为21分）
+        - 仅有S：10分
         """
         score = 0
         
@@ -291,6 +291,9 @@ class Strategy2Service:
         # XY型放量（策略2专用）
         xy_volume = 'X' in volume_types or 'Y' in volume_types
         
+        # S型
+        s_volume = 'S' in volume_types
+        
         if moderate_volume:
             score = 30
             details.append("成交量30分(温和放量)")
@@ -302,13 +305,9 @@ class Strategy2Service:
                 details.append("成交量21分(H型放量)")
             else:
                 details.append("成交量21分(XY型放量)")
-        
-        # 中长线 + S型成交量加10分（在原有分数基础上累加）
-        if 'S' in volume_types:
-            normalized_nature = stock_nature
-            if normalized_nature in ["长线", "中长", "中长线"]:
-                score += 10
-                details.append("中长线S型成交量+10分")
+        elif s_volume:
+            score = 10
+            details.append("成交量10分(S型)")
         
         return score
     
