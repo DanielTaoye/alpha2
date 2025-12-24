@@ -162,13 +162,14 @@ class Strategy2Service:
         计算均线得分：30分
         条件：
         - 5日 > 10日 > 20日（30分）
-        - 5日 > 20日 > 10日（20分）
+        - 5日 > 20日 > 10日 且 今日MA5>昨日MA5（20分）
         """
         score = 0
         
         ma5_current = ma_data['ma5'][index]
         ma10_current = ma_data['ma10'][index]
         ma20_current = ma_data['ma20'][index]
+        ma5_prev = ma_data['ma5'][index - 1] if index >= 1 else None
         
         # 判断多头排列：5日 > 10日 > 20日
         bullish_alignment = ma5_current > ma10_current and ma10_current > ma20_current
@@ -179,7 +180,8 @@ class Strategy2Service:
         else:
             # 次优排列：5日 > 20日 > 10日
             alt_alignment = ma5_current > ma20_current and ma20_current > ma10_current
-            if alt_alignment:
+            ma5_rising = ma5_prev is not None and ma5_current > ma5_prev
+            if alt_alignment and ma5_rising:
                 score = 20
                 details.append("均线20分(MA5>MA20>MA10)")
         
