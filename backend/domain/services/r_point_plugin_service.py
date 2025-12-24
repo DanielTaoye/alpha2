@@ -239,7 +239,8 @@ class RPointPluginService:
                 logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 无daily_chance数据，跳过检查")
                 return RPointPluginResult("乖离率偏离", False, "")
             
-            # 子条件7：当日收盘价相对MA10偏离>15%
+            # 预计算当日相对MA10的乖离度
+            deviation = None
             if ma_data is not None and current_index is not None:
                 ma10_list = ma_data.get('ma10')
                 if ma10_list is not None and current_index < len(ma10_list):
@@ -247,18 +248,6 @@ class RPointPluginService:
                     close_price = getattr(current_data, 'close', None)
                     if ma10_today is not None and ma10_today != 0 and close_price is not None:
                         deviation = (close_price - ma10_today) / ma10_today
-                        if deviation > 0.15:
-                            return RPointPluginResult(
-                                "乖离率偏离",
-                                True,
-                                f"条件7: 收盘价偏离MA10 {deviation*100:.2f}%>15%"
-                            )
-            
-            # 获取历史数据（需要至少21个前序交易日，用于“前20日+1”基准价）
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            if len(prev_dates) < 21:
-                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足21天({len(prev_dates)}天)")
-                return RPointPluginResult("乖离率偏离", False, "")
             
             # 判断当日是否放量（XYH）或（XYZH）
             is_volume_xyz = self._check_volume_type(current_chance, ['X', 'Y', 'Z'])
@@ -285,6 +274,26 @@ class RPointPluginService:
                         f"is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}, "
                         f"is_bearish_3pct_line={is_bearish_3pct_line}, matched_patterns={matched_patterns}, "
                         f"has_bearish_pattern={has_bearish_pattern}")
+
+            # 子条件7：当日收盘价相对MA10偏离>15%，且放量（XYH）且出现空头分歧K线（振幅>6%/8%）
+            if deviation is not None and deviation > 0.15:
+                if is_volume_xyh and is_bearish_kline_with_amplitude:
+                    return RPointPluginResult(
+                        "乖离率偏离",
+                        True,
+                        f"条件7: 收盘价偏离MA10 {deviation*100:.2f}%>15% 且放量XYH+空头分歧K线"
+                    )
+                else:
+                    logger.debug(
+                        f"[R点-乖离率偏离-条件7未达成] {stock_code} {date_str} deviation={deviation*100:.2f}%, "
+                        f"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}"
+                    )
+
+            # 获取历史数据（需要至少21个前序交易日，用于“前20日+1”基准价）
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            if len(prev_dates) < 21:
+                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足21天({len(prev_dates)}天)")
+                return RPointPluginResult("乖离率偏离", False, "")
             
             # 获取前N日数据
             prev_data_list = []
@@ -516,7 +525,7 @@ class RPointPluginService:
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
-            amplitude_threshold = 6 if is_main_board else 8
+            amplitude_threshold = 5  # 临时统一降至5%
             decline_threshold = 3 if is_main_board else 5
             distance_threshold = self.config_service.get_pressure_stagnation_distance_threshold() or 8.0
             
@@ -2103,23 +2112,26 @@ class RPointPluginService:
         # C: 下影线 = min(开盘价, 收盘价) - 最低价
         C_shadow = min(O, C) - L
         
-        # 1. 冲高回落阳线（需要振幅>6%/8%）
+        # 临时下调空头分歧K线的振幅门槛到 5%
+        amplitude_threshold = 5
+
+        # 1. 冲高回落阳线（需要振幅>6%/8% -> 5% 临时调整）
         if self._check_bullish_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
             matched_patterns.append("冲高回落阳线")
         
-        # 2. 冲高回落阴线（需要振幅>6%/8%）
+        # 2. 冲高回落阴线（需要振幅>6%/8% -> 5% 临时调整）
         if self._check_bearish_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
             matched_patterns.append("冲高回落阴线")
         
-        # 3. 冲高回落阳十字星（需要振幅>6%/8%）
+        # 3. 冲高回落阳十字星（需要振幅>6%/8% -> 5% 临时调整）
         if self._check_bullish_doji_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
             matched_patterns.append("冲高回落阳十字星")
         
-        # 4. 冲高回落阴十字星（需要振幅>6%/8%）
+        # 4. 冲高回落阴十字星（需要振幅>6%/8% -> 5% 临时调整）
         if self._check_bearish_doji_high_fallback(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
             matched_patterns.append("冲高回落阴十字星")
         
-        # 5. 高开低走（需要振幅>6%/8%）
+        # 5. 高开低走（需要振幅>6%/8% -> 5% 临时调整）
         if self._check_high_open_low_close_new(A, B, C_shadow, O, C, H, L, prev_close, is_main_board):
             matched_patterns.append("高开低走")
         
@@ -2155,7 +2167,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 6 if is_main_board else 8
+        amplitude_threshold = 5  # 临时统一降至5%
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2182,7 +2194,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 6 if is_main_board else 8
+        amplitude_threshold = 5  # 临时统一降至5%
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2209,7 +2221,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 6 if is_main_board else 8
+        amplitude_threshold = 5  # 临时统一降至5%
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2235,7 +2247,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 6 if is_main_board else 8
+        amplitude_threshold = 5  # 临时统一降至5%
         if amplitude <= amplitude_threshold:
             return False
         
@@ -2261,7 +2273,7 @@ class RPointPluginService:
         
         # 检查振幅
         amplitude = ((H - L) / prev_close) * 100
-        amplitude_threshold = 6 if is_main_board else 8
+        amplitude_threshold = 5  # 临时统一降至5%
         if amplitude <= amplitude_threshold:
             return False
         
