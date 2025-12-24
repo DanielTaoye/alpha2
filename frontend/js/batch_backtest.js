@@ -5,6 +5,18 @@ let allStockGroups = {};
 let isRunning = false;
 let importedStocksCache = [];
 
+// fetch with timeout (ms)
+async function fetchWithTimeout(url, options = {}, timeout = 20000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+        const resp = await fetch(url, { ...options, signal: controller.signal });
+        return resp;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function readCsvStocks(file) {
     const text = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -290,13 +302,13 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         
         console.log('CR分析请求参数:', requestBody);
         
-        const crResponse = await fetch(`${API_BASE_URL}/cr_analysis`, {
+        const crResponse = await fetchWithTimeout(`${API_BASE_URL}/cr_analysis`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(requestBody)
-        });
+        }, 20000);
         
         console.log('CR分析响应状态:', crResponse.status, crResponse.statusText);
         
@@ -319,11 +331,13 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         }
         
         const cPoints = crResult.data.c_points || [];
+        const cPointsS2 = crResult.data.strategy2_c_points || [];
+        const mergedCPoints = [...cPoints, ...cPointsS2];
         const rPoints = crResult.data.r_points || [];
         
-        console.log(`找到C点${cPoints.length}个, R点${rPoints.length}个`);
+        console.log(`找到C点${mergedCPoints.length}个(策略1:${cPoints.length} / 策略2:${cPointsS2.length}), R点${rPoints.length}个`);
         
-        if (cPoints.length === 0) {
+        if (mergedCPoints.length === 0) {
             console.warn('没有C点数据，跳过回测');
             return {
                 success: false,
@@ -332,7 +346,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         }
         
         // 执行回测
-        const backtestResponse = await fetch(`${API_BASE_URL}/backtest`, {
+        const backtestResponse = await fetchWithTimeout(`${API_BASE_URL}/backtest`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -340,11 +354,11 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
             body: JSON.stringify({
                 stockCode: stock.code,
                 tableName: stock.table_name,
-                cPoints: cPoints,
+                cPoints: mergedCPoints,
                 rPoints: rPoints,
                 backtestConfig
             })
-        });
+        }, 20000);
         
         // 检查响应是否是JSON
         const contentType2 = backtestResponse.headers.get('content-type');
@@ -357,6 +371,13 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         const backtestResult = await backtestResponse.json();
         
         if (backtestResult.code === 200) {
+            const tradesArr = backtestResult.data && Array.isArray(backtestResult.data.trades) ? backtestResult.data.trades : [];
+            if (!tradesArr.length) {
+                return {
+                    success: false,
+                    message: '无CR配对，已跳过'
+                };
+            }
             return {
                 success: true,
                 data: backtestResult.data
@@ -370,6 +391,12 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         
     } catch (error) {
         console.error('回测失败:', stock.code, error);
+        if (error.name === 'AbortError') {
+            return {
+                success: false,
+                message: '接口超时(20s)'
+            };
+        }
         return {
             success: false,
             message: error.message
