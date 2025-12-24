@@ -3203,18 +3203,28 @@ function displayBacktestResult(data) {
         const rPluginNames = rPlugins.filter(p => p && p.triggered).map(p => p.pluginName || p.plugin_name).filter(Boolean);
         const cPluginTitle = cPlugins.length ? cPlugins.map(p => `${p.pluginName || p.plugin_name}(${p.triggered ? '触发' : '未触发'}): ${p.reason || ''}`).join('\n') : '';
         const rPluginTitle = rPlugins.length ? rPlugins.map(p => `${p.pluginName || p.plugin_name}(${p.triggered ? '触发' : '未触发'}): ${p.reason || ''}`).join('\n') : '';
+        const cPluginsInfoText = (() => {
+            if (trade.c_plugins_info) return String(trade.c_plugins_info);
+            if (cPluginNames.length) return cPluginNames.join('，');
+            return '';
+        })();
+        const rPluginsInfoText = (() => {
+            if (trade.r_plugins_info) return String(trade.r_plugins_info);
+            if (rPluginNames.length) return rPluginNames.join('，');
+            return '';
+        })();
         
         html += `
             <tr>
                 <td>${index + 1}</td>
                 <td>${trade.c_date}</td>
-                <td title="${cPluginTitle.replaceAll('"', '&quot;')}">${strategyLabel}</td>
+                <td title="${cPluginTitle.replaceAll('"', '&quot;')}">${strategyLabel}${cPluginsInfoText ? '（' + cPluginsInfoText + '）' : ''}</td>
                 <td style="font-size:12px;">${cScoreText}${cScoreText2}</td>
                 <td>${goldenText}</td>
                 <td style="font-size:12px;">${trade.buy_time || '-'}</td>
                 <td>¥${trade.buy_price}</td>
                 <td>${trade.r_date || '-'}</td>
-                <td style="font-size:12px;">${trade.exit_reason || '-'}</td>
+                <td style="font-size:12px;">${trade.exit_reason || '-'}${rPluginsInfoText ? '（' + rPluginsInfoText + '）' : ''}</td>
                 <td style="font-size:12px;">${trade.sell_time || '-'}</td>
                 <td title="${rPluginTitle.replaceAll('"', '&quot;')}">${trade.sell_price ? '¥' + trade.sell_price : '-'}</td>
                 <td class="${returnClass}">${trade.return_rate !== null ? (trade.return_rate >= 0 ? '+' : '') + trade.return_rate + '%' : '-'}</td>

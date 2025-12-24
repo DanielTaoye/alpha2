@@ -43,6 +43,21 @@ class ConfigService:
         }
         return mapping.get(stock_nature, stock_nature)
     
+    @staticmethod
+    def _normalize_threshold_value(value: Any, fallback: float) -> float:
+        """
+        统一处理阈值：
+        - 非法格式 -> fallback
+        - ≥101 视为“禁用该策略/股性阈值”，返回一个极大值以保证永不触发
+        """
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        if v >= 101:
+            return 1e9  # 认为禁用
+        return v
+
     def _get_nature_threshold(self, strategy_key: str, stock_nature: Optional[str], fallback: float) -> float:
         """根据股性获取阈值，未命中则返回fallback"""
         config = self.get_config()
@@ -51,21 +66,18 @@ class ConfigService:
         nature = self._normalize_nature(stock_nature)
         
         if nature and nature in nature_thresholds and nature_thresholds[nature] is not None:
-            try:
-                return float(nature_thresholds[nature])
-            except (TypeError, ValueError):
-                logger.warning(f"{strategy_key} 股性[{nature}]阈值格式错误，使用兜底阈值")
+            val = self._normalize_threshold_value(nature_thresholds[nature], fallback)
+            if val == 1e9:
+                logger.info(f"{strategy_key} 股性[{nature}] 阈值设为禁用(>=101)")
+            return val
         
         if '波段' in nature_thresholds and nature_thresholds['波段'] is not None:
-            try:
-                return float(nature_thresholds['波段'])
-            except (TypeError, ValueError):
-                logger.warning(f"{strategy_key} 波段阈值格式错误，使用兜底阈值")
+            val = self._normalize_threshold_value(nature_thresholds['波段'], fallback)
+            if val == 1e9:
+                logger.info(f"{strategy_key} 波段阈值设为禁用(>=101)")
+            return val
         
-        try:
-            return float(strategy_cfg.get('c_point_threshold', fallback))
-        except (TypeError, ValueError):
-            return fallback
+        return self._normalize_threshold_value(strategy_cfg.get('c_point_threshold', fallback), fallback)
     
     def _load_config(self) -> Dict[str, Any]:
         """加载配置文件"""
@@ -237,10 +249,10 @@ class ConfigService:
         thresholds = strategy_cfg.get('nature_thresholds') or {}
         result = {}
         for k, v in thresholds.items():
-            try:
-                result[k] = float(v)
-            except (TypeError, ValueError):
+            val = self._normalize_threshold_value(v, None)
+            if val is None:
                 continue
+            result[k] = val
         return result
     
     def get_market_type(self, as_of: Optional[Any] = None) -> str:

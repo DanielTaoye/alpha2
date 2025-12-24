@@ -491,11 +491,11 @@
                 <div class="form-group hide-default">
                     <label for="strategy1Threshold">C点触发阈值</label>
                     <div class="input-wrapper">
-                        <input type="number" id="strategy1Threshold" min="0" max="100" step="1" value="70">
+                        <input type="number" id="strategy1Threshold" min="0" max="120" step="1" value="70">
                         <span class="unit">分</span>
                     </div>
                     <div class="slider-wrapper">
-                        <input type="range" id="strategy1Slider" min="0" max="100" step="1" value="70">
+                        <input type="range" id="strategy1Slider" min="0" max="120" step="1" value="70">
                         <div class="range-labels">
                             <span>0分</span>
                             <span>50分</span>
@@ -513,15 +513,15 @@
                     <div class="nature-grid">
                         <div class="nature-item">
                             <span class="nature-label">短线</span>
-                            <input type="number" id="strategy1ThresholdShort" min="0" max="100" step="1" value="70">
+                            <input type="number" id="strategy1ThresholdShort" min="0" max="120" step="1" value="70">
                         </div>
                         <div class="nature-item">
                             <span class="nature-label">波段</span>
-                            <input type="number" id="strategy1ThresholdSwing" min="0" max="100" step="1" value="70">
+                            <input type="number" id="strategy1ThresholdSwing" min="0" max="120" step="1" value="70">
                         </div>
                         <div class="nature-item">
                             <span class="nature-label">中长线</span>
-                            <input type="number" id="strategy1ThresholdMid" min="0" max="100" step="1" value="70">
+                            <input type="number" id="strategy1ThresholdMid" min="0" max="120" step="1" value="70">
                         </div>
                     </div>
                     <p class="description">短线/波段/中长线各自的C点触发阈值，留空则使用上方默认阈值。</p>
@@ -659,11 +659,11 @@
                 <div class="form-group hide-default">
                     <label for="strategy2Threshold">C点触发阈值</label>
                     <div class="input-wrapper">
-                        <input type="number" id="strategy2Threshold" min="0" max="100" step="1" value="20">
+                        <input type="number" id="strategy2Threshold" min="0" max="120" step="1" value="20">
                         <span class="unit">分</span>
                     </div>
                     <div class="slider-wrapper">
-                        <input type="range" id="strategy2Slider" min="0" max="100" step="1" value="20">
+                        <input type="range" id="strategy2Slider" min="0" max="120" step="1" value="20">
                         <div class="range-labels">
                             <span>0分</span>
                             <span>50分</span>
@@ -681,15 +681,15 @@
                     <div class="nature-grid">
                         <div class="nature-item">
                             <span class="nature-label">短线</span>
-                            <input type="number" id="strategy2ThresholdShort" min="0" max="100" step="1" value="70">
+                            <input type="number" id="strategy2ThresholdShort" min="0" max="120" step="1" value="70">
                         </div>
                         <div class="nature-item">
                             <span class="nature-label">波段</span>
-                            <input type="number" id="strategy2ThresholdSwing" min="0" max="100" step="1" value="70">
+                            <input type="number" id="strategy2ThresholdSwing" min="0" max="120" step="1" value="70">
                         </div>
                         <div class="nature-item">
                             <span class="nature-label">中长线</span>
-                            <input type="number" id="strategy2ThresholdMid" min="0" max="100" step="1" value="70">
+                            <input type="number" id="strategy2ThresholdMid" min="0" max="120" step="1" value="70">
                         </div>
                     </div>
                     <p class="description">短线/波段/中长线各自的C点触发阈值，留空则使用上方默认阈值。</p>
@@ -904,35 +904,7 @@
                 const highStagnationGain = parseFloat(document.getElementById('highStagnationGainThreshold').value);
                 const pressureDistance = parseFloat(document.getElementById('pressureDistanceThreshold').value);
 
-                // 参数验证
-                if (isNaN(highPositionGain) || highPositionGain < 0 || highPositionGain > 100) {
-                    showMessage('高位发R-涨幅阈值必须在0-100之间', true);
-                    return;
-                }
-                if (isNaN(highStagnationGain) || highStagnationGain < 0 || highStagnationGain > 100) {
-                    showMessage('高位滞涨+空头组合-涨幅阈值必须在0-100之间', true);
-                    return;
-                }
-                if (isNaN(pressureDistance) || pressureDistance < 0 || pressureDistance > 100) {
-                    showMessage('临近压力位滞涨-距离阈值必须在0-100之间', true);
-                    return;
-                }
-
-                const natureValues = [
-                    { value: strategy1Short, label: '策略1-短线' },
-                    { value: strategy1Swing, label: '策略1-波段' },
-                    { value: strategy1Mid, label: '策略1-中长线' },
-                    { value: strategy2Short, label: '策略2-短线' },
-                    { value: strategy2Swing, label: '策略2-波段' },
-                    { value: strategy2Mid, label: '策略2-中长线' }
-                ];
-
-                for (const item of natureValues) {
-                    if (isNaN(item.value) || item.value < 0 || item.value > 100) {
-                        showMessage(`${item.label}阈值必须在0-100之间`, true);
-                        return;
-                    }
-                }
+                // 参数验证：交给后端，前端不再拦截
 
                 const strategy1NatureThresholds = {
                     "短线": strategy1Short,

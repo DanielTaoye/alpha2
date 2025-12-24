@@ -43,16 +43,16 @@ class ConfigController:
             if strategy1_threshold is not None:
                 try:
                     strategy1_threshold = float(strategy1_threshold)
-                    if strategy1_threshold < 0 or strategy1_threshold > 100:
-                        return jsonify(ResponseBuilder.error('策略1阈值必须在0-100之间')), 400
+                    if strategy1_threshold < 0 or strategy1_threshold > 120:
+                        return jsonify(ResponseBuilder.error('策略1阈值必须在0-120之间（>=101表示禁用）')), 400
                 except (ValueError, TypeError):
                     return jsonify(ResponseBuilder.error('策略1阈值必须是数字')), 400
             
             if strategy2_threshold is not None:
                 try:
                     strategy2_threshold = float(strategy2_threshold)
-                    if strategy2_threshold < 0 or strategy2_threshold > 100:
-                        return jsonify(ResponseBuilder.error('策略2阈值必须在0-100之间')), 400
+                    if strategy2_threshold < 0 or strategy2_threshold > 120:
+                        return jsonify(ResponseBuilder.error('策略2阈值必须在0-120之间（>=101表示禁用）')), 400
                 except (ValueError, TypeError):
                     return jsonify(ResponseBuilder.error('策略2阈值必须是数字')), 400
             
@@ -93,8 +93,8 @@ class ConfigController:
                         val_float = float(val)
                     except (TypeError, ValueError):
                         return None, (jsonify(ResponseBuilder.error(f'{label}股性[{nature}]阈值必须是数字')), 400)
-                    if val_float < 0 or val_float > 100:
-                        return None, (jsonify(ResponseBuilder.error(f'{label}股性[{nature}]阈值必须在0-100之间')), 400)
+                    if val_float < 0 or val_float > 120:
+                        return None, (jsonify(ResponseBuilder.error(f'{label}股性[{nature}]阈值必须在0-120之间（>=101表示禁用）')), 400)
                     parsed[nature] = val_float
                 return parsed, None
 
