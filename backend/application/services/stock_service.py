@@ -57,18 +57,25 @@ class StockApplicationService:
             with DatabaseConnection.get_connection_context() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 
-                # 搜索未退市的股票，支持代码和名称模糊匹配
+                # 搜索未退市的股票，支持代码、名称、拼音及首字母模糊匹配
                 sql = """
-                    SELECT code, name, nature
+                    SELECT code, name, nature, pin_yin, pin_yin_initial
                     FROM all_stock
                     WHERE (`是否退市` != 1 OR `是否退市` IS NULL)
-                      AND (code LIKE %s OR name LIKE %s)
+                      AND (
+                            code LIKE %s 
+                         OR name LIKE %s
+                         OR pin_yin LIKE %s
+                         OR pin_yin_initial LIKE %s
+                      )
                     ORDER BY 
                         CASE 
                             WHEN code = %s THEN 1
                             WHEN code LIKE %s THEN 2
                             WHEN name LIKE %s THEN 3
-                            ELSE 4
+                            WHEN pin_yin LIKE %s THEN 4
+                            WHEN pin_yin_initial LIKE %s THEN 5
+                            ELSE 6
                         END,
                         code
                     LIMIT %s
@@ -77,16 +84,24 @@ class StockApplicationService:
                 # 构建搜索模式
                 code_pattern = f"%{keyword}%"
                 name_pattern = f"%{keyword}%"
+                pinyin_pattern = f"%{keyword.lower()}%"
+                pinyin_initial_pattern = f"%{keyword.lower()}%"
                 exact_code = keyword.upper()
                 code_start_pattern = f"{keyword.upper()}%"
                 name_start_pattern = f"{keyword}%"
+                pinyin_start_pattern = f"{keyword.lower()}%"
+                pinyin_initial_start_pattern = f"{keyword.lower()}%"
                 
                 cursor.execute(sql, (
                     code_pattern,
                     name_pattern,
+                    pinyin_pattern,
+                    pinyin_initial_pattern,
                     exact_code,
                     code_start_pattern,
                     name_start_pattern,
+                    pinyin_start_pattern,
+                    pinyin_initial_start_pattern,
                     limit
                 ))
                 
@@ -102,6 +117,8 @@ class StockApplicationService:
                         'code': code,
                         'name': row['name'],
                         'nature': row['nature'] or '未分类',
+                        'pin_yin': row.get('pin_yin'),
+                        'pin_yin_initial': row.get('pin_yin_initial'),
                         'table_name': table_name
                     })
                 
