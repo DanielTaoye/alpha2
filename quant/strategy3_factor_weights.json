@@ -1,0 +1,2071 @@
+{
+  "trained_at": "2025-12-25 13:57:55",
+  "date_range": {
+    "start": "2024-12-22",
+    "end": "2024-12-25"
+  },
+  "forward_days": 1,
+  "min_non_null_ratio": 0.6,
+  "min_days": 2,
+  "factor_count_total": 276,
+  "factor_count_weighted": 158,
+  "weights": {
+    "EBIT": 0.09316773541105033,
+    "VEMA10": 0.07337989780162373,
+    "roic_ttm": 0.058539019594553744,
+    "OperateNetIncome": 0.0445226346212099,
+    "VOSC": 0.032979729349044244,
+    "VEMA12": 0.028857263180413737,
+    "total_profit_ttm": 0.02349805716119398,
+    "operating_profit_ttm": 0.02349805716119398,
+    "VEMA5": 0.023291933852762535,
+    "EMAC26": 0.023085810544330964,
+    "EBITDA": 0.02127192543013348,
+    "gross_income_ratio": 0.019581714300995017,
+    "VEMA26": 0.019434483366401058,
+    "net_profit_to_total_operate_revenue_ttm": 0.0180210663942992,
+    "net_profit_ratio": 0.0180210663942992,
+    "net_profit_ttm": 0.017973952495229123,
+    "administration_expense_ttm": 0.017785496898948885,
+    "operating_profit_to_operating_revenue": 0.017078788412897884,
+    "profit_margin_ttm": 0.017078788412897884,
+    "operating_profit_ratio": 0.017078788412897884,
+    "MAC60": 0.016581475033825024,
+    "Rank1M": 0.015665371440796043,
+    "total_profit_to_cost_ratio": 0.01525312482393299,
+    "earnings_growth": 0.01311693780927897,
+    "VROC12": 0.011645966926381257,
+    "ARBR": 0.010718412038439373,
+    "PSY": 0.00933613738550936,
+    "VROC6": 0.008898840764009366,
+    "MACDC": 0.008409830984006274,
+    "TVSTD6": 0.007341915938418183,
+    "current_ratio": 0.006849636095570732,
+    "goods_sale_and_service_render_cash_ttm": 0.006713730617484012,
+    "invsqlty": 0.006547446267824964,
+    "BIAS20": 0.006046283713991449,
+    "Price1M": 0.006046283713991449,
+    "roe_ttm": 0.005837412094780838,
+    "equity_to_asset_ratio": 0.00547699076689485,
+    "boll_down": 0.005375695883894213,
+    "net_working_capital": 0.005373421419801174,
+    "fixed_assets_turnover_rate": 0.005197892125664579,
+    "SGI": 0.005186328405696475,
+    "operating_profit_per_share_ttm": 0.00504589859040377,
+    "operating_tax_to_operating_revenue_ratio_ttm": 0.004740836093925111,
+    "equity_to_fixed_asset_ratio": 0.00469602667904869,
+    "eps_ttm": 0.004488907605842139,
+    "earnings_yield": 0.004300734975922664,
+    "gross_profit_ttm": 0.004163690830316838,
+    "sale_expense_to_operating_revenue": 0.0039887645631614356,
+    "total_operating_revenue_ttm": 0.0039284677606949755,
+    "operating_revenue_ttm": 0.0039284677606949755,
+    "asset_impairment_loss_ttm": 0.0038607222849079592,
+    "single_day_VPT_6": 0.003831468556727199,
+    "np_parent_company_owners_growth_rate": 0.003792668875140091,
+    "arron_down_25": 0.0037344693527594213,
+    "np_parent_company_owners_ttm": 0.0036969212738041527,
+    "net_operate_cash_flow_to_operate_income": 0.003531320076525019,
+    "quick_ratio": 0.0034316745403735237,
+    "roa_ttm": 0.0032979729349044244,
+    "VMACD": 0.0032636190501658382,
+    "DEGM": 0.003106572719932293,
+    "fifty_two_week_close_rank": 0.0030277339928873317,
+    "rnoa_ttm": 0.0029200802027799593,
+    "operating_profit_per_share": 0.002864029127680158,
+    "ROC6": 0.0028243278857426196,
+    "LVGI": 0.00277884756552132,
+    "EMAC120": 0.0027483107790870222,
+    "liquidity": 0.0026674781091138734,
+    "AR": 0.0026652223136727628,
+    "profit": 0.0026637473704997283,
+    "financial_assets": 0.002620056276062961,
+    "total_operating_cost_ttm": 0.0026168698287828596,
+    "admin_expense_rate": 0.00259562684691552,
+    "invest_income_associates_to_total_profit": 0.0025436493380911794,
+    "earnyild": 0.002542187470655494,
+    "market_cap": 0.0024289124993552864,
+    "market_size": 0.0024289124993552864,
+    "size": 0.0024289124993552864,
+    "natural_log_of_market_cap": 0.0024289124993552864,
+    "intangible_asset_ratio": 0.0023764804972105412,
+    "super_quick_ratio": 0.0023577613525851823,
+    "asset_turnover_ttm": 0.002250643692063155,
+    "divyild": 0.0021946069897709596,
+    "earnings_to_price_ratio": 0.0021607408883856575,
+    "Kurtosis20": 0.002150149021285728,
+    "operating_cost_ttm": 0.0021263246553989063,
+    "net_profit_growth_rate": 0.0021070382639667164,
+    "operating_revenue_growth_rate": 0.0021070382639667164,
+    "non_recurring_gain_loss": 0.0020791568502658334,
+    "operating_profit_growth_rate": 0.002061233084315266,
+    "total_profit_growth_rate": 0.002061233084315266,
+    "short_term_predicted_earnings_growth": 0.0019157342783636003,
+    "TVMA6": 0.0018963344375700446,
+    "cash_rate_of_sales": 0.0018551097758837392,
+    "VOL5": 0.0018138851141974344,
+    "Skewness60": 0.0016651530014468424,
+    "BIAS10": 0.0016004868654683243,
+    "bear_power": 0.001600486865468324,
+    "total_asset_turnover_rate": 0.0015874571216517566,
+    "net_operate_cash_flow_per_share": 0.0015835504965215695,
+    "sale_expense_ttm": 0.0015606479066958441,
+    "circulating_market_cap": 0.0015375684628946304,
+    "operating_liability": 0.0014587187981308035,
+    "cfo_to_ev": 0.001453711754201293,
+    "MAC120": 0.0014312722041768585,
+    "earnqlty": 0.0013781675220677252,
+    "margin_stability": 0.0013741553895435107,
+    "account_receivable_turnover_days": 0.0013741553895435105,
+    "net_operate_cash_flow_ttm": 0.0013427461234968019,
+    "sharpe_ratio_120": 0.0012642229583800296,
+    "interest_free_current_liability": 0.0012573521814323125,
+    "ROAEBITTTM": 0.0012266850550559142,
+    "net_operate_cash_flow_to_total_liability": 0.001222524450007675,
+    "bull_power": 0.0011542905272165487,
+    "operating_profit_to_total_profit": 0.0010422838992386627,
+    "book_to_price_ratio": 0.0010323486707999147,
+    "btop": 0.0010323486707999147,
+    "retained_earnings": 0.0010243703812960715,
+    "cash_earnings_to_price_ratio": 0.0010140319081459008,
+    "net_operate_cash_flow_to_total_current_liability": 0.0009706059586902264,
+    "DAVOL5": 0.0009214924376938836,
+    "VSTD10": 0.0008855668065947068,
+    "market_beta": 0.0008813548360520448,
+    "equity_turnover_rate": 0.0008776863455794034,
+    "TVMA20": 0.0008632929153132172,
+    "money_flow_20": 0.0008632929153132172,
+    "net_operate_cash_flow_to_net_debt": 0.0008622562825990577,
+    "BIAS5": 0.0007950470468073168,
+    "net_debt": 0.0007610706772856366,
+    "OperatingCycle": 0.0007532407320460725,
+    "EMAC20": 0.0007107700290742297,
+    "ACCA": 0.0006992537551854319,
+    "capital_reserve_fund_per_share": 0.0006976481208451669,
+    "single_day_VPT": 0.0006943100915588263,
+    "Skewness20": 0.0006851422646456377,
+    "net_operate_cash_flow_to_asset": 0.0006639724271599617,
+    "momentum": 0.0006046283713991447,
+    "relative_strength": 0.0006046283713991447,
+    "value_change_profit_ttm": 0.0005973873130590352,
+    "DSRI": 0.0005289201876733512,
+    "inventory_turnover_rate": 0.0005165499777561148,
+    "accounts_payable_turnover_days": 0.0004761158110249347,
+    "predicted_earnings_to_price_ratio": 0.0004534712785493585,
+    "TVSTD20": 0.0004413953675503398,
+    "retained_earnings_per_share": 0.0004040016845257921,
+    "retained_profit_per_share": 0.00040130201641536156,
+    "VSTD20": 0.00038476350907218305,
+    "cash_to_current_liability": 0.0003506465476766199,
+    "long_debt_to_working_capital_ratio": 0.00033245694908310726,
+    "CCI10": 0.0003297972934904426,
+    "surplus_reserve_fund_per_share": 0.00032979729349044245,
+    "WVAD": 0.00032423891213947996,
+    "operating_assets": 0.00028067854765144055,
+    "net_invest_cash_flow_ttm": 0.0002300911349933321,
+    "net_asset_per_share": 0.00022309816912588764,
+    "growth": 0.00022163796605540498,
+    "PLRC12": 0.00012825450302406097,
+    "VDIFF": 7.067084860509493e-05,
+    "single_day_VPT_12": 5.889237383757905e-05
+  },
+  "stats": [
+    {
+      "factor": "EBIT",
+      "ic_mean": 0.20178571428571426,
+      "ic_std": 0.0025253813613805177,
+      "ir": 79.90306627408015,
+      "n_days": 2
+    },
+    {
+      "factor": "VEMA10",
+      "ic_mean": 0.31785714285714284,
+      "ic_std": 0.005050762722761035,
+      "ir": 62.932503525602954,
+      "n_days": 2
+    },
+    {
+      "factor": "roic_ttm",
+      "ic_mean": 0.3803571428571428,
+      "ic_std": 0.007576144084141554,
+      "ir": 50.20458146424504,
+      "n_days": 2
+    },
+    {
+      "factor": "OperateNetIncome",
+      "ic_mean": 0.19285714285714284,
+      "ic_std": 0.005050762722761035,
+      "ir": 38.183766184073704,
+      "n_days": 2
+    },
+    {
+      "factor": "VOSC",
+      "ic_mean": 0.2857142857142857,
+      "ic_std": 0.01010152544552211,
+      "ir": 28.28427124746189,
+      "n_days": 2
+    },
+    {
+      "factor": "VEMA12",
+      "ic_mean": 0.3125,
+      "ic_std": 0.012626906806902628,
+      "ir": 24.748737341529175,
+      "n_days": 2
+    },
+    {
+      "factor": "total_profit_ttm",
+      "ic_mean": 0.20357142857142857,
+      "ic_std": 0.01010152544552213,
+      "ir": 20.15254326381656,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_ttm",
+      "ic_mean": 0.20357142857142857,
+      "ic_std": 0.01010152544552213,
+      "ir": 20.15254326381656,
+      "n_days": 2
+    },
+    {
+      "factor": "VEMA5",
+      "ic_mean": 0.40357142857142847,
+      "ic_std": 0.020203050891044183,
+      "ir": 19.975766568519994,
+      "n_days": 2
+    },
+    {
+      "factor": "EMAC26",
+      "ic_mean": 0.09999999999999998,
+      "ic_std": 0.005050762722761055,
+      "ir": 19.79898987322332,
+      "n_days": 2
+    },
+    {
+      "factor": "EBITDA",
+      "ic_mean": 0.23035714285714282,
+      "ic_std": 0.012626906806902668,
+      "ir": 18.243354954612872,
+      "n_days": 2
+    },
+    {
+      "factor": "gross_income_ratio",
+      "ic_mean": 0.33928571428571425,
+      "ic_std": 0.02020305089104422,
+      "ir": 16.793786053180497,
+      "n_days": 2
+    },
+    {
+      "factor": "VEMA26",
+      "ic_mean": 0.2946428571428571,
+      "ic_std": 0.017677669529663705,
+      "ir": 16.667516985111458,
+      "n_days": 2
+    },
+    {
+      "factor": "net_profit_to_total_operate_revenue_ttm",
+      "ic_mean": 0.27321428571428563,
+      "ic_std": 0.017677669529663664,
+      "ir": 15.455333931648841,
+      "n_days": 2
+    },
+    {
+      "factor": "net_profit_ratio",
+      "ic_mean": 0.27321428571428563,
+      "ic_std": 0.017677669529663664,
+      "ir": 15.455333931648841,
+      "n_days": 2
+    },
+    {
+      "factor": "net_profit_ttm",
+      "ic_mean": 0.19464285714285712,
+      "ic_std": 0.012626906806902628,
+      "ir": 15.414927829866741,
+      "n_days": 2
+    },
+    {
+      "factor": "administration_expense_ttm",
+      "ic_mean": 0.2696428571428571,
+      "ic_std": 0.017677669529663664,
+      "ir": 15.2533034227384,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_to_operating_revenue",
+      "ic_mean": 0.2589285714285714,
+      "ic_std": 0.017677669529663723,
+      "ir": 14.647211896007025,
+      "n_days": 2
+    },
+    {
+      "factor": "profit_margin_ttm",
+      "ic_mean": 0.2589285714285714,
+      "ic_std": 0.017677669529663723,
+      "ir": 14.647211896007025,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_ratio",
+      "ic_mean": 0.2589285714285714,
+      "ic_std": 0.017677669529663723,
+      "ir": 14.647211896007025,
+      "n_days": 2
+    },
+    {
+      "factor": "MAC60",
+      "ic_mean": 0.3232142857142857,
+      "ic_std": 0.02272843225242474,
+      "ir": 14.220703043862787,
+      "n_days": 2
+    },
+    {
+      "factor": "Rank1M",
+      "ic_mean": 0.13571428571428568,
+      "ic_std": 0.010101525445522092,
+      "ir": 13.43502884254442,
+      "n_days": 2
+    },
+    {
+      "factor": "total_profit_to_cost_ratio",
+      "ic_mean": 0.26428571428571423,
+      "ic_std": 0.020203050891044183,
+      "ir": 13.081475451951148,
+      "n_days": 2
+    },
+    {
+      "factor": "earnings_growth",
+      "ic_mean": 0.31249999999999994,
+      "ic_std": 0.027779194975185776,
+      "ir": 11.249426064331443,
+      "n_days": 2
+    },
+    {
+      "factor": "VROC12",
+      "ic_mean": 0.40357142857142847,
+      "ic_std": 0.0404061017820884,
+      "ir": 9.987883284259988,
+      "n_days": 2
+    },
+    {
+      "factor": "ARBR",
+      "ic_mean": 0.4178571428571428,
+      "ic_std": 0.045456864504849516,
+      "ir": 9.19238815542511,
+      "n_days": 2
+    },
+    {
+      "factor": "PSY",
+      "ic_mean": 0.22445412750284965,
+      "ic_std": 0.02803254034758491,
+      "ir": 8.006913562587169,
+      "n_days": 2
+    },
+    {
+      "factor": "VROC6",
+      "ic_mean": 0.5589285714285713,
+      "ic_std": 0.07323605948003517,
+      "ir": 7.6318766383237815,
+      "n_days": 2
+    },
+    {
+      "factor": "MACDC",
+      "ic_mean": 0.2732142857142857,
+      "ic_std": 0.03788072042070795,
+      "ir": 7.212489168102776,
+      "n_days": 2
+    },
+    {
+      "factor": "TVSTD6",
+      "ic_mean": 0.33392857142857135,
+      "ic_std": 0.05303300858899107,
+      "ir": 6.296617527708778,
+      "n_days": 2
+    },
+    {
+      "factor": "current_ratio",
+      "ic_mean": 0.3857142857142857,
+      "ic_std": 0.06565991539589366,
+      "ir": 5.874425566780551,
+      "n_days": 2
+    },
+    {
+      "factor": "goods_sale_and_service_render_cash_ttm",
+      "ic_mean": 0.10178571428571426,
+      "ic_std": 0.017677669529663674,
+      "ir": 5.757869503947604,
+      "n_days": 2
+    },
+    {
+      "factor": "invsqlty",
+      "ic_mean": 0.24107142857142855,
+      "ic_std": 0.042931483143468945,
+      "ir": 5.615259732951996,
+      "n_days": 2
+    },
+    {
+      "factor": "BIAS20",
+      "ic_mean": 0.07857142857142857,
+      "ic_std": 0.015152288168283156,
+      "ir": 5.18544972870135,
+      "n_days": 2
+    },
+    {
+      "factor": "Price1M",
+      "ic_mean": 0.07857142857142857,
+      "ic_std": 0.015152288168283156,
+      "ir": 5.18544972870135,
+      "n_days": 2
+    },
+    {
+      "factor": "roe_ttm",
+      "ic_mean": 0.3160714285714285,
+      "ic_std": 0.0631345340345131,
+      "ir": 5.00631601080076,
+      "n_days": 2
+    },
+    {
+      "factor": "equity_to_asset_ratio",
+      "ic_mean": 0.3321428571428571,
+      "ic_std": 0.07071067811865474,
+      "ir": 4.69720933216778,
+      "n_days": 2
+    },
+    {
+      "factor": "boll_down",
+      "ic_mean": 0.2910714285714285,
+      "ic_std": 0.06313453403451316,
+      "ir": 4.610336213336289,
+      "n_days": 2
+    },
+    {
+      "factor": "net_working_capital",
+      "ic_mean": 0.3374999999999999,
+      "ic_std": 0.0732360594800353,
+      "ir": 4.608385573939911,
+      "n_days": 2
+    },
+    {
+      "factor": "fixed_assets_turnover_rate",
+      "ic_mean": 0.2589285714285714,
+      "ic_std": 0.05808377131175215,
+      "ir": 4.457847098784753,
+      "n_days": 2
+    },
+    {
+      "factor": "SGI",
+      "ic_mean": 0.3482142857142857,
+      "ic_std": 0.07828682220279633,
+      "ir": 4.447929752625057,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_per_share_ttm",
+      "ic_mean": 0.27321428571428563,
+      "ic_std": 0.06313453403451316,
+      "ir": 4.32749350086167,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_tax_to_operating_revenue_ratio_ttm",
+      "ic_mean": 0.24642857142857139,
+      "ic_std": 0.060609152673132646,
+      "ir": 4.065863991822647,
+      "n_days": 2
+    },
+    {
+      "factor": "equity_to_fixed_asset_ratio",
+      "ic_mean": 0.46785714285714275,
+      "ic_std": 0.11616754262350426,
+      "ir": 4.027434275453812,
+      "n_days": 2
+    },
+    {
+      "factor": "eps_ttm",
+      "ic_mean": 0.26249999999999996,
+      "ic_std": 0.06818529675727415,
+      "ir": 3.8498035864600957,
+      "n_days": 2
+    },
+    {
+      "factor": "earnings_yield",
+      "ic_mean": 0.34464285714285703,
+      "ic_std": 0.09343911037107944,
+      "ir": 3.688421858621722,
+      "n_days": 2
+    },
+    {
+      "factor": "gross_profit_ttm",
+      "ic_mean": 0.36071428571428565,
+      "ic_std": 0.10101525445522103,
+      "ir": 3.570889244992066,
+      "n_days": 2
+    },
+    {
+      "factor": "sale_expense_to_operating_revenue",
+      "ic_mean": 0.3196428571428571,
+      "ic_std": 0.09343911037107944,
+      "ir": 3.420867941416002,
+      "n_days": 2
+    },
+    {
+      "factor": "total_operating_revenue_ttm",
+      "ic_mean": 0.14464285714285713,
+      "ic_std": 0.04293148314346897,
+      "ir": 3.3691558397711954,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_revenue_ttm",
+      "ic_mean": 0.14464285714285713,
+      "ic_std": 0.04293148314346897,
+      "ir": 3.3691558397711954,
+      "n_days": 2
+    },
+    {
+      "factor": "asset_impairment_loss_ttm",
+      "ic_mean": 0.5267857142857142,
+      "ic_std": 0.15909902576697313,
+      "ir": 3.3110555626989138,
+      "n_days": 2
+    },
+    {
+      "factor": "single_day_VPT_6",
+      "ic_mean": 0.14107142857142854,
+      "ic_std": 0.04293148314346896,
+      "ir": 3.2859668066904257,
+      "n_days": 2
+    },
+    {
+      "factor": "np_parent_company_owners_growth_rate",
+      "ic_mean": 0.12637362637362637,
+      "ic_std": 0.03885202094431578,
+      "ir": 3.25269119345812,
+      "n_days": 2
+    },
+    {
+      "factor": "arron_down_25",
+      "ic_mean": 0.348768513634676,
+      "ic_std": 0.10889563319330779,
+      "ir": 3.202777773609655,
+      "n_days": 2
+    },
+    {
+      "factor": "np_parent_company_owners_ttm",
+      "ic_mean": 0.24821428571428567,
+      "ic_std": 0.07828682220279636,
+      "ir": 3.1705755672558085,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_to_operate_income",
+      "ic_mean": 0.4053571428571428,
+      "ic_std": 0.133845212153168,
+      "ir": 3.028551685459362,
+      "n_days": 2
+    },
+    {
+      "factor": "quick_ratio",
+      "ic_mean": 0.3384615384615385,
+      "ic_std": 0.11500198199517478,
+      "ir": 2.9430930892629275,
+      "n_days": 2
+    },
+    {
+      "factor": "roa_ttm",
+      "ic_mean": 0.2571428571428571,
+      "ic_std": 0.09091372900969898,
+      "ir": 2.8284271247461894,
+      "n_days": 2
+    },
+    {
+      "factor": "VMACD",
+      "ic_mean": 0.33928571428571425,
+      "ic_std": 0.12121830534626525,
+      "ir": 2.798964342196751,
+      "n_days": 2
+    },
+    {
+      "factor": "DEGM",
+      "ic_mean": 0.46373626373626375,
+      "ic_std": 0.17405705383053482,
+      "ir": 2.6642773362564554,
+      "n_days": 2
+    },
+    {
+      "factor": "fifty_two_week_close_rank",
+      "ic_mean": 0.03929848649594155,
+      "ic_std": 0.015134225535358274,
+      "ir": 2.596663199192322,
+      "n_days": 2
+    },
+    {
+      "factor": "rnoa_ttm",
+      "ic_mean": 0.3035714285714285,
+      "ic_std": 0.12121830534626529,
+      "ir": 2.504336516702355,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_per_share",
+      "ic_mean": 0.23571428571428568,
+      "ic_std": 0.09596449173246004,
+      "ir": 2.456265660963796,
+      "n_days": 2
+    },
+    {
+      "factor": "ROC6",
+      "ic_mean": 0.2875,
+      "ic_std": 0.11869292398488476,
+      "ir": 2.422216846192216,
+      "n_days": 2
+    },
+    {
+      "factor": "LVGI",
+      "ic_mean": 0.16249999999999998,
+      "ic_std": 0.06818529675727425,
+      "ir": 2.3832117439991034,
+      "n_days": 2
+    },
+    {
+      "factor": "EMAC120",
+      "ic_mean": 0.17857142857142855,
+      "ic_std": 0.07576144084141577,
+      "ir": 2.3570226039551594,
+      "n_days": 2
+    },
+    {
+      "factor": "liquidity",
+      "ic_mean": 0.0982142857142857,
+      "ic_std": 0.04293148314346895,
+      "ir": 2.287698409721183,
+      "n_days": 2
+    },
+    {
+      "factor": "AR",
+      "ic_mean": 0.24821428571428567,
+      "ic_std": 0.10859139853936263,
+      "ir": 2.2857637810448863,
+      "n_days": 2
+    },
+    {
+      "factor": "profit",
+      "ic_mean": 0.29999999999999993,
+      "ic_std": 0.13131983079178738,
+      "ir": 2.284498831525769,
+      "n_days": 2
+    },
+    {
+      "factor": "financial_assets",
+      "ic_mean": 0.25535714285714284,
+      "ic_std": 0.11364216126212366,
+      "ir": 2.247028215770585,
+      "n_days": 2
+    },
+    {
+      "factor": "total_operating_cost_ttm",
+      "ic_mean": 0.13035714285714284,
+      "ic_std": 0.05808377131175211,
+      "ir": 2.244295435939912,
+      "n_days": 2
+    },
+    {
+      "factor": "admin_expense_rate",
+      "ic_mean": 0.30357142857142855,
+      "ic_std": 0.13637059351454844,
+      "ir": 2.2260769037354273,
+      "n_days": 2
+    },
+    {
+      "factor": "invest_income_associates_to_total_profit",
+      "ic_mean": 0.272934679002628,
+      "ic_std": 0.12511332731248825,
+      "ir": 2.1814996440861574,
+      "n_days": 2
+    },
+    {
+      "factor": "earnyild",
+      "ic_mean": 0.39642857142857135,
+      "ic_std": 0.18182745801939793,
+      "ir": 2.180245908658521,
+      "n_days": 2
+    },
+    {
+      "factor": "market_cap",
+      "ic_mean": 0.19464285714285712,
+      "ic_std": 0.09343911037107948,
+      "ir": 2.083098355387397,
+      "n_days": 2
+    },
+    {
+      "factor": "market_size",
+      "ic_mean": 0.19464285714285712,
+      "ic_std": 0.09343911037107948,
+      "ir": 2.083098355387397,
+      "n_days": 2
+    },
+    {
+      "factor": "size",
+      "ic_mean": 0.19464285714285712,
+      "ic_std": 0.09343911037107948,
+      "ir": 2.083098355387397,
+      "n_days": 2
+    },
+    {
+      "factor": "natural_log_of_market_cap",
+      "ic_mean": 0.19464285714285712,
+      "ic_std": 0.09343911037107948,
+      "ir": 2.083098355387397,
+      "n_days": 2
+    },
+    {
+      "factor": "intangible_asset_ratio",
+      "ic_mean": 0.26249999999999996,
+      "ic_std": 0.12879444943040688,
+      "ir": 2.038131310478872,
+      "n_days": 2
+    },
+    {
+      "factor": "super_quick_ratio",
+      "ic_mean": 0.29107142857142854,
+      "ic_std": 0.14394673759868998,
+      "ir": 2.022077286551005,
+      "n_days": 2
+    },
+    {
+      "factor": "asset_turnover_ttm",
+      "ic_mean": 0.3607142857142856,
+      "ic_std": 0.18687822074215893,
+      "ir": 1.9302104026984135,
+      "n_days": 2
+    },
+    {
+      "factor": "divyild",
+      "ic_mean": 0.3235032569706777,
+      "ic_std": 0.17187946495373735,
+      "ir": 1.882151873452428,
+      "n_days": 2
+    },
+    {
+      "factor": "earnings_to_price_ratio",
+      "ic_mean": 0.27142857142857135,
+      "ic_std": 0.14647211896007054,
+      "ir": 1.8531074265578484,
+      "n_days": 2
+    },
+    {
+      "factor": "Kurtosis20",
+      "ic_mean": 0.23749999999999996,
+      "ic_std": 0.12879444943040685,
+      "ir": 1.8440235666237415,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_cost_ttm",
+      "ic_mean": 0.0875,
+      "ic_std": 0.04798224586623,
+      "ir": 1.8235911725337282,
+      "n_days": 2
+    },
+    {
+      "factor": "net_profit_growth_rate",
+      "ic_mean": 0.06318681318681318,
+      "ic_std": 0.034966818849884215,
+      "ir": 1.8070506630322882,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_revenue_growth_rate",
+      "ic_mean": 0.5054945054945055,
+      "ic_std": 0.2797345507990737,
+      "ir": 1.8070506630322882,
+      "n_days": 2
+    },
+    {
+      "factor": "non_recurring_gain_loss",
+      "ic_mean": 0.20714285714285713,
+      "ic_std": 0.11616754262350422,
+      "ir": 1.7831388395139025,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_growth_rate",
+      "ic_mean": 0.08241758241758243,
+      "ic_std": 0.046622425133178956,
+      "ir": 1.767766952966369,
+      "n_days": 2
+    },
+    {
+      "factor": "total_profit_growth_rate",
+      "ic_mean": 0.08241758241758243,
+      "ic_std": 0.046622425133178956,
+      "ir": 1.767766952966369,
+      "n_days": 2
+    },
+    {
+      "factor": "short_term_predicted_earnings_growth",
+      "ic_mean": 0.47878787878787876,
+      "ic_std": 0.29141370376172865,
+      "ir": 1.6429834033452135,
+      "n_days": 2
+    },
+    {
+      "factor": "TVMA6",
+      "ic_mean": 0.24642857142857139,
+      "ic_std": 0.1515228816828316,
+      "ir": 1.6263455967290592,
+      "n_days": 2
+    },
+    {
+      "factor": "cash_rate_of_sales",
+      "ic_mean": 0.2571428571428571,
+      "ic_std": 0.16162440712835371,
+      "ir": 1.590990257669732,
+      "n_days": 2
+    },
+    {
+      "factor": "VOL5",
+      "ic_mean": 0.03928571428571428,
+      "ic_std": 0.02525381361380526,
+      "ir": 1.5556349186104048,
+      "n_days": 2
+    },
+    {
+      "factor": "Skewness60",
+      "ic_mean": 0.1839285714285714,
+      "ic_std": 0.12879444943040685,
+      "ir": 1.4280784012198902,
+      "n_days": 2
+    },
+    {
+      "factor": "BIAS10",
+      "ic_mean": 0.17678571428571424,
+      "ic_std": 0.12879444943040683,
+      "ir": 1.37261904583271,
+      "n_days": 2
+    },
+    {
+      "factor": "bear_power",
+      "ic_mean": 0.05892857142857142,
+      "ic_std": 0.04293148314346895,
+      "ir": 1.3726190458327099,
+      "n_days": 2
+    },
+    {
+      "factor": "total_asset_turnover_rate",
+      "ic_mean": 0.23035714285714282,
+      "ic_std": 0.1692005512124953,
+      "ir": 1.3614443995979792,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_per_share",
+      "ic_mean": 0.21607142857142853,
+      "ic_std": 0.15909902576697316,
+      "ir": 1.358093976564639,
+      "n_days": 2
+    },
+    {
+      "factor": "sale_expense_ttm",
+      "ic_mean": 0.18928571428571428,
+      "ic_std": 0.1414213562373095,
+      "ir": 1.3384521215316791,
+      "n_days": 2
+    },
+    {
+      "factor": "circulating_market_cap",
+      "ic_mean": 0.1232142857142857,
+      "ic_std": 0.0934391103710795,
+      "ir": 1.3186585919424803,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_liability",
+      "ic_mean": 0.16428571428571426,
+      "ic_std": 0.13131983079178738,
+      "ir": 1.2510350744069687,
+      "n_days": 2
+    },
+    {
+      "factor": "cfo_to_ev",
+      "ic_mean": 0.23928571428571424,
+      "ic_std": 0.19192898346492,
+      "ir": 1.2467409036710182,
+      "n_days": 2
+    },
+    {
+      "factor": "MAC120",
+      "ic_mean": 0.11794016222362011,
+      "ic_std": 0.0960818988464718,
+      "ir": 1.227496163580982,
+      "n_days": 2
+    },
+    {
+      "factor": "earnqlty",
+      "ic_mean": 0.40892857142857136,
+      "ic_std": 0.34597724650913214,
+      "ir": 1.1819522108884626,
+      "n_days": 2
+    },
+    {
+      "factor": "margin_stability",
+      "ic_mean": 0.2272727272727273,
+      "ic_std": 0.19284730395996752,
+      "ir": 1.1785113019775793,
+      "n_days": 2
+    },
+    {
+      "factor": "account_receivable_turnover_days",
+      "ic_mean": 0.2767857142857142,
+      "ic_std": 0.23486046660838894,
+      "ir": 1.178511301977579,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_ttm",
+      "ic_mean": 0.10178571428571427,
+      "ic_std": 0.08838834764831842,
+      "ir": 1.1515739007895203,
+      "n_days": 2
+    },
+    {
+      "factor": "sharpe_ratio_120",
+      "ic_mean": 0.041071428571428564,
+      "ic_std": 0.0378807204207079,
+      "ir": 1.0842303978193728,
+      "n_days": 2
+    },
+    {
+      "factor": "interest_free_current_liability",
+      "ic_mean": 0.2178571428571428,
+      "ic_std": 0.20203050891044205,
+      "ir": 1.0783378413094853,
+      "n_days": 2
+    },
+    {
+      "factor": "ROAEBITTTM",
+      "ic_mean": 0.21785714285714283,
+      "ic_std": 0.2070812716332032,
+      "ir": 1.052036918350717,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_to_total_liability",
+      "ic_mean": 0.3071428571428571,
+      "ic_std": 0.29294423792014107,
+      "ir": 1.048468675552467,
+      "n_days": 2
+    },
+    {
+      "factor": "bull_power",
+      "ic_mean": 0.04999999999999999,
+      "ic_std": 0.050507627227610534,
+      "ir": 0.9899494936611664,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_profit_to_total_profit",
+      "ic_mean": 0.23928571428571427,
+      "ic_std": 0.26769042430633583,
+      "ir": 0.8938897045188431,
+      "n_days": 2
+    },
+    {
+      "factor": "book_to_price_ratio",
+      "ic_mean": 0.26607142857142857,
+      "ic_std": 0.30052038200428266,
+      "ir": 0.8853689949310554,
+      "n_days": 2
+    },
+    {
+      "factor": "btop",
+      "ic_mean": 0.26607142857142857,
+      "ic_std": 0.30052038200428266,
+      "ir": 0.8853689949310554,
+      "n_days": 2
+    },
+    {
+      "factor": "retained_earnings",
+      "ic_mean": 0.29285714285714287,
+      "ic_std": 0.33335033970222955,
+      "ir": 0.8785266069287408,
+      "n_days": 2
+    },
+    {
+      "factor": "cash_earnings_to_price_ratio",
+      "ic_mean": 0.19107142857142853,
+      "ic_std": 0.21970817844010582,
+      "ir": 0.8696600642179376,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_to_total_current_liability",
+      "ic_mean": 0.16607142857142856,
+      "ic_std": 0.1995051275490616,
+      "ir": 0.8324168436753028,
+      "n_days": 2
+    },
+    {
+      "factor": "DAVOL5",
+      "ic_mean": 0.033928571428571426,
+      "ic_std": 0.04293148314346895,
+      "ir": 0.7902958142673179,
+      "n_days": 2
+    },
+    {
+      "factor": "VSTD10",
+      "ic_mean": 0.05178571428571428,
+      "ic_std": 0.06818529675727422,
+      "ir": 0.7594850612744399,
+      "n_days": 2
+    },
+    {
+      "factor": "market_beta",
+      "ic_mean": 0.055357142857142855,
+      "ic_std": 0.07323605948003527,
+      "ir": 0.7558727660959647,
+      "n_days": 2
+    },
+    {
+      "factor": "equity_turnover_rate",
+      "ic_mean": 0.058928571428571414,
+      "ic_std": 0.07828682220279631,
+      "ir": 0.7527265735211635,
+      "n_days": 2
+    },
+    {
+      "factor": "TVMA20",
+      "ic_mean": 0.15892857142857136,
+      "ic_std": 0.2146574157173447,
+      "ir": 0.7403823944188557,
+      "n_days": 2
+    },
+    {
+      "factor": "money_flow_20",
+      "ic_mean": 0.15892857142857136,
+      "ic_std": 0.2146574157173447,
+      "ir": 0.7403823944188557,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_to_net_debt",
+      "ic_mean": 0.24464285714285713,
+      "ic_std": 0.330824958340849,
+      "ir": 0.739493351317229,
+      "n_days": 2
+    },
+    {
+      "factor": "BIAS5",
+      "ic_mean": 0.19285714285714284,
+      "ic_std": 0.28284271247461895,
+      "ir": 0.6818529675727423,
+      "n_days": 2
+    },
+    {
+      "factor": "net_debt",
+      "ic_mean": 0.0857142857142857,
+      "ic_std": 0.13131983079178738,
+      "ir": 0.6527139518645054,
+      "n_days": 2
+    },
+    {
+      "factor": "OperatingCycle",
+      "ic_mean": 0.16263736263736261,
+      "ic_std": 0.25176109571916633,
+      "ir": 0.6459987877506731,
+      "n_days": 2
+    },
+    {
+      "factor": "EMAC20",
+      "ic_mean": 0.04464285714285713,
+      "ic_std": 0.07323605948003525,
+      "ir": 0.6095748113677134,
+      "n_days": 2
+    },
+    {
+      "factor": "ACCA",
+      "ic_mean": 0.11964285714285712,
+      "ic_std": 0.1995051275490616,
+      "ir": 0.5996981561961858,
+      "n_days": 2
+    },
+    {
+      "factor": "capital_reserve_fund_per_share",
+      "ic_mean": 0.05892857142857142,
+      "ic_std": 0.09848987309384054,
+      "ir": 0.5983211225424633,
+      "n_days": 2
+    },
+    {
+      "factor": "single_day_VPT",
+      "ic_mean": 0.3428571428571428,
+      "ic_std": 0.57578695039476,
+      "ir": 0.5954583420518295,
+      "n_days": 2
+    },
+    {
+      "factor": "Skewness20",
+      "ic_mean": 0.10535714285714283,
+      "ic_std": 0.17930207665801737,
+      "ir": 0.5875957759155818,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cash_flow_to_asset",
+      "ic_mean": 0.16249999999999998,
+      "ic_std": 0.28536809383599954,
+      "ir": 0.5694399742298745,
+      "n_days": 2
+    },
+    {
+      "factor": "momentum",
+      "ic_mean": 0.039285714285714285,
+      "ic_std": 0.0757614408414158,
+      "ir": 0.5185449728701349,
+      "n_days": 2
+    },
+    {
+      "factor": "relative_strength",
+      "ic_mean": 0.039285714285714285,
+      "ic_std": 0.0757614408414158,
+      "ir": 0.5185449728701349,
+      "n_days": 2
+    },
+    {
+      "factor": "value_change_profit_ttm",
+      "ic_mean": 0.10813230412555802,
+      "ic_std": 0.21105787240642748,
+      "ir": 0.5123348534345644,
+      "n_days": 2
+    },
+    {
+      "factor": "DSRI",
+      "ic_mean": 0.12142857142857139,
+      "ic_std": 0.2676904243063358,
+      "ir": 0.45361567094986066,
+      "n_days": 2
+    },
+    {
+      "factor": "inventory_turnover_rate",
+      "ic_mean": 0.1142857142857143,
+      "ic_std": 0.2579774190702569,
+      "ir": 0.4430066580927768,
+      "n_days": 2
+    },
+    {
+      "factor": "accounts_payable_turnover_days",
+      "ic_mean": 0.11263736263736263,
+      "ic_std": 0.2758493487046421,
+      "ir": 0.4083292680091331,
+      "n_days": 2
+    },
+    {
+      "factor": "predicted_earnings_to_price_ratio",
+      "ic_mean": 0.06666666666666667,
+      "ic_std": 0.17141982574219333,
+      "ir": 0.38890872965260115,
+      "n_days": 2
+    },
+    {
+      "factor": "TVSTD20",
+      "ic_mean": 0.09464285714285714,
+      "ic_std": 0.2500127547766721,
+      "ir": 0.378552115180677,
+      "n_days": 2
+    },
+    {
+      "factor": "retained_earnings_per_share",
+      "ic_mean": 0.10769230769230767,
+      "ic_std": 0.31081616755452635,
+      "ir": 0.3464823227814083,
+      "n_days": 2
+    },
+    {
+      "factor": "retained_profit_per_share",
+      "ic_mean": 0.09821428571428573,
+      "ic_std": 0.28536809383599954,
+      "ir": 0.3441670173916825,
+      "n_days": 2
+    },
+    {
+      "factor": "VSTD20",
+      "ic_mean": 0.025,
+      "ic_std": 0.0757614408414158,
+      "ir": 0.32998316455372223,
+      "n_days": 2
+    },
+    {
+      "factor": "cash_to_current_liability",
+      "ic_mean": 0.06607142857142854,
+      "ic_std": 0.21970817844010576,
+      "ir": 0.3007235736080719,
+      "n_days": 2
+    },
+    {
+      "factor": "long_debt_to_working_capital_ratio",
+      "ic_mean": 0.08928571428571423,
+      "ic_std": 0.31314728881118525,
+      "ir": 0.2851237020913497,
+      "n_days": 2
+    },
+    {
+      "factor": "CCI10",
+      "ic_mean": 0.03571428571428571,
+      "ic_std": 0.12626906806902632,
+      "ir": 0.28284271247461906,
+      "n_days": 2
+    },
+    {
+      "factor": "surplus_reserve_fund_per_share",
+      "ic_mean": 0.08351648351648351,
+      "ic_std": 0.2952753591768001,
+      "ir": 0.28284271247461895,
+      "n_days": 2
+    },
+    {
+      "factor": "WVAD",
+      "ic_mean": 0.06249999999999998,
+      "ic_std": 0.22475894116286685,
+      "ir": 0.2780757004666198,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_assets",
+      "ic_mean": 0.05714285714285715,
+      "ic_std": 0.23738584796976947,
+      "ir": 0.24071720210605882,
+      "n_days": 2
+    },
+    {
+      "factor": "net_invest_cash_flow_ttm",
+      "ic_mean": 0.04285714285714286,
+      "ic_std": 0.21718279707872523,
+      "ir": 0.1973321249822924,
+      "n_days": 2
+    },
+    {
+      "factor": "net_asset_per_share",
+      "ic_mean": 0.041071428571428564,
+      "ic_std": 0.21465741571734473,
+      "ir": 0.1913347760857717,
+      "n_days": 2
+    },
+    {
+      "factor": "growth",
+      "ic_mean": 0.04464285714285715,
+      "ic_std": 0.234860466608389,
+      "ir": 0.1900824680608999,
+      "n_days": 2
+    },
+    {
+      "factor": "PLRC12",
+      "ic_mean": 0.012499999999999997,
+      "ic_std": 0.11364216126212369,
+      "ir": 0.10999438818457405,
+      "n_days": 2
+    },
+    {
+      "factor": "VDIFF",
+      "ic_mean": 0.005357142857142862,
+      "ic_std": 0.08838834764831842,
+      "ir": 0.06060915267313272,
+      "n_days": 2
+    },
+    {
+      "factor": "single_day_VPT_12",
+      "ic_mean": 0.0035714285714285726,
+      "ic_std": 0.07071067811865475,
+      "ir": 0.050507627227610555,
+      "n_days": 2
+    },
+    {
+      "factor": "long_term_debt_to_asset_ratio",
+      "ic_mean": -0.3607142857142856,
+      "ic_std": 0.0,
+      "ir": 0.0,
+      "n_days": 2
+    },
+    {
+      "factor": "MFI14",
+      "ic_mean": 0.0,
+      "ic_std": 0.07071067811865475,
+      "ir": 0.0,
+      "n_days": 2
+    },
+    {
+      "factor": "sales_to_price_ratio",
+      "ic_mean": -0.024999999999999998,
+      "ic_std": 0.0,
+      "ir": 0.0,
+      "n_days": 2
+    },
+    {
+      "factor": "VOL10",
+      "ic_mean": 0.0,
+      "ic_std": 0.06060915267313264,
+      "ir": 0.0,
+      "n_days": 2
+    },
+    {
+      "factor": "adjusted_profit_to_total_profit",
+      "ic_mean": -0.007142857142857145,
+      "ic_std": 0.34850262787051267,
+      "ir": -0.020495848730044865,
+      "n_days": 2
+    },
+    {
+      "factor": "roe_ttm_8y",
+      "ic_mean": -0.009090909090909066,
+      "ic_std": 0.32141217326661253,
+      "ir": -0.02828427124746182,
+      "n_days": 2
+    },
+    {
+      "factor": "current_asset_turnover_rate",
+      "ic_mean": -0.010714285714285704,
+      "ic_std": 0.27779194975185795,
+      "ir": -0.038569460791993464,
+      "n_days": 2
+    },
+    {
+      "factor": "net_asset_growth_rate",
+      "ic_mean": -0.02857142857142858,
+      "ic_std": 0.34850262787051267,
+      "ir": -0.08198339492017946,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operating_cash_flow_coverage",
+      "ic_mean": -0.02857142857142858,
+      "ic_std": 0.2575888988608137,
+      "ir": -0.11091871077436044,
+      "n_days": 2
+    },
+    {
+      "factor": "financial_liability",
+      "ic_mean": -0.02678571428571428,
+      "ic_std": 0.1793020766580174,
+      "ir": -0.1493887565887072,
+      "n_days": 2
+    },
+    {
+      "factor": "CR20",
+      "ic_mean": -0.030357142857142867,
+      "ic_std": 0.1793020766580174,
+      "ir": -0.1693072574672016,
+      "n_days": 2
+    },
+    {
+      "factor": "VOL240",
+      "ic_mean": -0.017857142857142853,
+      "ic_std": 0.09596449173246002,
+      "ir": -0.18608073189119667,
+      "n_days": 2
+    },
+    {
+      "factor": "roa_ttm_8y",
+      "ic_mean": -0.08181818181818182,
+      "ic_std": 0.2699862255439545,
+      "ir": -0.3030457633656632,
+      "n_days": 2
+    },
+    {
+      "factor": "average_share_turnover_annual",
+      "ic_mean": -0.041071428571428564,
+      "ic_std": 0.11364216126212369,
+      "ir": -0.3614101326064576,
+      "n_days": 2
+    },
+    {
+      "factor": "accounts_payable_turnover_rate",
+      "ic_mean": -0.11263736263736263,
+      "ic_std": 0.2758493487046421,
+      "ir": -0.4083292680091331,
+      "n_days": 2
+    },
+    {
+      "factor": "inventory_turnover_days",
+      "ic_mean": -0.1142857142857143,
+      "ic_std": 0.2579774190702569,
+      "ir": -0.4430066580927768,
+      "n_days": 2
+    },
+    {
+      "factor": "VOL120",
+      "ic_mean": -0.03035714285714285,
+      "ic_std": 0.05808377131175211,
+      "ir": -0.5226441426161438,
+      "n_days": 2
+    },
+    {
+      "factor": "MAWVAD",
+      "ic_mean": -0.06607142857142857,
+      "ic_std": 0.11869292398488475,
+      "ir": -0.5566585298702609,
+      "n_days": 2
+    },
+    {
+      "factor": "sales_growth",
+      "ic_mean": -0.1607142857142857,
+      "ic_std": 0.28789347519738,
+      "ir": -0.5582421956735902,
+      "n_days": 2
+    },
+    {
+      "factor": "PLRC6",
+      "ic_mean": -0.030357142857142857,
+      "ic_std": 0.05303300858899106,
+      "ir": -0.5724197752462529,
+      "n_days": 2
+    },
+    {
+      "factor": "ROC120",
+      "ic_mean": -0.030357142857142857,
+      "ic_std": 0.05303300858899106,
+      "ir": -0.5724197752462529,
+      "n_days": 2
+    },
+    {
+      "factor": "liquidty",
+      "ic_mean": -0.08035714285714285,
+      "ic_std": 0.13889597487592897,
+      "ir": -0.5785419118799024,
+      "n_days": 2
+    },
+    {
+      "factor": "VOL20",
+      "ic_mean": -0.03928571428571428,
+      "ic_std": 0.06565991539589368,
+      "ir": -0.5983211225424634,
+      "n_days": 2
+    },
+    {
+      "factor": "share_turnover_monthly",
+      "ic_mean": -0.03928571428571428,
+      "ic_std": 0.06565991539589368,
+      "ir": -0.5983211225424634,
+      "n_days": 2
+    },
+    {
+      "factor": "TRIX5",
+      "ic_mean": -0.02321428571428571,
+      "ic_std": 0.0378807204207079,
+      "ir": -0.6128258770283412,
+      "n_days": 2
+    },
+    {
+      "factor": "ROC12",
+      "ic_mean": -0.0482142857142857,
+      "ic_std": 0.07828682220279631,
+      "ir": -0.6158671965173156,
+      "n_days": 2
+    },
+    {
+      "factor": "MAC5",
+      "ic_mean": -0.19285714285714284,
+      "ic_std": 0.28284271247461895,
+      "ir": -0.6818529675727423,
+      "n_days": 2
+    },
+    {
+      "factor": "residual_volatility",
+      "ic_mean": -0.1714285714285714,
+      "ic_std": 0.22728432252424738,
+      "ir": -0.7542472332656507,
+      "n_days": 2
+    },
+    {
+      "factor": "historical_sigma",
+      "ic_mean": -0.20178571428571423,
+      "ic_std": 0.2601142802221942,
+      "ir": -0.7757579249910668,
+      "n_days": 2
+    },
+    {
+      "factor": "EMA5",
+      "ic_mean": -0.1857142857142857,
+      "ic_std": 0.22728432252424738,
+      "ir": -0.8171011693711216,
+      "n_days": 2
+    },
+    {
+      "factor": "interest_carry_current_liability",
+      "ic_mean": -0.12857142857142856,
+      "ic_std": 0.1515228816828316,
+      "ir": -0.848528137423857,
+      "n_days": 2
+    },
+    {
+      "factor": "Skewness120",
+      "ic_mean": -0.08392857142857142,
+      "ic_std": 0.09848987309384054,
+      "ir": -0.8521543260453265,
+      "n_days": 2
+    },
+    {
+      "factor": "long_growth",
+      "ic_mean": -0.2913316623548092,
+      "ic_std": 0.32859309476449783,
+      "ir": -0.8866031179492866,
+      "n_days": 2
+    },
+    {
+      "factor": "cash_flow_to_price_ratio",
+      "ic_mean": -0.3142857142857142,
+      "ic_std": 0.3535533905932737,
+      "ir": -0.8889342392059455,
+      "n_days": 2
+    },
+    {
+      "factor": "cashflow_per_share_ttm",
+      "ic_mean": -0.2946428571428571,
+      "ic_std": 0.30052038200428266,
+      "ir": -0.9804421755947927,
+      "n_days": 2
+    },
+    {
+      "factor": "DAVOL10",
+      "ic_mean": -0.09464285714285713,
+      "ic_std": 0.09343911037107949,
+      "ir": -1.012882686564514,
+      "n_days": 2
+    },
+    {
+      "factor": "arron_up_25",
+      "ic_mean": -0.23651691216739837,
+      "ic_std": 0.2123918857842689,
+      "ir": -1.1135873260602516,
+      "n_days": 2
+    },
+    {
+      "factor": "ATR6",
+      "ic_mean": -0.16428571428571426,
+      "ic_std": 0.1464721189600705,
+      "ir": -1.1216176529165929,
+      "n_days": 2
+    },
+    {
+      "factor": "relative_momentum",
+      "ic_mean": -0.05183201354778813,
+      "ic_std": 0.04549750542893047,
+      "ir": -1.13922759191166,
+      "n_days": 2
+    },
+    {
+      "factor": "ATR14",
+      "ic_mean": -0.15714285714285714,
+      "ic_std": 0.13637059351454844,
+      "ir": -1.152322161933633,
+      "n_days": 2
+    },
+    {
+      "factor": "resvol",
+      "ic_mean": -0.26428571428571423,
+      "ic_std": 0.22728432252424738,
+      "ir": -1.1627978179512115,
+      "n_days": 2
+    },
+    {
+      "factor": "account_receivable_turnover_rate",
+      "ic_mean": -0.2767857142857142,
+      "ic_std": 0.23486046660838894,
+      "ir": -1.178511301977579,
+      "n_days": 2
+    },
+    {
+      "factor": "net_operate_cashflow_growth_rate",
+      "ic_mean": -0.11538461538461539,
+      "ic_std": 0.09324485026635793,
+      "ir": -1.2374368670764582,
+      "n_days": 2
+    },
+    {
+      "factor": "midcap",
+      "ic_mean": -0.3232142857142857,
+      "ic_std": 0.2500127547766722,
+      "ir": -1.292791185805708,
+      "n_days": 2
+    },
+    {
+      "factor": "non_linear_size",
+      "ic_mean": -0.3232142857142857,
+      "ic_std": 0.2500127547766722,
+      "ir": -1.292791185805708,
+      "n_days": 2
+    },
+    {
+      "factor": "cube_of_size",
+      "ic_mean": -0.3232142857142857,
+      "ic_std": 0.2500127547766722,
+      "ir": -1.292791185805708,
+      "n_days": 2
+    },
+    {
+      "factor": "EMAC12",
+      "ic_mean": -0.14285714285714282,
+      "ic_std": 0.1060660171779821,
+      "ir": -1.3468700594029477,
+      "n_days": 2
+    },
+    {
+      "factor": "MAC10",
+      "ic_mean": -0.17678571428571424,
+      "ic_std": 0.12879444943040683,
+      "ir": -1.37261904583271,
+      "n_days": 2
+    },
+    {
+      "factor": "DAVOL20",
+      "ic_mean": -0.2482142857142857,
+      "ic_std": 0.17425131393525634,
+      "ir": -1.4244614867381176,
+      "n_days": 2
+    },
+    {
+      "factor": "cumulative_range",
+      "ic_mean": -0.2357142857142857,
+      "ic_std": 0.16162440712835371,
+      "ir": -1.4584077361972543,
+      "n_days": 2
+    },
+    {
+      "factor": "EMAC10",
+      "ic_mean": -0.13035714285714284,
+      "ic_std": 0.0883883476483184,
+      "ir": -1.474822715046228,
+      "n_days": 2
+    },
+    {
+      "factor": "BBIC",
+      "ic_mean": -0.13035714285714284,
+      "ic_std": 0.0883883476483184,
+      "ir": -1.474822715046228,
+      "n_days": 2
+    },
+    {
+      "factor": "Volume1M",
+      "ic_mean": -0.1482142857142857,
+      "ic_std": 0.09848987309384051,
+      "ir": -1.5048682779098321,
+      "n_days": 2
+    },
+    {
+      "factor": "goods_service_cash_to_operating_revenue_ttm",
+      "ic_mean": -0.3214285714285714,
+      "ic_std": 0.21213203435596423,
+      "ir": -1.5152288168283161,
+      "n_days": 2
+    },
+    {
+      "factor": "GMI",
+      "ic_mean": -0.30494505494505497,
+      "ic_std": 0.19814530681601059,
+      "ir": -1.5389971119942505,
+      "n_days": 2
+    },
+    {
+      "factor": "CCI88",
+      "ic_mean": -0.18571428571428567,
+      "ic_std": 0.1161675426235042,
+      "ir": -1.5986762009434987,
+      "n_days": 2
+    },
+    {
+      "factor": "total_asset_growth_rate",
+      "ic_mean": -0.4392857142857142,
+      "ic_std": 0.27274118702909694,
+      "ir": -1.610632112702691,
+      "n_days": 2
+    },
+    {
+      "factor": "CCI20",
+      "ic_mean": -0.04999999999999999,
+      "ic_std": 0.030304576336566316,
+      "ir": -1.6499158227686108,
+      "n_days": 2
+    },
+    {
+      "factor": "average_share_turnover_quarterly",
+      "ic_mean": -0.024999999999999994,
+      "ic_std": 0.015152288168283158,
+      "ir": -1.6499158227686108,
+      "n_days": 2
+    },
+    {
+      "factor": "VOL60",
+      "ic_mean": -0.024999999999999994,
+      "ic_std": 0.015152288168283158,
+      "ir": -1.6499158227686108,
+      "n_days": 2
+    },
+    {
+      "factor": "price_no_fq",
+      "ic_mean": -0.16071428571428567,
+      "ic_std": 0.09596449173245998,
+      "ir": -1.6747265870207706,
+      "n_days": 2
+    },
+    {
+      "factor": "ltrevrsl",
+      "ic_mean": -0.20357142857142851,
+      "ic_std": 0.1161675426235042,
+      "ir": -1.7523950664188352,
+      "n_days": 2
+    },
+    {
+      "factor": "PLRC24",
+      "ic_mean": -0.2767857142857142,
+      "ic_std": 0.1540482630442121,
+      "ir": -1.7967467390805714,
+      "n_days": 2
+    },
+    {
+      "factor": "TRIX10",
+      "ic_mean": -0.35357142857142854,
+      "ic_std": 0.19192898346492004,
+      "ir": -1.8421992457228473,
+      "n_days": 2
+    },
+    {
+      "factor": "turnover_volatility",
+      "ic_mean": -0.11428571428571427,
+      "ic_std": 0.06060915267313266,
+      "ir": -1.885618083164126,
+      "n_days": 2
+    },
+    {
+      "factor": "Variance20",
+      "ic_mean": -0.23392857142857137,
+      "ic_std": 0.10859139853936259,
+      "ir": -2.154209031056692,
+      "n_days": 2
+    },
+    {
+      "factor": "Variance120",
+      "ic_mean": -0.25535714285714284,
+      "ic_std": 0.11364216126212366,
+      "ir": -2.247028215770585,
+      "n_days": 2
+    },
+    {
+      "factor": "SGAI",
+      "ic_mean": -0.21249999999999997,
+      "ic_std": 0.08333758492555739,
+      "ir": -2.5498699079151255,
+      "n_days": 2
+    },
+    {
+      "factor": "non_current_asset_ratio",
+      "ic_mean": -0.23392857142857137,
+      "ic_std": 0.08838834764831842,
+      "ir": -2.646599666726792,
+      "n_days": 2
+    },
+    {
+      "factor": "raw_beta",
+      "ic_mean": -0.14107142857142854,
+      "ic_std": 0.053033008588991064,
+      "ir": -2.660068367320821,
+      "n_days": 2
+    },
+    {
+      "factor": "beta",
+      "ic_mean": -0.14107142857142854,
+      "ic_std": 0.053033008588991064,
+      "ir": -2.660068367320821,
+      "n_days": 2
+    },
+    {
+      "factor": "long_debt_to_asset_ratio",
+      "ic_mean": -0.48028982343087817,
+      "ic_std": 0.17741144310298845,
+      "ir": -2.707208819399924,
+      "n_days": 2
+    },
+    {
+      "factor": "MLEV",
+      "ic_mean": -0.3285714285714285,
+      "ic_std": 0.12121830534626525,
+      "ir": -2.7105759945484325,
+      "n_days": 2
+    },
+    {
+      "factor": "Kurtosis120",
+      "ic_mean": -0.07678571428571426,
+      "ic_std": 0.02777919497518579,
+      "ir": -2.7641446900928672,
+      "n_days": 2
+    },
+    {
+      "factor": "market_leverage",
+      "ic_mean": -0.32678571428571423,
+      "ic_std": 0.10859139853936262,
+      "ir": -3.009314905979959,
+      "n_days": 2
+    },
+    {
+      "factor": "non_operating_net_profit_ttm",
+      "ic_mean": -0.20357142857142851,
+      "ic_std": 0.060609152673132605,
+      "ir": -3.358757210636102,
+      "n_days": 2
+    },
+    {
+      "factor": "debt_to_assets",
+      "ic_mean": -0.3339285714285714,
+      "ic_std": 0.09848987309384051,
+      "ir": -3.3904863610739597,
+      "n_days": 2
+    },
+    {
+      "factor": "VDEA",
+      "ic_mean": -0.1875,
+      "ic_std": 0.05303300858899106,
+      "ir": -3.535533905932738,
+      "n_days": 2
+    },
+    {
+      "factor": "ROC60",
+      "ic_mean": -0.41428571428571426,
+      "ic_std": 0.11616754262350426,
+      "ir": -3.566277679027804,
+      "n_days": 2
+    },
+    {
+      "factor": "Variance60",
+      "ic_mean": -0.2642857142857143,
+      "ic_std": 0.07071067811865477,
+      "ir": -3.7375644148431793,
+      "n_days": 2
+    },
+    {
+      "factor": "debt_to_tangible_equity_ratio",
+      "ic_mean": -0.3374999999999999,
+      "ic_std": 0.08333758492555736,
+      "ir": -4.049793383159318,
+      "n_days": 2
+    },
+    {
+      "factor": "cash_and_equivalents_per_share",
+      "ic_mean": -0.20714285714285713,
+      "ic_std": 0.050507627227610534,
+      "ir": -4.1012193308819755,
+      "n_days": 2
+    },
+    {
+      "factor": "daily_standard_deviation",
+      "ic_mean": -0.3625,
+      "ic_std": 0.0833375849255574,
+      "ir": -4.349778078208155,
+      "n_days": 2
+    },
+    {
+      "factor": "net_finance_cash_flow_ttm",
+      "ic_mean": -0.475,
+      "ic_std": 0.10606601717798211,
+      "ir": -4.478342947514801,
+      "n_days": 2
+    },
+    {
+      "factor": "VR",
+      "ic_mean": -0.3374999999999999,
+      "ic_std": 0.0732360594800353,
+      "ir": -4.608385573939911,
+      "n_days": 2
+    },
+    {
+      "factor": "debt_to_asset_ratio",
+      "ic_mean": -0.3321428571428571,
+      "ic_std": 0.07071067811865474,
+      "ir": -4.69720933216778,
+      "n_days": 2
+    },
+    {
+      "factor": "debt_to_equity_ratio",
+      "ic_mean": -0.41607142857142854,
+      "ic_std": 0.08838834764831845,
+      "ir": -4.707310857613302,
+      "n_days": 2
+    },
+    {
+      "factor": "fixed_asset_ratio",
+      "ic_mean": -0.2857142857142857,
+      "ic_std": 0.060609152673132625,
+      "ir": -4.714045207910318,
+      "n_days": 2
+    },
+    {
+      "factor": "sharpe_ratio_60",
+      "ic_mean": -0.3767857142857143,
+      "ic_std": 0.0732360594800353,
+      "ir": -5.1448114079435,
+      "n_days": 2
+    },
+    {
+      "factor": "MAC20",
+      "ic_mean": -0.07857142857142857,
+      "ic_std": 0.015152288168283156,
+      "ir": -5.18544972870135,
+      "n_days": 2
+    },
+    {
+      "factor": "financing_cash_growth_rate",
+      "ic_mean": -0.46153846153846156,
+      "ic_std": 0.08547444607749477,
+      "ir": -5.399724510879089,
+      "n_days": 2
+    },
+    {
+      "factor": "boll_up",
+      "ic_mean": -0.2946428571428571,
+      "ic_std": 0.053033008588991036,
+      "ir": -5.555838995037162,
+      "n_days": 2
+    },
+    {
+      "factor": "MASS",
+      "ic_mean": -0.23928571428571427,
+      "ic_std": 0.04040610178208838,
+      "ir": -5.9220192924373425,
+      "n_days": 2
+    },
+    {
+      "factor": "earnvar",
+      "ic_mean": -0.3071428571428571,
+      "ic_std": 0.05050762722761051,
+      "ir": -6.081118318204311,
+      "n_days": 2
+    },
+    {
+      "factor": "CCI15",
+      "ic_mean": -0.06607142857142856,
+      "ic_std": 0.007576144084141573,
+      "ir": -8.720983634634093,
+      "n_days": 2
+    },
+    {
+      "factor": "Kurtosis60",
+      "ic_mean": -0.06607142857142856,
+      "ic_std": 0.007576144084141573,
+      "ir": -8.720983634634093,
+      "n_days": 2
+    },
+    {
+      "factor": "net_non_operating_income_to_total_profit",
+      "ic_mean": -0.45327541726427634,
+      "ic_std": 0.048433244995346084,
+      "ir": -9.358766221586665,
+      "n_days": 2
+    },
+    {
+      "factor": "total_operating_revenue_per_share",
+      "ic_mean": -0.11785714285714284,
+      "ic_std": 0.01010152544552213,
+      "ir": -11.667261889578008,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_revenue_per_share",
+      "ic_mean": -0.11785714285714284,
+      "ic_std": 0.01010152544552213,
+      "ir": -11.667261889578008,
+      "n_days": 2
+    },
+    {
+      "factor": "ROC20",
+      "ic_mean": -0.13571428571428568,
+      "ic_std": 0.010101525445522092,
+      "ir": -13.43502884254442,
+      "n_days": 2
+    },
+    {
+      "factor": "sharpe_ratio_20",
+      "ic_mean": -0.1732142857142857,
+      "ic_std": 0.012626906806902647,
+      "ir": -13.717871555019007,
+      "n_days": 2
+    },
+    {
+      "factor": "BIAS60",
+      "ic_mean": -0.3232142857142857,
+      "ic_std": 0.02272843225242474,
+      "ir": -14.220703043862787,
+      "n_days": 2
+    },
+    {
+      "factor": "Price3M",
+      "ic_mean": -0.33749999999999997,
+      "ic_std": 0.02272843225242474,
+      "ir": -14.849242404917497,
+      "n_days": 2
+    },
+    {
+      "factor": "financial_expense_rate",
+      "ic_mean": -0.4196428571428571,
+      "ic_std": 0.027779194975185776,
+      "ir": -15.106372143530796,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_cost_to_operating_revenue_ratio",
+      "ic_mean": -0.33928571428571425,
+      "ic_std": 0.02020305089104422,
+      "ir": -16.793786053180497,
+      "n_days": 2
+    },
+    {
+      "factor": "leverage",
+      "ic_mean": -0.35357142857142854,
+      "ic_std": 0.020203050891044183,
+      "ir": -17.50089283436708,
+      "n_days": 2
+    },
+    {
+      "factor": "operating_revenue_per_share_ttm",
+      "ic_mean": -0.15178571428571427,
+      "ic_std": 0.007576144084141593,
+      "ir": -20.03469213361881,
+      "n_days": 2
+    },
+    {
+      "factor": "total_operating_revenue_per_share_ttm",
+      "ic_mean": -0.15178571428571427,
+      "ic_std": 0.007576144084141593,
+      "ir": -20.03469213361881,
+      "n_days": 2
+    },
+    {
+      "factor": "book_leverage",
+      "ic_mean": -0.45892857142857135,
+      "ic_std": 0.022728432252424817,
+      "ir": -20.191826973882453,
+      "n_days": 2
+    },
+    {
+      "factor": "Price1Y",
+      "ic_mean": -0.13928571428571426,
+      "ic_std": 0.005050762722761035,
+      "ir": -27.57716446627545,
+      "n_days": 2
+    },
+    {
+      "factor": "financial_leverage",
+      "ic_mean": -0.2321428571428571,
+      "ic_std": 0.005050762722761075,
+      "ir": -45.961940777125385,
+      "n_days": 2
+    },
+    {
+      "factor": "BR",
+      "ic_mean": -0.33571428571428563,
+      "ic_std": 0.005050762722761075,
+      "ir": -66.46803743153517,
+      "n_days": 2
+    },
+    {
+      "factor": "financial_expense_ttm",
+      "ic_mean": -0.1875,
+      "ic_std": 0.0025253813613805376,
+      "ir": -74.24621202458718,
+      "n_days": 2
+    }
+  ]
+}

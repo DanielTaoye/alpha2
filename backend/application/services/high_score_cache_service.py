@@ -287,6 +287,7 @@ class HighScoreCacheService:
             total_score = min(max(s1_score or 0, s2_score or 0) * 1.2, 99)
             volume_type = (result or {}).get("volume_type") or (result or {}).get("realtime_volume_type")
             volume_type_source = (result or {}).get("volume_type_source")
+
             # 忽略阈值，统一标记 is_high_score=1 表示已写入
             return {
                 "stock_code": stock["code"],
@@ -295,6 +296,11 @@ class HighScoreCacheService:
                 "strategy1_score": round(s1_score or 0, 2),
                 "strategy2_score": round(s2_score or 0, 2),
                 "total_score": round(total_score, 2),
+                # 策略3：从DB补齐（见 HighScoreController），这里不做重计算，避免刷新阻塞/超时
+                "strategy3_prob": None,
+                "strategy3_raw": None,
+                "strategy3_date": None,
+                "strategy3_used_factors": 0,
                 "is_high_score": 1,
                 "date": date_str,
                 "volume_type": volume_type,
@@ -312,6 +318,10 @@ class HighScoreCacheService:
                 "strategy1_score": 0,
                 "strategy2_score": 0,
                 "total_score": 0,
+                "strategy3_prob": None,
+                "strategy3_raw": None,
+                "strategy3_date": None,
+                "strategy3_used_factors": 0,
                 "is_high_score": 1,  # 占位也写入，便于排查
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "error": str(e),
