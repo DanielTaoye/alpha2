@@ -36,3 +36,20 @@ class HighScoreController:
             logger.error(f"刷新高分排行榜失败: {e}", exc_info=True)
             return jsonify(ResponseBuilder.error("刷新失败"))
 
+    def get_high_score_grouped(self):
+        """从Redis读取高分排行榜（按股性分组分别取Top N）"""
+        try:
+            data = request.get_json(silent=True) or {}
+            limit_per_group = data.get("limit_per_group") or data.get("limitPerGroup") or data.get("limit") or 100
+            scan_limit = data.get("scan_limit") or data.get("scanLimit") or 2000
+            date_str = data.get("date") or data.get("date_str")
+            result = self.cache_service.get_top_grouped_from_cache(
+                limit_per_group=int(limit_per_group),
+                date_str=date_str,
+                scan_limit=int(scan_limit),
+            )
+            return jsonify(ResponseBuilder.success(result, "ok"))
+        except Exception as e:
+            logger.error(f"获取分组高分排行榜失败: {e}", exc_info=True)
+            return jsonify(ResponseBuilder.error("获取分组高分排行榜失败"))
+

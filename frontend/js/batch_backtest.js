@@ -11,6 +11,49 @@ function clampInt(v, min, max, fallback) {
     return Math.max(min, Math.min(max, n));
 }
 
+function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+        // 如果已经有同 src 的脚本，不重复加载
+        const existing = Array.from(document.getElementsByTagName('script')).find(s => s.src && s.src.includes(src));
+        if (existing) {
+            existing.addEventListener('load', () => resolve());
+            existing.addEventListener('error', () => reject(new Error(`加载脚本失败: ${src}`)));
+            // 如果已经加载完毕
+            if (existing.readyState === 'complete' || existing.readyState === 'loaded') {
+                return resolve();
+            }
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`加载脚本失败: ${src}`));
+        document.head.appendChild(script);
+    });
+}
+
+async function ensureXLSXLoaded() {
+    if (typeof XLSX !== 'undefined') return;
+    // 先尝试本地同源
+    try {
+        await loadScriptOnce('js/lib/xlsx.full.min.js?v=0.18.5');
+    } catch (err) {
+        console.warn('本地 xlsx.full.min.js 加载失败，尝试 CDN', err);
+    }
+    if (typeof XLSX !== 'undefined') return;
+    // 再尝试 CDN 兜底（如果生产策略拦截 CDN，仍可能失败）
+    try {
+        await loadScriptOnce('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    } catch (err) {
+        console.warn('CDN xlsx.full.min.js 加载失败', err);
+    }
+    if (typeof XLSX === 'undefined') {
+        throw new Error('Excel解析库未加载，请部署 js/lib/xlsx.full.min.js 或放行 CDN');
+    }
+}
+
 // 旧版：前端并发跑每只股票的 cr_analysis/backtest
 // 现已改为“后端批处理任务”，保留 backtestSingleStock 仅用于调试单股
 
@@ -78,6 +121,7 @@ function parseRowsToStocks(rows) {
 }
 
 async function readExcelStocks(file) {
+    await ensureXLSXLoaded();
     const data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = e => resolve(new Uint8Array(e.target.result));
@@ -100,7 +144,7 @@ async function readFileStocks(file) {
     }
     if (ext === 'xlsx' || ext === 'xls') {
         if (typeof XLSX === 'undefined') {
-            throw new Error('Excel解析库未加载');
+            throw new Error('Excel解析库未加载，请确保部署了 js/lib/xlsx.full.min.js');
         }
         return readExcelStocks(file);
     }

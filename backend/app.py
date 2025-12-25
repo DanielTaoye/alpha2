@@ -205,6 +205,12 @@ def streaming_high_score():
     return high_score_controller.get_high_score()
 
 
+@app.route('/api/streaming/high_score/grouped', methods=['POST'])
+def streaming_high_score_grouped():
+    """从Redis获取高分排行榜（按股性分组分别取Top N）"""
+    return high_score_controller.get_high_score_grouped()
+
+
 @app.route('/api/streaming/high_score/refresh', methods=['POST'])
 def refresh_streaming_high_score():
     """手动刷新高分排行榜（立即重算）"""

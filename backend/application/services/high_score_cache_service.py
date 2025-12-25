@@ -143,6 +143,36 @@ class HighScoreCacheService:
 
         return result
 
+    def get_top_grouped_from_cache(
+        self,
+        limit_per_group: int = 100,
+        date_str: Optional[str] = None,
+        scan_limit: int = 2000,
+    ) -> Dict:
+        """从缓存获取指定日期（默认当日）的排行榜，并按股性分组分别取Top N。
+
+        说明：
+        - 原接口 get_top_from_cache 只返回全局Top N，可能导致某些股性在Top里为空
+        - 这里会从zset取更大窗口（scan_limit），再分别筛出每个股性Top limit_per_group
+        """
+        keys = self.build_keys(date_str)
+        result = self._get_grouped_from_keys(keys, limit_per_group=limit_per_group, scan_limit=scan_limit)
+
+        # 若指定日期/当日无数据，兼容读取旧版无日期Key
+        total = result.get("total", 0) or 0
+        if total == 0:
+            legacy_keys = {
+                "zset": RedisClient.full_key("high_score:zset"),
+                "meta": RedisClient.full_key("high_score:meta"),
+                "date_key": "legacy",
+            }
+            legacy_result = self._get_grouped_from_keys(legacy_keys, limit_per_group=limit_per_group, scan_limit=scan_limit)
+            legacy_total = legacy_result.get("total", 0) or 0
+            if legacy_total > 0:
+                result = legacy_result
+
+        return result
+
     def _get_from_keys(self, keys: Dict[str, str], limit: int) -> Dict:
         zset_key = keys["zset"]
         meta_key = keys["meta"]
@@ -177,6 +207,64 @@ class HighScoreCacheService:
         return {
             "stocks": stocks,
             "total": len(stocks),
+            "service_stats": stats,
+            "date_key": keys.get("date_key"),
+        }
+
+    @staticmethod
+    def _normalize_nature(raw: Optional[str]) -> str:
+        val = (raw or "").strip()
+        if val in ("短线", "波段", "中长线"):
+            return val
+        return "波段"
+
+    def _get_grouped_from_keys(self, keys: Dict[str, str], limit_per_group: int, scan_limit: int) -> Dict:
+        zset_key = keys["zset"]
+        meta_key = keys["meta"]
+
+        groups = {"短线": [], "波段": [], "中长线": []}
+
+        # 取更大窗口，再分别筛出每组Top N
+        items = self.redis_client.zrevrange(zset_key, 0, max(scan_limit - 1, 0), withscores=True)
+        for raw, score in items:
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+
+            data["total_score"] = round(score, 2)
+            # 补充驼峰命名，兼容前端
+            if "volume_type" in data and "volumeType" not in data:
+                data["volumeType"] = data.get("volume_type")
+            if "volume_type_source" in data and "volumeTypeSource" not in data:
+                data["volumeTypeSource"] = data.get("volume_type_source")
+
+            nature = self._normalize_nature(data.get("nature"))
+            data["nature"] = nature
+            if len(groups[nature]) < limit_per_group:
+                groups[nature].append(data)
+
+            if all(len(groups[k]) >= limit_per_group for k in groups.keys()):
+                break
+
+        meta = self.redis_client.get(meta_key)
+        stats = None
+        if meta:
+            try:
+                stats = json.loads(meta)
+            except Exception:
+                stats = None
+        if not stats:
+            stats = self._last_stats
+        if stats and "date_key" not in stats:
+            stats["date_key"] = keys.get("date_key")
+
+        total_by_nature = {k: len(v) for k, v in groups.items()}
+        total = sum(total_by_nature.values())
+        return {
+            "groups": groups,
+            "total_by_nature": total_by_nature,
+            "total": total,
             "service_stats": stats,
             "date_key": keys.get("date_key"),
         }

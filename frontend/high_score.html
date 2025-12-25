@@ -326,6 +326,41 @@
             font-size: 14px;
         }
 
+        .nature-sections {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .nature-section {
+            border-top: 1px solid #f0f0f0;
+        }
+
+        .nature-header {
+            background: #f4f5fb;
+            color: #333;
+        }
+
+        .nature-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nature-count {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .nature-summary {
+            justify-content: flex-start;
+            gap: 20px;
+        }
+
+        .nature-empty {
+            padding: 30px 0;
+        }
+
 
         .scan-stats {
             display: flex;
@@ -410,6 +445,12 @@
     <script>
         const API_BASE_URL = '/api';
         let isScanning = false;
+        const DEFAULT_NATURE = '波段';
+        const NATURE_GROUPS = [
+            { key: '短线', label: '短线高分推荐' },
+            { key: '波段', label: '波段高分推荐' },
+            { key: '中长线', label: '中长线高分推荐' },
+        ];
 
 
         function formatTodayDigits() {
@@ -440,15 +481,16 @@
             updateScanningStatus(true);
 
             try {
-                // 使用快速接口（直接查数据库，毫秒级）
+                // 使用分组接口（从Redis读取，并按股性分别取Top N）
                 const todayDigits = formatTodayDigits();
-                const response = await fetch(`${API_BASE_URL}/streaming/high_score`, {
+                const response = await fetch(`${API_BASE_URL}/streaming/high_score/grouped`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        limit: 100,
+                        limit_per_group: 100,
+                        scan_limit: 5000,
                         date: todayDigits
                     })
                 });
@@ -456,20 +498,31 @@
                 const result = await response.json();
 
                 if (result.code === 200 && result.data) {
-                    const filteredStocks = (result.data.stocks || []).filter(item => {
-                        const digits = normalizeDateDigits(item.date);
-                        return digits === todayDigits;
+                    const groups = result.data.groups || {};
+                    const filteredGroups = {};
+                    let total = 0;
+                    NATURE_GROUPS.forEach(g => {
+                        const arr = groups[g.key] || [];
+                        const filteredArr = arr.filter(item => {
+                            const digits = normalizeDateDigits(item.date);
+                            return digits === todayDigits;
+                        });
+                        filteredGroups[g.key] = filteredArr;
+                        total += filteredArr.length;
                     });
 
                     const filteredData = {
                         ...result.data,
-                        stocks: filteredStocks,
-                        total: filteredStocks.length,
+                        groups: filteredGroups,
+                        total: total,
+                        total_by_nature: {
+                            '短线': filteredGroups['短线']?.length || 0,
+                            '波段': filteredGroups['波段']?.length || 0,
+                            '中长线': filteredGroups['中长线']?.length || 0,
+                        }
                     };
 
                     displayRanking(filteredData);
-                    document.getElementById('total-count').textContent = 
-                        `共 ${filteredData.total || 0} 只股票达到阈值（仅展示今日数据）`;
                     
                     // 显示流式服务统计信息
                     const stats = result.data.service_stats;
@@ -517,90 +570,45 @@
 
         // 显示排行榜
         function displayRanking(data) {
+            const hasGrouped = !!data.groups;
             const stocks = data.stocks || [];
-            
-            if (stocks.length === 0) {
+
+            let natureGroups = null;
+            if (hasGrouped) {
+                natureGroups = {
+                    '短线': data.groups['短线'] || [],
+                    '波段': data.groups['波段'] || [],
+                    '中长线': data.groups['中长线'] || [],
+                };
+            } else {
+                natureGroups = groupByNature(stocks);
+            }
+
+            const totalCount = (data.total != null) ? data.total : (
+                (natureGroups['短线'].length || 0) + (natureGroups['波段'].length || 0) + (natureGroups['中长线'].length || 0)
+            );
+
+            if (totalCount === 0) {
                 document.getElementById('ranking-content').innerHTML = 
                     `<div class="empty-state">
                         <div class="empty-state-icon">📊</div>
                         <div>暂无达到阈值的高分股票</div>
                     </div>`;
+                document.getElementById('total-count').textContent = '共 0 只股票达到阈值';
                 return;
             }
 
-            let html = `
-                <table class="ranking-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 60px; text-align: center;">排名</th>
-                            <th style="width: 120px;">股票代码</th>
-                            <th style="width: 120px;">股票名称</th>
-                            <th style="width: 100px;">总评分</th>
-                            <th style="width: 100px;">策略1</th>
-                            <th style="width: 100px;">策略2</th>
-                            <th style="width: 100px;">成交量类型</th>
-                            <th style="width: 80px;">股性</th>
-                            <th style="width: 110px;">日期</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
+            const groupSummaryText = NATURE_GROUPS
+                .map(group => `${group.key} ${natureGroups[group.key].length} 只`)
+                .join(' / ');
+            document.getElementById('total-count').textContent = 
+                `共 ${totalCount} 只（${groupSummaryText}，仅展示今日数据）`;
 
-            stocks.forEach((item, index) => {
-                const rank = index + 1;
-                let rankClass = '';
-                let rankIcon = rank;
-                
-                if (rank === 1) {
-                    rankClass = 'top1';
-                    rankIcon = '🥇';
-                } else if (rank === 2) {
-                    rankClass = 'top2';
-                    rankIcon = '🥈';
-                } else if (rank === 3) {
-                    rankClass = 'top3';
-                    rankIcon = '🥉';
-                }
-
-                const tableName = item.table_name || `basic_data_${item.stock_code.toLowerCase()}`;
-                const natureClass = item.nature || '';
-                
-                html += `
-                    <tr>
-                        <td class="rank-cell ${rankClass}">${rankIcon}</td>
-                        <td class="stock-code-cell">${item.stock_code}</td>
-                        <td class="stock-name-cell">${item.stock_name}</td>
-                        <td class="score-cell score-total">${item.total_score.toFixed(1)}%</td>
-                        <td class="score-cell score-strategy1">
-                            ${item.strategy1_score.toFixed(1)}
-                            ${item.strategy1_triggered ? 
-                                '<span class="badge badge-triggered">✓</span>' : ''}
-                        </td>
-                        <td class="score-cell score-strategy2">
-                            ${item.strategy2_score.toFixed(1)}
-                            ${item.strategy2_triggered ? 
-                                '<span class="badge badge-triggered">✓</span>' : ''}
-                        </td>
-                        <td class="volume-type-cell">${item.volume_type || '-'}</td>
-                        <td><span class="nature-badge ${natureClass}">${item.nature || '波段'}</span></td>
-                        <td class="date-cell">${item.date || '-'}</td>
-                    </tr>
-                `;
+            let html = '<div class="nature-sections">';
+            NATURE_GROUPS.forEach(group => {
+                html += renderNatureSection(group, natureGroups[group.key]);
             });
-
-            html += `
-                    </tbody>
-                </table>
-                <div class="summary-info">
-                    <div>
-                        共找到 <strong>${data.total || 0}</strong> 只达到阈值的高分股票
-                    </div>
-                    <div class="scan-stats">
-                        <span>📊 总共: ${data.total || 0} 只</span>
-                        <span>⚡ 实时更新</span>
-                    </div>
-                </div>
-            `;
+            html += '</div>';
 
             document.getElementById('ranking-content').innerHTML = html;
         }
@@ -619,6 +627,126 @@
         // 初始化加载（仅加载一次，不自动轮询）
         function initPage() {
             scanHighScoreStocks();  // 直接查询数据库
+        }
+
+        function groupByNature(stocks) {
+            const groups = {
+                '短线': [],
+                '波段': [],
+                '中长线': [],
+            };
+
+            stocks.forEach(item => {
+                const nature = normalizeNature(item.nature);
+                groups[nature].push({ ...item, nature });
+            });
+
+            Object.keys(groups).forEach(key => {
+                groups[key].sort((a, b) => (b.total_score || 0) - (a.total_score || 0));
+            });
+            return groups;
+        }
+
+        function normalizeNature(rawNature) {
+            const val = (rawNature || '').trim();
+            if (!val) return DEFAULT_NATURE;
+            if (val === '短线' || val === '波段' || val === '中长线') return val;
+            return DEFAULT_NATURE;
+        }
+
+        function renderNatureSection(group, items = []) {
+            const hasData = items.length > 0;
+            const header = `
+                <div class="ranking-header nature-header">
+                    <div class="nature-title">
+                        <h3 style="margin: 0;">${group.label}</h3>
+                        <span class="nature-badge ${group.key}">${group.key}</span>
+                    </div>
+                    <div class="nature-count">${hasData ? `${items.length} 只` : '暂无'}</div>
+                </div>
+            `;
+
+            if (!hasData) {
+                return `
+                    <div class="nature-section">
+                        ${header}
+                        <div class="empty-state nature-empty">
+                            <div class="empty-state-icon">📊</div>
+                            <div>当前股性暂无高分股票</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const rowsHtml = items.map((item, index) => {
+                const rank = index + 1;
+                let rankClass = '';
+                let rankIcon = rank;
+
+                if (rank === 1) {
+                    rankClass = 'top1';
+                    rankIcon = '🥇';
+                } else if (rank === 2) {
+                    rankClass = 'top2';
+                    rankIcon = '🥈';
+                } else if (rank === 3) {
+                    rankClass = 'top3';
+                    rankIcon = '🥉';
+                }
+
+                const normalizedNature = normalizeNature(item.nature);
+                const natureClass = normalizedNature;
+                return `
+                    <tr>
+                        <td class="rank-cell ${rankClass}">${rankIcon}</td>
+                        <td class="stock-code-cell">${item.stock_code}</td>
+                        <td class="stock-name-cell">${item.stock_name}</td>
+                        <td class="score-cell score-total">${item.total_score.toFixed(1)}%</td>
+                        <td class="score-cell score-strategy1">
+                            ${item.strategy1_score.toFixed(1)}
+                            ${item.strategy1_triggered ? '<span class="badge badge-triggered">✓</span>' : ''}
+                        </td>
+                        <td class="score-cell score-strategy2">
+                            ${item.strategy2_score.toFixed(1)}
+                            ${item.strategy2_triggered ? '<span class="badge badge-triggered">✓</span>' : ''}
+                        </td>
+                        <td class="volume-type-cell">${item.volume_type || '-'}</td>
+                        <td><span class="nature-badge ${natureClass}">${normalizedNature}</span></td>
+                        <td class="date-cell">${item.date || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <div class="nature-section">
+                    ${header}
+                    <table class="ranking-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 60px; text-align: center;">排名</th>
+                                <th style="width: 120px;">股票代码</th>
+                                <th style="width: 120px;">股票名称</th>
+                                <th style="width: 100px;">总评分</th>
+                                <th style="width: 100px;">策略1</th>
+                                <th style="width: 100px;">策略2</th>
+                                <th style="width: 100px;">成交量类型</th>
+                                <th style="width: 80px;">股性</th>
+                                <th style="width: 110px;">日期</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                    </table>
+                    <div class="summary-info nature-summary">
+                        <div>共找到 <strong>${items.length}</strong> 只 ${group.key} 股性的高分股票</div>
+                        <div class="scan-stats">
+                            <span>📊 当前股性: ${items.length} 只</span>
+                            <span>⚡ 实时更新</span>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         // 页面加载时启动
