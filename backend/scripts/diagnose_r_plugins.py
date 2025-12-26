@@ -1,6 +1,11 @@
 """
 诊断R点插件脚本 - 查看某只股票某天为什么触发/没有触发R点
 
+目标：
+- 输出顺序与 `domain/services/r_point_plugin_service.py::RPointPluginService.check_r_point` 完全一致
+- 对每个R插件都输出“条件说明 + 是否触发 + 关键原因/关键数据”
+- 控制台输出不包含任何 emoji / 对勾符号
+
 用法:
     python diagnose_r_plugins.py 东华软件 2025-02-21
     python diagnose_r_plugins.py SZ002065 2025-02-21
@@ -8,12 +13,13 @@
 import sys
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import argparse
 import requests
 from functools import lru_cache
+import logging
 
-# 控制台输出强制使用UTF-8，避免 Windows 控制台 emoji/中文报编码错误
+# 控制台输出强制使用UTF-8
 try:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -28,18 +34,42 @@ sys.path.insert(0, backend_dir)
 
 import pymysql
 from infrastructure.persistence.database import DatabaseConnection
-from infrastructure.logging.logger import get_logger
 from domain.services.r_point_plugin_service import RPointPluginService
 from domain.services.kline_pattern_service import KLinePatternService
 from application.services.cr_point_service import CRPointService
-from domain.services.config_service import get_config_service
 from domain.models.kline import KLineData as DomainKLineData
 
-logger = get_logger(__name__)
-config_service = get_config_service()
+# 本脚本输出需保持纯文本（无emoji/对勾）。为避免各业务模块 logger 混入控制台输出，
+# 这里直接禁用所有 logging 输出（包含 third-party logger）。
+logging.disable(logging.CRITICAL)
 
 # API基础URL
 API_BASE_URL = "http://localhost:5000"
+
+def _mark(ok: bool) -> str:
+    return "[OK]" if ok else "[NO]"
+
+def _mark3(state: str) -> str:
+    # state: OK/NO/SKIP
+    m = {"OK": "[OK]", "NO": "[NO]", "SKIP": "[SKIP]"}
+    return m.get(state, f"[{state}]")
+
+def _safe_float(v, default=0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+def _norm_date_str(s: str) -> str:
+    return str(s).strip()
+
+def _as_dt(s: Optional[str]) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        return datetime.strptime(str(s).split(" ")[0], "%Y-%m-%d")
+    except Exception:
+        return None
 
 
 def get_cr_points_from_api(stock_code: str, table_name: str, start_date: str = None, end_date: str = None) -> Optional[Dict]:
@@ -54,20 +84,20 @@ def get_cr_points_from_api(stock_code: str, table_name: str, start_date: str = N
         response = requests.post(f"{API_BASE_URL}/api/kline_data", json=payload, timeout=60)
         
         if response.status_code != 200:
-            print(f"❌ API请求失败: HTTP {response.status_code}")
+            print(f"[ERROR] API请求失败: HTTP {response.status_code}")
             return None
         
         result = response.json()
         if result.get("code") != 200:
-            print(f"❌ API返回错误: {result.get('message')}")
+            print(f"[ERROR] API返回错误: {result.get('message')}")
             return None
         
         return result.get("data")
     except requests.exceptions.ConnectionError:
-        print(f"❌ 无法连接到API服务器 ({API_BASE_URL})，请确保后端服务已启动")
+        print(f"[ERROR] 无法连接到API服务器 ({API_BASE_URL})，请确保后端服务已启动")
         return None
     except Exception as e:
-        print(f"❌ 获取K线数据失败: {e}")
+        print(f"[ERROR] 获取K线数据失败: {e}")
         return None
 
 
@@ -94,12 +124,12 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
     try:
         kline_list = api_data.get('kline_data') or api_data.get('klineData') or []
         if not kline_list:
-            return None, None
+            return None, None, None
 
         # 目标日期转换
         target_dt = _parse_dt(date_str)
         if not target_dt:
-            return None, None
+            return None, None, None
 
         # 转 DomainKLineData
         k_objs = []
@@ -146,8 +176,7 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
         s2_c_points = cr_result.get('strategy2_c_points', []) or []
         r_points = cr_result.get('r_points', []) or []
 
-        # 注意：这里要推断“进入目标日计算前”的CR上下文，因此使用 dt < target_dt（严格小于），
-        # 避免把“目标日当天刚产生的R/C”算进“上一有效点类型”，从而导致诊断与真实流程不一致。
+        # 推断“进入目标日计算前”的CR上下文：严格小于目标日，避免把当日新产生的点算进去
         def _last_before(points, ptypes):
             last_dt = None
             for p in points:
@@ -176,8 +205,242 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
         last_r_str = last_r_dt.strftime('%Y-%m-%d') if last_r_dt else None
         return last_c_str, last_type, last_r_str
     except Exception as e:
-        print(f"⚠️ 推断CR序列失败: {e}")
+        print(f"[WARN] 推断CR序列失败: {e}")
         return None, None, None
+
+
+def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: Optional[str] = None) -> str:
+    """
+    生成一份“按真实R插件顺序”的诊断报告（纯文本，无emoji）。
+    """
+    global API_BASE_URL
+    if api_base_url:
+        API_BASE_URL = api_base_url
+
+    date_str = _norm_date_str(date_str)
+    stock_code = stock_info["code"]
+    stock_name = stock_info.get("name") or ""
+    table_name = stock_info.get("table_name") or f"basic_data_{stock_code.lower()}"
+
+    lines: List[str] = []
+    lines.append("=" * 88)
+    lines.append("R点插件诊断报告")
+    lines.append(f"股票: {stock_code} {stock_name}".strip())
+    lines.append(f"日期: {date_str}")
+    lines.append("=" * 88)
+
+    # 基础数据（DB）
+    current_data = get_daily_data(stock_code, date_str)
+    if not current_data:
+        lines.append("[ERROR] 无法从数据库获取当日K线，终止。")
+        return "\n".join(lines)
+    current_chance = get_daily_chance(stock_code, date_str) or {}
+    prev_chances = get_prev_daily_chances(stock_code, date_str, 1)
+    prev_chance = prev_chances[0] if prev_chances else None
+
+    lines.append("")
+    lines.append("基础数据:")
+    lines.append(f"- 当日K线: O={_safe_float(current_data.get('open')):.2f} H={_safe_float(current_data.get('high')):.2f} L={_safe_float(current_data.get('low')):.2f} C={_safe_float(current_data.get('close')):.2f}")
+    lines.append(f"- 当日成交量: {current_data.get('volume')}")
+    lines.append(f"- 当日成交量类型: {current_chance.get('volume_type') or '无'}")
+    lines.append(f"- 当日空头组合: {current_chance.get('bearish_pattern') or '无'}")
+    if prev_chance:
+        lines.append(f"- 前一日赔率(day_win_ratio_score): {_safe_float(prev_chance.get('day_win_ratio_score')):.2f}")
+        lines.append(f"- 前一日压力位: {_safe_float(prev_chance.get('pressure_price'))/100.0:.2f} (raw={prev_chance.get('pressure_price')})")
+        lines.append(f"- 前一日支撑位: {_safe_float(prev_chance.get('support_price'))/100.0:.2f} (raw={prev_chance.get('support_price')})")
+    else:
+        lines.append("- 前一日daily_chance: 无")
+
+    # API数据（MA/MACD/K线序列）——用于需要index的插件 & 让插件2情形4走传入macd_data分支
+    api_start_date = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=240)).strftime("%Y-%m-%d")
+    api_data = get_cr_points_from_api(stock_code, table_name, api_start_date, date_str) or {}
+    ma_data = api_data.get("ma") or {}
+    macd_data = api_data.get("macd") or {}
+    kline_list = api_data.get("kline_data") or api_data.get("klineData") or []
+
+    # 找目标索引
+    target_index = None
+    for i, k in enumerate(kline_list):
+        kd = k.get("date") or k.get("time") or ""
+        if isinstance(kd, str) and kd.startswith(date_str):
+            target_index = i
+            break
+        if hasattr(kd, "strftime") and kd.strftime("%Y-%m-%d") == date_str:
+            target_index = i
+            break
+
+    # 推断“进入目标日之前”的 CR 上下文（含策略2 C）
+    last_c_str, last_valid_type, last_r_str = (None, None, None)
+    if api_data:
+        last_c_str, last_valid_type, last_r_str = infer_last_cr_points(stock_code, stock_name, date_str, api_data)
+    last_c_dt = _as_dt(last_c_str)
+    last_valid_type = last_valid_type or None
+
+    lines.append("")
+    lines.append("CR上下文(进入当日计算前):")
+    lines.append(f"- 最近C点: {last_c_str or '未找到'}")
+    lines.append(f"- 最近R点: {last_r_str or '未找到'}")
+    lines.append(f"- 上一有效点类型: {last_valid_type or '未找到'}")
+
+    # 初始化插件缓存（尽量覆盖C点日期到目标日）
+    start_for_cache = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=180)).strftime("%Y-%m-%d")
+    if last_c_dt:
+        c_minus = (last_c_dt - timedelta(days=30)).strftime("%Y-%m-%d")
+        if c_minus < start_for_cache:
+            start_for_cache = c_minus
+
+    rp = RPointPluginService()
+    rp.init_cache(stock_code, start_for_cache, date_str)
+    check_date = datetime.strptime(date_str, "%Y-%m-%d")
+
+    # kline objects（给部分插件用）
+    from types import SimpleNamespace
+    def _to_dt(v):
+        if hasattr(v, "strftime"):
+            return v
+        try:
+            return datetime.fromisoformat(str(v).replace("T", " "))
+        except Exception:
+            return None
+    k_objs = []
+    for k in kline_list:
+        k_objs.append(SimpleNamespace(
+            high=_safe_float(k.get("high")),
+            low=_safe_float(k.get("low")),
+            close=_safe_float(k.get("close")),
+            open=_safe_float(k.get("open")),
+            time=_to_dt(k.get("date") or k.get("time")),
+        ))
+
+    def _run_plugin(name: str, cond_text: List[str], fn, args: List[Any], requires: List[str] = None):
+        requires = requires or []
+        lines.append("")
+        lines.append("-" * 88)
+        lines.append(name)
+        for t in cond_text:
+            lines.append(f"条件: {t}")
+        # 依赖检查
+        missing = []
+        for r in requires:
+            if r == "ma_macd_index" and (not ma_data or not macd_data or target_index is None):
+                missing.append("MA/MACD/target_index")
+            if r == "macd_index" and (not macd_data or target_index is None):
+                missing.append("MACD/target_index")
+            if r == "kline_index" and (not k_objs or target_index is None):
+                missing.append("K线序列/target_index")
+            if r == "c_point" and (last_c_dt is None):
+                missing.append("最近C点")
+            if r == "last_valid_type" and (not last_valid_type):
+                missing.append("上一有效点类型")
+        if missing:
+            lines.append(f"结果: {_mark3('SKIP')} (缺少: {', '.join(missing)})")
+            return
+        try:
+            res = fn(*args)
+            triggered = bool(getattr(res, "triggered", False))
+            reason = getattr(res, "reason", "") or ""
+            lines.append(f"结果: {_mark(triggered)}")
+            if reason:
+                lines.append(f"原因: {reason}")
+            else:
+                lines.append("原因: 未满足条件(插件未给出细分原因)")
+        except Exception as e:
+            lines.append(f"结果: {_mark3('ERROR')} {e}")
+
+    # 逐插件执行（顺序与 RPointPluginService.check_r_point 一致）
+    _run_plugin(
+        "插件1: 乖离率偏离",
+        ["包含多个子条件(涨幅/放量/空头形态/乖离等)，满足任一子条件即可触发(详见插件逻辑)"],
+        rp._check_deviation,
+        [stock_code, check_date, ma_data if ma_data else None, target_index],
+        requires=["ma_macd_index"],  # 该插件很多子条件依赖MA/index
+    )
+    _run_plugin(
+        "插件3: 强转弱未反转",
+        ["前一日空头组合包含“强转弱”", "今日未修复: close < (前日收盘+前日开盘)/2", "今日成交量类型包含G"],
+        rp._check_strong_to_weak_not_reversed,
+        [stock_code, check_date],
+    )
+    _run_plugin(
+        "插件4: 基本面突发利空",
+        ["一字跌停 或 T字跌停"],
+        rp._check_fundamental_negative,
+        [stock_code, check_date],
+    )
+    _run_plugin(
+        "插件5: 上冲乏力(熊市特定)",
+        ["需要最近C点且上一有效点为C", "具体条件较多，详见插件reason/插件实现"],
+        rp._check_weak_breakout,
+        [stock_code, check_date, last_c_dt, last_valid_type],
+        requires=["c_point", "last_valid_type"],
+    )
+    _run_plugin(
+        "插件6: 跌破支撑位",
+        ["跌破前一日支撑位", "当日放量(X/Y/Z)"],
+        rp._check_break_support,
+        [stock_code, check_date],
+    )
+    _run_plugin(
+        "插件7: 高位发R",
+        ["均线多头排列(当前或近3日出现过)", "20日低点涨幅>阈值", "股价>MA10", "跌破前一日支撑位"],
+        rp._check_high_position_r,
+        [stock_code, check_date, ma_data, macd_data, target_index],
+        requires=["ma_macd_index"],
+    )
+    _run_plugin(
+        "插件8: 箱体回踩被跌破",
+        ["回踩箱体并跌破支撑 + 结合MACD状态(详见插件实现)"],
+        rp._check_box_breakdown,
+        [stock_code, check_date, macd_data, target_index, k_objs],
+        requires=["macd_index", "kline_index"],
+    )
+    _run_plugin(
+        "插件9: 趋势向下+未放量跌破支撑+MACD死叉",
+        ["股价<MA60", "跌破支撑位", "MACD死叉(含近几日)", "需要最近C点参与低位C判定"],
+        rp._check_downtrend_break_support,
+        [stock_code, check_date, ma_data, macd_data, target_index, k_objs, last_c_dt],
+        requires=["ma_macd_index", "kline_index", "c_point"],
+    )
+    _run_plugin(
+        "插件11: MACD中长线死叉+跌破支撑",
+        ["MACD进入死叉/死叉形成", "并满足跌破支撑等组合条件(详见插件实现)"],
+        rp._check_macd_long_dead_cross_break_support,
+        [stock_code, check_date, macd_data, target_index],
+        requires=["macd_index"],
+    )
+    _run_plugin(
+        "插件12: 中长线顶背离",
+        ["仅中长线股性", "顶背离形态 + 指标组合(详见插件实现)"],
+        rp._check_macd_long_top_divergence,
+        [stock_code, check_date, macd_data, target_index, k_objs],
+        requires=["macd_index", "kline_index"],
+    )
+    _run_plugin(
+        "插件10: 高位滞涨+空头组合",
+        ["高位涨幅达阈值 + 当日空头组合 + 支撑/指标组合(详见插件实现)"],
+        rp._check_high_stagnation_bearish,
+        [stock_code, check_date, macd_data, target_index],
+        requires=["macd_index"],
+    )
+    _run_plugin(
+        "插件2: 临近压力位滞涨(最后检查)",
+        [
+            "公共前置: 最近C点存在，且上一有效点类型为C",
+            "前一日赔率>0，且距离压力位在阈值内",
+            "情形1/2/3/4满足任一即可触发(其中情形4: 空头组合 + 近5日MACD死叉 + 当日DIF<DEA且MACD<0)",
+        ],
+        rp._check_pressure_stagnation,
+        [stock_code, check_date, last_c_dt, last_valid_type, macd_data, target_index],
+        requires=["c_point", "last_valid_type"],
+    )
+
+    lines.append("")
+    lines.append("=" * 88)
+    lines.append("说明:")
+    lines.append("- 本报告会逐个插件单独评估，因此可能出现“多个插件都显示触发”。真实交易逻辑以 RPointPluginService.check_r_point 的顺序为准，先触发的插件会提前返回。")
+    lines.append("- 若要完全复现线上R判定，请确保后端5000接口可用(用于获取MA/MACD/K线序列)。")
+    lines.append("=" * 88)
+    return "\n".join(lines)
 
 
 def search_stock(keyword: str) -> Optional[Dict]:
@@ -1553,30 +1816,34 @@ def main():
     parser.add_argument('date', help='日期，格式: YYYY-MM-DD，如: 2025-02-21')
     parser.add_argument('-c', '--c_point', help='C点日期(可选)，格式: YYYY-MM-DD', default=None)
     parser.add_argument('-p', '--prev_point_type', help='上一有效点类型，可选: R 或 C', default=None)
+    parser.add_argument('--api', help='后端API地址(可选)，默认 http://localhost:5000', default=None)
     
     args = parser.parse_args()
     
     # 搜索股票
-    print(f"🔍 搜索股票: {args.stock}")
+    print(f"搜索股票: {args.stock}")
     stock_info = search_stock(args.stock)
     
     if not stock_info:
-        print(f"❌ 未找到股票: {args.stock}")
-        print("   请检查股票名称或代码是否正确")
+        print(f"[ERROR] 未找到股票: {args.stock}")
+        print("请检查股票名称或代码是否正确")
         return
     
-    print(f"✅ 找到股票: {stock_info['code']} {stock_info['name']} ({stock_info['nature']})")
+    print(f"找到股票: {stock_info['code']} {stock_info['name']} ({stock_info['nature']})")
     
     # 验证日期格式
     try:
         datetime.strptime(args.date, '%Y-%m-%d')
     except ValueError:
-        print(f"❌ 日期格式错误: {args.date}")
-        print("   正确格式: YYYY-MM-DD，如: 2025-02-21")
+        print(f"[ERROR] 日期格式错误: {args.date}")
+        print("正确格式: YYYY-MM-DD，如: 2025-02-21")
         return
-    
-    # 诊断
-    diagnose_stock(stock_info, args.date, args.c_point, args.prev_point_type)
+
+    # 新版报告（默认）
+    api_base_url = args.api or None
+    report = generate_r_diagnosis_report(stock_info, args.date, api_base_url=api_base_url)
+    print("")
+    print(report)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>R点诊断</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #0f1b33;
+        --text: #e6edf7;
+        --muted: #9fb0cc;
+        --border: rgba(255,255,255,0.12);
+        --primary: #4f8cff;
+        --danger: #ff5a5a;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: radial-gradient(1200px 600px at 20% 10%, rgba(79,140,255,0.25), transparent 60%),
+                    radial-gradient(1000px 600px at 80% 10%, rgba(61,214,140,0.18), transparent 60%),
+                    var(--bg);
+        color: var(--text);
+      }
+      .wrap { max-width: 1100px; margin: 32px auto; padding: 0 16px; }
+      .card {
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+        overflow: hidden;
+      }
+      .header { padding: 18px 20px; border-bottom: 1px solid var(--border); }
+      .header h1 { font-size: 18px; margin: 0; }
+      .header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+      .content { padding: 18px 20px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }
+      label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        background: rgba(0,0,0,0.25);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        outline: none;
+      }
+      input:focus { border-color: rgba(79,140,255,0.7); box-shadow: 0 0 0 3px rgba(79,140,255,0.18); }
+      button {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(79,140,255,0.35);
+        background: rgba(79,140,255,0.18);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button:hover { background: rgba(79,140,255,0.24); }
+      .meta { margin-top: 14px; color: var(--muted); font-size: 12px; }
+      .error { color: var(--danger); margin-top: 12px; white-space: pre-wrap; }
+      pre {
+        margin: 16px 0 0;
+        padding: 14px;
+        background: rgba(0,0,0,0.28);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: auto;
+        white-space: pre-wrap;
+        line-height: 1.45;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="header">
+          <h1>R点诊断</h1>
+          <p>输入股票代码/名称与日期，生成与现有R插件一致顺序的诊断报告。</p>
+        </div>
+        <div class="content">
+          <div class="row">
+            <div>
+              <label for="stock">股票(代码或名称)</label>
+              <input id="stock" placeholder="例如: SH603319 或 美湖股份" />
+            </div>
+            <div>
+              <label for="date">日期(YYYY-MM-DD)</label>
+              <input id="date" placeholder="例如: 2025-03-10" />
+            </div>
+            <div>
+              <label for="api">后端API(可选)</label>
+              <input id="api" placeholder="默认 http://localhost:5000" />
+            </div>
+            <div>
+              <button id="run">开始诊断</button>
+            </div>
+          </div>
+
+          <div id="meta" class="meta"></div>
+          <div id="error" class="error"></div>
+          <pre id="report" style="display:none;"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const btn = $("run");
+      const reportEl = $("report");
+      const errEl = $("error");
+      const metaEl = $("meta");
+
+      async function run() {
+        errEl.textContent = "";
+        reportEl.style.display = "none";
+        reportEl.textContent = "";
+        metaEl.textContent = "处理中，请稍等...";
+
+        const stock = $("stock").value.trim();
+        const date = $("date").value.trim();
+        const api = $("api").value.trim();
+
+        const params = new URLSearchParams({ stock, date });
+        if (api) params.set("api", api);
+
+        try {
+          const res = await fetch(`/api/diagnose?${params.toString()}`);
+          const data = await res.json();
+          if (!data.ok) {
+            metaEl.textContent = "";
+            errEl.textContent = data.error || "诊断失败";
+            return;
+          }
+          metaEl.textContent = `股票: ${data.stock_code || ""} ${data.stock_name || ""}`.trim();
+          reportEl.textContent = data.report || "";
+          reportEl.style.display = "block";
+        } catch (e) {
+          metaEl.textContent = "";
+          errEl.textContent = String(e);
+        }
+      }
+
+      btn.addEventListener("click", run);
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") run();
+      });
+    </script>
+  </body>
+</html>
+
+
