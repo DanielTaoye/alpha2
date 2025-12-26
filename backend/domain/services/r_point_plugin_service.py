@@ -1815,7 +1815,7 @@ class RPointPluginService:
            定义：DIF从上方下穿DEA，且前一日红柱(MACD>0)、当日蓝柱(MACD<0)、当日DIF<DEA
         3) 在S1之前找到最近的DIF局部高点H1，并取H1日最高价Price_H1
            定义：往前数10根K线，当日DIF与前一日DIF均大于再往前8个交易日的DIF
-        4) 在G1之后、今天之前，找到DIF局部高点中DIF最大的日期H2，并取H2日最高价Price_H2
+        4) 在G1之后、今天之前，找到DIF最大的日期H2，并取H2日最高价Price_H2
         5) 若 Price_H2 > Price_H1，则判定为“顶背离”，触发R
         """
         plugin_name = "中长线顶背离"
@@ -1859,26 +1859,28 @@ class RPointPluginService:
             if not (has_bearish_combo or is_three_down):
                 return RPointPluginResult(plugin_name, False, "")
 
-            # ---------- Step 1: 最近一次交叉事件必须是金叉 ----------
+            # ---------- Step 1: 最近一次交叉事件用于G1 ----------
+            # 规则：从当前往前最多10个交易日逐日检查：
+            #       若发现“前一日MACD<0 且 当日MACD>0”则视为金叉，取最近金叉为G1；
+            #       若遇到死叉(前一日MACD>0 且 当日MACD<0)，继续向前扫描，不立即失败；
+            #       超出10日仍未找到金叉则失败。
             g1_idx = None
-            for i in range(current_index - 1, 0, -1):
-                # 金叉/死叉都要求 i-1 存在
+            max_back = 10
+            start_idx = max(1, current_index - max_back)
+            for i in range(current_index - 1, start_idx - 1, -1):
                 if i - 1 < 0:
                     break
-                dif_prev, dea_prev = dif_arr[i - 1], dea_arr[i - 1]
-                dif_curr, dea_curr = dif_arr[i], dea_arr[i]
                 macd_prev, macd_curr = macd_arr[i - 1], macd_arr[i]
-                if None in [dif_prev, dea_prev, dif_curr, dea_curr, macd_prev, macd_curr]:
+                if None in [macd_prev, macd_curr]:
                     continue
 
-                # 死叉事件（最近一次如果是死叉，则不符合）
-                if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
-                    return RPointPluginResult(plugin_name, False, "")
+                is_gold = (macd_prev < 0) and (macd_curr > 0)
+                is_dead = (macd_prev > 0) and (macd_curr < 0)
 
-                # 金叉事件
-                if (dif_prev < dea_prev) and (dif_curr > dea_curr) and (macd_prev < 0) and (macd_curr > 0) and (dif_curr > dea_curr):
+                if is_gold:
                     g1_idx = i
                     break
+                # 如果是死叉，则继续向前找金叉（不立即失败）
 
             if g1_idx is None:
                 return RPointPluginResult(plugin_name, False, "")
@@ -1926,21 +1928,16 @@ class RPointPluginService:
             if dif_h1 is None:
                 return RPointPluginResult(plugin_name, False, "")
 
-            # ---------- Step 4: G1之后、今天之前 DIF局部高点中DIF最大的H2 ----------
+            # ---------- Step 4: G1之后、今天之前，找 DIF 最大的日期H2 ----------
+            # 说明：若Step1是在“最近为死叉后10日内找到金叉”，则以该金叉日G1为起点，
+            #      在 (G1, today) 区间内直接取 DIF 最大的那一天作为H2（不再要求局部高点形态）。
             best_h2_idx = None
             best_h2_dif = None
             for j in range(g1_idx + 1, current_index):  # 排除今天
-                if j - 9 < 0 or j - 1 < 0:
+                if j < 0 or j >= len(dif_arr):
                     continue
                 dif_j = dif_arr[j]
-                dif_j1 = dif_arr[j - 1]
-                if dif_j is None or dif_j1 is None:
-                    continue
-                prev8 = [dif_arr[j - k] for k in range(2, 10)]
-                if any(v is None for v in prev8):
-                    continue
-                m = max(prev8)
-                if not (dif_j > m and dif_j1 > m):
+                if dif_j is None:
                     continue
                 if best_h2_dif is None or dif_j > best_h2_dif or (dif_j == best_h2_dif and (best_h2_idx is None or j > best_h2_idx)):
                     best_h2_dif = dif_j

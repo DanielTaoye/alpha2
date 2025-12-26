@@ -34,9 +34,9 @@
       .header h1 { font-size: 18px; margin: 0; }
       .header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
       .content { padding: 18px 20px; }
-      .row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }
+      .row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
       label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-      input {
+      input, select {
         width: 100%;
         padding: 10px 12px;
         background: rgba(0,0,0,0.25);
@@ -45,7 +45,7 @@
         border-radius: 10px;
         outline: none;
       }
-      input:focus { border-color: rgba(79,140,255,0.7); box-shadow: 0 0 0 3px rgba(79,140,255,0.18); }
+      input:focus, select:focus { border-color: rgba(79,140,255,0.7); box-shadow: 0 0 0 3px rgba(79,140,255,0.18); }
       button {
         padding: 10px 14px;
         border-radius: 10px;
@@ -80,16 +80,13 @@
         <div class="content">
           <div class="row">
             <div>
-              <label for="stock">股票(代码或名称)</label>
-              <input id="stock" placeholder="例如: SH603319 或 美湖股份" />
+              <label for="stock">股票(代码/名称/首字母)</label>
+              <input id="stock" placeholder="例如: SH603319 / 美湖股份 / MHG" list="stock_list" autocomplete="off" />
+              <datalist id="stock_list"></datalist>
             </div>
             <div>
               <label for="date">日期</label>
-              <input id="date" type="date" />
-            </div>
-            <div>
-              <label for="api">后端API(可选)</label>
-              <input id="api" placeholder="默认 http://localhost:5000" />
+              <select id="date"></select>
             </div>
             <div>
               <button id="run">开始诊断</button>
@@ -109,6 +106,70 @@
       const reportEl = $("report");
       const errEl = $("error");
       const metaEl = $("meta");
+      const stockListEl = $("stock_list");
+      let stockCandidates = [];
+
+      function setDateOptions(dates) {
+        const sel = $("date");
+        sel.innerHTML = "";
+        const arr = Array.isArray(dates) ? dates : [];
+        if (arr.length === 0) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = "无可用交易日";
+          sel.appendChild(opt);
+          return;
+        }
+        for (const d of arr) {
+          const opt = document.createElement("option");
+          opt.value = d;
+          opt.textContent = d;
+          sel.appendChild(opt);
+        }
+        sel.value = arr[0];
+      }
+
+      async function refreshCandidates() {
+        const q = $("stock").value.trim();
+        if (!q) {
+          stockListEl.innerHTML = "";
+          stockCandidates = [];
+          setDateOptions([]);
+          return;
+        }
+        try {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          if (!data.ok) return;
+          stockCandidates = data.items || [];
+          stockListEl.innerHTML = "";
+          for (const it of stockCandidates) {
+            const opt = document.createElement("option");
+            opt.value = it.code || "";
+            opt.label = `${it.code || ""} ${it.name || ""}`.trim();
+            stockListEl.appendChild(opt);
+          }
+        } catch (e) {}
+      }
+
+      async function refreshDates() {
+        const stock = $("stock").value.trim();
+        if (!stock) {
+          setDateOptions([]);
+          return;
+        }
+        try {
+          const res = await fetch(`/api/dates?stock=${encodeURIComponent(stock)}`);
+          const data = await res.json();
+          if (!data.ok) {
+            setDateOptions([]);
+            return;
+          }
+          setDateOptions(data.dates || []);
+        } catch (e) {
+          setDateOptions([]);
+        }
+      }
 
       async function run() {
         errEl.textContent = "";
@@ -118,10 +179,7 @@
 
         const stock = $("stock").value.trim();
         const date = $("date").value.trim();
-        const api = $("api").value.trim();
-
         const params = new URLSearchParams({ stock, date });
-        if (api) params.set("api", api);
 
         try {
           const res = await fetch(`/api/diagnose?${params.toString()}`);
@@ -141,9 +199,18 @@
       }
 
       btn.addEventListener("click", run);
+      $("stock").addEventListener("input", () => {
+        refreshCandidates();
+      });
+      $("stock").addEventListener("change", () => {
+        refreshDates();
+      });
       document.addEventListener("keydown", (e) => {
         if (e.key === "Enter") run();
       });
+
+      // 初始状态：空日期下拉
+      setDateOptions([]);
     </script>
   </body>
 </html>

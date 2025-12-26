@@ -878,21 +878,28 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
 
     g1_idx = None
     last_event = None
+    # 按插件新规则：向前最多10个交易日，检测“前一日MACD<0 当日MACD>0”为金叉；死叉则继续向前。
+    g1_scan_detail = ""
     if ok_macd12:
-        for i in range(target_index - 1, 0, -1):
-            dif_prev, dea_prev = dif_arr[i - 1], dea_arr[i - 1]
-            dif_curr, dea_curr = dif_arr[i], dea_arr[i]
+        max_back = 10
+        start_idx = max(1, target_index - max_back)
+        for i in range(target_index - 1, start_idx - 1, -1):
             macd_prev, macd_curr = macd_arr[i - 1], macd_arr[i]
-            if None in (dif_prev, dea_prev, dif_curr, dea_curr, macd_prev, macd_curr):
+            if None in (macd_prev, macd_curr):
                 continue
-            if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
-                last_event = ("dead", i)
-                break
-            if (dif_prev < dea_prev) and (dif_curr > dea_curr) and (macd_prev < 0) and (macd_curr > 0) and (dif_curr > dea_curr):
+            is_gold = (macd_prev < 0) and (macd_curr > 0)
+            is_dead = (macd_prev > 0) and (macd_curr < 0)
+            if is_gold:
                 last_event = ("gold", i)
                 g1_idx = i
+                g1_scan_detail = f"金叉(前MACD<0,当MACD>0) @idx{i}, date={_kdate(i)}"
                 break
-    checks_p12.append({"label": "Step1 最近一次交叉事件必须是金叉G1(若最近为死叉则失败)", "ok": (last_event is not None and last_event[0] == "gold"), "detail": f"last_event={last_event}, g1_idx={g1_idx}, g1_date={_kdate(g1_idx)}"})
+            if is_dead:
+                last_event = ("dead", i)
+                g1_scan_detail = f"最近交叉是死叉@idx{i}, 继续向前<=10日找金叉"
+        if not g1_scan_detail:
+            g1_scan_detail = "近10日未检出金叉/死叉（或数据缺失）"
+    checks_p12.append({"label": "Step1 最近一次交叉事件必须是金叉G1(死叉则继续向前10日找金叉)", "ok": (last_event is not None and last_event[0] == "gold"), "detail": f"{g1_scan_detail}; last_event={last_event}, g1_idx={g1_idx}, g1_date={_kdate(g1_idx)}"})
 
     s1_idx = None
     if g1_idx is not None:
@@ -935,20 +942,16 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
     h2_idx = None
     h2_dif = None
     price_h2 = None
+    scan_cnt = 0
     if g1_idx is not None and target_index is not None:
+        # 按最新规则：在 (G1, today) 区间内直接取 DIF 最大的那一天作为H2（不再要求局部高点形态）
         for j in range(g1_idx + 1, target_index):
-            if j - 9 < 0:
+            if j < 0 or j >= len(dif_arr):
                 continue
             dif_j = dif_arr[j]
-            dif_j1 = dif_arr[j - 1]
-            if dif_j is None or dif_j1 is None:
+            if dif_j is None:
                 continue
-            prev8 = [dif_arr[j - k] for k in range(2, 10)]
-            if any(v is None for v in prev8):
-                continue
-            m = max(prev8)
-            if not (dif_j > m and dif_j1 > m):
-                continue
+            scan_cnt += 1
             if h2_dif is None or dif_j > h2_dif or (dif_j == h2_dif and (h2_idx is None or j > h2_idx)):
                 h2_dif = dif_j
                 h2_idx = j
@@ -957,7 +960,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
                 price_h2 = float(getattr(k_objs[h2_idx], "high"))
             except Exception:
                 price_h2 = None
-    checks_p12.append({"label": "Step4 找到H2(局部高点中DIF最大)", "ok": (h2_idx is not None and h2_dif is not None and price_h2 is not None), "detail": f"h2_idx={h2_idx}, h2_date={_kdate(h2_idx)}, price_h2={price_h2}, dif_h2={h2_dif}"})
+    checks_p12.append({"label": "Step4 找到H2(G1后到今前DIF最大)", "ok": (h2_idx is not None and h2_dif is not None and price_h2 is not None), "detail": f"scan_days={scan_cnt}, h2_idx={h2_idx}, h2_date={_kdate(h2_idx)}, price_h2={price_h2}, dif_h2={h2_dif}"})
 
     ok_price_higher = (price_h2 is not None and price_h1 is not None and price_h2 > price_h1)
     ok_dif_lower = (h2_dif is not None and dif_h1 is not None and h2_dif < dif_h1)
@@ -1212,6 +1215,147 @@ def search_stock(keyword: str) -> Optional[Dict]:
     except Exception as e:
         print(f"[ERROR] 搜索股票失败: {e}")
         return None
+
+
+def search_stock_candidates(keyword: str, limit: int = 20) -> List[Dict]:
+    """
+    返回候选列表（给Web端联想/下拉用）：
+    - 代码/名称精确匹配优先
+    - 代码LIKE/名称LIKE
+    - 首字母前缀匹配（需要pypinyin，缺失则退化）
+    """
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+    kw_upper = kw.upper()
+    limit = max(1, min(int(limit or 20), 50))
+
+    def _to_item(row) -> Dict:
+        return {
+            "code": row.get("code"),
+            "name": row.get("name"),
+            "nature": row.get("nature") or "波段",
+        }
+
+    try:
+        with DatabaseConnection.get_connection_context() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            out: List[Dict] = []
+            seen = set()
+
+            def _push_rows(rows):
+                nonlocal out
+                for r in rows or []:
+                    code = (r.get("code") or "").upper()
+                    if not code or code in seen:
+                        continue
+                    seen.add(code)
+                    out.append(_to_item(r))
+                    if len(out) >= limit:
+                        return True
+                return False
+
+            # 1) 精确匹配（最多5条）
+            cursor.execute(
+                """
+                SELECT code, name, nature
+                FROM all_stock
+                WHERE code = %s OR name = %s
+                LIMIT 5
+                """,
+                (kw_upper, kw),
+            )
+            if _push_rows(cursor.fetchall()):
+                return out
+
+            # 2) 代码LIKE
+            cursor.execute(
+                """
+                SELECT code, name, nature
+                FROM all_stock
+                WHERE code LIKE %s
+                ORDER BY code
+                LIMIT 30
+                """,
+                (f"%{kw_upper}%",),
+            )
+            if _push_rows(cursor.fetchall()):
+                return out
+
+            # 3) 名称LIKE
+            cursor.execute(
+                """
+                SELECT code, name, nature
+                FROM all_stock
+                WHERE name LIKE %s
+                ORDER BY name
+                LIMIT 30
+                """,
+                (f"%{kw}%",),
+            )
+            if _push_rows(cursor.fetchall()):
+                return out
+
+            # 4) 首字母前缀匹配（最多200行做本地过滤）
+            initials_kw = _initials(kw)
+            if initials_kw:
+                cursor.execute(
+                    """
+                    SELECT code, name, nature
+                    FROM all_stock
+                    LIMIT 300
+                    """
+                )
+                rows = cursor.fetchall() or []
+                matched = []
+                for r in rows:
+                    ini = _initials(r.get("name") or "")
+                    if ini.startswith(initials_kw.upper()):
+                        matched.append(r)
+                if _push_rows(matched):
+                    return out
+
+            return out[:limit]
+    except Exception:
+        return []
+
+
+def list_trading_dates(stock_code: str, limit: int = 350) -> List[str]:
+    """
+    返回该股票最近的交易日列表（降序 -> 前端再转成下拉）。
+    """
+    code = (stock_code or "").strip().upper()
+    if not code:
+        return []
+    limit = max(1, min(int(limit or 350), 1200))
+    table_name = f"basic_data_{code.lower()}"
+    try:
+        with DatabaseConnection.get_connection_context() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                f"""
+                SELECT DATE(shi_jian) AS d
+                FROM `{table_name}`
+                WHERE peroid_type = '1day'
+                ORDER BY shi_jian DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall() or []
+            out = []
+            for r in rows:
+                d = r.get("d")
+                if hasattr(d, "strftime"):
+                    out.append(d.strftime("%Y-%m-%d"))
+                else:
+                    s = str(d or "").split(" ")[0].strip()
+                    if s:
+                        out.append(s)
+            return out
+    except Exception:
+        return []
 
 
 def get_prev_trading_day_close(stock_code: str, date_str: str) -> Tuple[Optional[float], Optional[str]]:
