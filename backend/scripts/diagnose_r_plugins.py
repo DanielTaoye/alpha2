@@ -86,7 +86,7 @@ def _parse_dt(value):
     return None
 
 
-def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_data: Dict) -> Tuple[Optional[str], Optional[str]]:
+def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_data: Dict) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     基于 CR 全量计算推断目标日前最近的有效点类型与最近的C点日期
     返回: (last_c_point_date_str, last_valid_point_type)
@@ -143,20 +143,25 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
         )
 
         c_points = cr_result.get('c_points', []) or []
+        s2_c_points = cr_result.get('strategy2_c_points', []) or []
         r_points = cr_result.get('r_points', []) or []
 
-        def _last_before(points, ptype):
+        # 注意：这里要推断“进入目标日计算前”的CR上下文，因此使用 dt < target_dt（严格小于），
+        # 避免把“目标日当天刚产生的R/C”算进“上一有效点类型”，从而导致诊断与真实流程不一致。
+        def _last_before(points, ptypes):
             last_dt = None
             for p in points:
-                if p.get('pointType') != ptype:
+                pt = p.get('pointType')
+                if pt not in ptypes:
                     continue
                 dt = _parse_dt(p.get('triggerDate'))
-                if dt and dt <= target_dt and (last_dt is None or dt > last_dt):
+                if dt and dt < target_dt and (last_dt is None or dt > last_dt):
                     last_dt = dt
             return last_dt
 
-        last_c_dt = _last_before(c_points, 'C')
-        last_r_dt = _last_before(r_points, 'R')
+        # C点需要同时考虑策略1(C)和策略2(C_STRATEGY2)
+        last_c_dt = _last_before(c_points + s2_c_points, {'C', 'C_STRATEGY2'})
+        last_r_dt = _last_before(r_points, {'R'})
 
         last_type = None
         last_dt = None
@@ -168,10 +173,11 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
             last_dt = last_r_dt
 
         last_c_str = last_c_dt.strftime('%Y-%m-%d') if last_c_dt else None
-        return last_c_str, last_type
+        last_r_str = last_r_dt.strftime('%Y-%m-%d') if last_r_dt else None
+        return last_c_str, last_type, last_r_str
     except Exception as e:
         print(f"⚠️ 推断CR序列失败: {e}")
-        return None, None
+        return None, None, None
 
 
 def search_stock(keyword: str) -> Optional[Dict]:
@@ -607,8 +613,10 @@ def diagnose_deviation(stock_code: str, date_str: str, current_data: Dict,
 
 
 def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: Dict,
-                                  current_chance: Dict, prev_chance: Dict):
-    """诊断临近压力位滞涨插件"""
+                                  current_chance: Dict, prev_chance: Dict,
+                                  macd_data: Dict = None, kline_list: List = None,
+                                  target_index: int = None):
+    """诊断临近压力位滞涨插件（含情形4-MACD死叉+空头组合）"""
     print("\n" + "=" * 80)
     print("📊 插件2: 临近压力位滞涨")
     print("=" * 80)
@@ -736,6 +744,49 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     print(f"  当日形态: {pattern_today or '无'} | 振幅: {amplitude_today:.2f}% (阈值 {amplitude_threshold}%) | 跌幅: {decline_today:.2f}% (阈值 {-decline_threshold}%)")
     print(f"  空头组合含乌云盖顶: {'✅' if has_cloud else '❌'}")
     print(f"  风险K线判定(情形2): {'✅' if is_risky_case2 else '❌'}（冲高回落/高开低走振幅超阈值 或 乌云盖顶）")
+
+    # 情形4：当日空头组合 + 近5日内出现MACD死叉（当日DIF<DEA且MACD<0）
+    print("\n  --- 情形4：空头组合 + 近5日MACD死叉 ---")
+    bearish_pattern_today = current_chance.get('bearish_pattern') if current_chance else ''
+    has_bearish_today = bool(bearish_pattern_today)
+    print(f"  当日空头组合: {'✅' if has_bearish_today else '❌'} ({bearish_pattern_today or '无'})")
+    if macd_data and target_index is not None:
+        dif_list = macd_data.get('dif') or []
+        dea_list = macd_data.get('dea') or []
+        macd_list = macd_data.get('macd') or []
+        if target_index < len(dif_list) and target_index < len(dea_list) and target_index < len(macd_list):
+            today_dif = dif_list[target_index]
+            today_dea = dea_list[target_index]
+            today_macd = macd_list[target_index]
+            today_ok = (today_dif is not None and today_dea is not None and
+                        today_macd is not None and today_dif < today_dea and today_macd < 0)
+            print(f"  当日DIF={today_dif}, DEA={today_dea}, MACD柱={today_macd} -> DIF<DEA且MACD<0: {'✅' if today_ok else '❌'}")
+            has_cross = False
+            if today_ok:
+                start_idx = max(1, target_index - 4)
+                for i in range(start_idx, target_index + 1):
+                    prev_i = i - 1
+                    if prev_i < 0:
+                        continue
+                    prev_dif = dif_list[prev_i]
+                    prev_dea = dea_list[prev_i]
+                    prev_macd = macd_list[prev_i]
+                    cur_dif = dif_list[i]
+                    cur_dea = dea_list[i]
+                    cur_macd = macd_list[i]
+                    if None in [prev_dif, prev_dea, prev_macd, cur_dif, cur_dea, cur_macd]:
+                        continue
+                    if prev_macd > 0 and prev_dif > prev_dea and cur_macd < 0 and cur_dif < cur_dea:
+                        has_cross = True
+                        print(f"  近{i - target_index if i!=target_index else 0}日位置存在死叉转换 (index {i}) ✅")
+                        break
+            print(f"  近5日死叉出现: {'✅' if has_cross else '❌'}")
+            meets_case4 = has_bearish_today and today_ok and has_cross
+            print(f"  情形4判定: {'✅ 触发' if meets_case4 else '❌ 未触发'}")
+        else:
+            print("  ❌ MACD数据不足，索引越界")
+    else:
+        print("  ❌ 无MACD数据，无法检查情形4（空头组合+近5日死叉）")
 
 
 def diagnose_fundamental_negative(stock_code: str, date_str: str, current_data: Dict):
@@ -1334,13 +1385,14 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     inferred_last_type = last_valid_point_type
     api_data_for_infer = load_api_data()
     if api_data_for_infer and (not c_point_date or not last_valid_point_type):
-        last_c, last_type = infer_last_cr_points(stock_code, stock_name, date_str, api_data_for_infer)
+        last_c, last_type, last_r = infer_last_cr_points(stock_code, stock_name, date_str, api_data_for_infer)
         if not inferred_c_point:
             inferred_c_point = last_c
         if not inferred_last_type:
             inferred_last_type = last_type
         print("\n🧭 自动推断CR序列(基于CRPointService全量计算):")
         print(f"   最近C点: {last_c or '未找到'}")
+        print(f"   最近R点: {last_r or '未找到'}")
         print(f"   上一有效点类型: {last_type or '未找到'}")
     else:
         if inferred_c_point or inferred_last_type:
@@ -1468,6 +1520,10 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
                     print("   ❌ 未触发R点（含MA/MACD）")
             except Exception as e:
                 print(f"   ⚠️ 携带MA/MACD重检失败: {e}")
+            
+            # 重新诊断插件2（临近压力位滞涨），补充情形4 (MACD死叉)
+            diagnose_pressure_stagnation(stock_code, date_str, current_data, current_chance, prev_chance,
+                                          macd_data=macd_data, kline_list=kline_list, target_index=target_index)
             
             # 诊断插件7-10
             diagnose_high_position_r(stock_code, date_str, current_data, prev_chance, 

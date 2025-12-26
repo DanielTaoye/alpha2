@@ -197,7 +197,14 @@ class RPointPluginService:
                 return True, triggered_plugins
 
         # 插件2: 临近压力位滞涨（放最后，避免缺C点影响其他插件）
-        plugin2 = self._check_pressure_stagnation(stock_code, date, c_point_date, last_valid_point_type)
+        plugin2 = self._check_pressure_stagnation(
+            stock_code,
+            date,
+            c_point_date,
+            last_valid_point_type,
+            macd_data=macd_data,
+            current_index=current_index,
+        )
         if plugin2.triggered:
             triggered_plugins.append(plugin2)
             logger.info(f"[R点插件-临近压力位滞涨] {stock_code} {date}: {plugin2.reason}")
@@ -499,8 +506,15 @@ class RPointPluginService:
             logger.error(f"R点插件-乖离率偏离检查失败: {e}")
             return RPointPluginResult("乖离率偏离", False, "")
     
-    def _check_pressure_stagnation(self, stock_code: str, date: datetime, c_point_date: Optional[datetime] = None,
-                                   last_valid_point_type: Optional[str] = None) -> RPointPluginResult:
+    def _check_pressure_stagnation(
+        self,
+        stock_code: str,
+        date: datetime,
+        c_point_date: Optional[datetime] = None,
+        last_valid_point_type: Optional[str] = None,
+        macd_data: Optional[dict] = None,
+        current_index: Optional[int] = None,
+    ) -> RPointPluginResult:
         """
         插件2: 临近压力位滞涨（重写版）
         
@@ -684,53 +698,105 @@ class RPointPluginService:
             # 情形4：当日空头组合 + 近5日出现MACD死叉（当日DIF<DEA且MACD<0）
             # 死叉定义：前一日MACD>0且DIF>DEA，当前日MACD<0且DIF<DEA
             if current_chance.bearish_pattern:
-                # 取近5个交易日（含当日）日期列表
-                recent_dates = [date_str] + prev_dates[:5]
-                recent_dates = list(reversed(recent_dates))  # 升序以便对应MACD序列
-                
-                closes = []
-                valid = True
-                for d in recent_dates:
-                    data = self._daily_cache.get(d) or self.daily_repo.find_by_date(stock_code, d)
-                    if not data or data.close is None:
-                        valid = False
-                        break
-                    closes.append(float(data.close))
-                if valid and len(closes) >= 26:  # MACD计算至少需要慢线周期长度
-                    macd_res = MACDService.calculate_macd(closes)
-                    dif_list = macd_res.get('dif') or []
-                    dea_list = macd_res.get('dea') or []
-                    macd_list = macd_res.get('macd') or []
-                    cur_idx = len(closes) - 1
-                    today_dif = dif_list[cur_idx]
-                    today_dea = dea_list[cur_idx]
-                    today_macd = macd_list[cur_idx]
-                    
-                    def is_valid(v):
-                        return v is not None
-                    
-                    if is_valid(today_dif) and is_valid(today_dea) and is_valid(today_macd):
-                        if today_dif < today_dea and today_macd < 0:
+                def is_valid(v):
+                    return v is not None
+
+                # 优先使用外部传入的 MACD 序列（更稳定，且与策略2/其它插件使用同一套序列）
+                if macd_data and current_index is not None:
+                    dif_list = macd_data.get("dif") or []
+                    dea_list = macd_data.get("dea") or []
+                    macd_list = macd_data.get("macd") or []
+                    if current_index < len(dif_list) and current_index < len(dea_list) and current_index < len(macd_list):
+                        today_dif = dif_list[current_index]
+                        today_dea = dea_list[current_index]
+                        today_macd = macd_list[current_index]
+                        if is_valid(today_dif) and is_valid(today_dea) and is_valid(today_macd) and today_dif < today_dea and today_macd < 0:
                             has_death_cross = False
-                            # 检查近5日（含当日，排除首位）是否存在死叉
-                            start_idx = max(1, cur_idx - 4)
-                            for i in range(start_idx, cur_idx + 1):
+                            cross_idx = None
+                            start_i = max(1, current_index - 4)
+                            for i in range(start_i, current_index + 1):
                                 prev_i = i - 1
-                                if prev_i < 0:
+                                prev_macd = macd_list[prev_i]
+                                prev_dif = dif_list[prev_i]
+                                prev_dea = dea_list[prev_i]
+                                cur_macd = macd_list[i]
+                                cur_dif = dif_list[i]
+                                cur_dea = dea_list[i]
+                                if None in (prev_macd, prev_dif, prev_dea, cur_macd, cur_dif, cur_dea):
                                     continue
-                                if not (is_valid(macd_list[i]) and is_valid(dif_list[i]) and is_valid(dea_list[i]) and
-                                        is_valid(macd_list[prev_i]) and is_valid(dif_list[prev_i]) and is_valid(dea_list[prev_i])):
-                                    continue
-                                if macd_list[prev_i] > 0 and dif_list[prev_i] > dea_list[prev_i] and \
-                                   macd_list[i] < 0 and dif_list[i] < dea_list[i]:
+                                if prev_macd > 0 and prev_dif > prev_dea and cur_macd < 0 and cur_dif < cur_dea:
                                     has_death_cross = True
+                                    cross_idx = i
                                     break
-                            
                             if has_death_cross:
                                 return RPointPluginResult(
                                     "临近压力位滞涨",
                                     True,
-                                    f"临压+当日空头组合+近5日MACD死叉(当日DIF<DEA<0，距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
+                                    f"临压+当日空头组合+近5日MACD死叉(index={cross_idx})(当日DIF<DEA且MACD<0，距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
+                                )
+
+                # 降级：没有传入MACD序列时，用“足够长”的收盘价序列本地计算MACD，再在近5日内找死叉
+                # 注意：MACD(12,26,9) 至少需要26个数据点，否则DIF/DEA会大量为None
+                all_dates_desc = self._sorted_dates if self._sorted_dates else sorted(self._daily_cache.keys(), reverse=True)
+                all_dates_asc = list(reversed(all_dates_desc))
+                if date_str in all_dates_asc:
+                    cur_pos = all_dates_asc.index(date_str)
+                    # 取最多120个点（含当日），避免每次都算全量；同时确保>=26
+                    start_pos = max(0, cur_pos - 119)
+                    window_dates = all_dates_asc[start_pos:cur_pos + 1]
+
+                    closes = []
+                    valid = True
+                    for d in window_dates:
+                        data = self._daily_cache.get(d)
+                        if not data:
+                            data = self.daily_repo.find_by_date(stock_code, d)
+                            if data:
+                                self._daily_cache[d] = data
+                        if not data or getattr(data, "close", None) is None:
+                            valid = False
+                            break
+                        closes.append(float(data.close))
+
+                    if valid and len(closes) >= 26:
+                        macd_res = MACDService.calculate_macd(closes)
+                        dif_list = macd_res.get('dif') or []
+                        dea_list = macd_res.get('dea') or []
+                        macd_list = macd_res.get('macd') or []
+
+                        cur_idx = len(closes) - 1  # window内的当日索引
+                        today_dif = dif_list[cur_idx] if cur_idx < len(dif_list) else None
+                        today_dea = dea_list[cur_idx] if cur_idx < len(dea_list) else None
+                        today_macd = macd_list[cur_idx] if cur_idx < len(macd_list) else None
+
+                        # 当日状态：DIF<DEA 且 MACD<0
+                        if is_valid(today_dif) and is_valid(today_dea) and is_valid(today_macd) and (today_dif < today_dea) and (today_macd < 0):
+                            has_death_cross = False
+                            cross_idx = None
+                            # 在“近5个交易日（含当日）”窗口内找死叉转换点
+                            start_i = max(1, cur_idx - 4)
+                            for i in range(start_i, cur_idx + 1):
+                                prev_i = i - 1
+                                prev_macd = macd_list[prev_i] if prev_i < len(macd_list) else None
+                                prev_dif = dif_list[prev_i] if prev_i < len(dif_list) else None
+                                prev_dea = dea_list[prev_i] if prev_i < len(dea_list) else None
+                                cur_macd = macd_list[i] if i < len(macd_list) else None
+                                cur_dif = dif_list[i] if i < len(dif_list) else None
+                                cur_dea = dea_list[i] if i < len(dea_list) else None
+
+                                if None in (prev_macd, prev_dif, prev_dea, cur_macd, cur_dif, cur_dea):
+                                    continue
+                                if prev_macd > 0 and prev_dif > prev_dea and cur_macd < 0 and cur_dif < cur_dea:
+                                    has_death_cross = True
+                                    cross_idx = i
+                                    break
+
+                            if has_death_cross:
+                                cross_date = window_dates[cross_idx] if cross_idx is not None and 0 <= cross_idx < len(window_dates) else None
+                                return RPointPluginResult(
+                                    "临近压力位滞涨",
+                                    True,
+                                    f"临压+当日空头组合+近5日MACD死叉({cross_date or '-'})(当日DIF<DEA且MACD<0，距压{distance_pct:.2f}%,赔率{day_win_ratio_score:.1f})"
                                 )
             
             return RPointPluginResult("临近压力位滞涨", False, "")
