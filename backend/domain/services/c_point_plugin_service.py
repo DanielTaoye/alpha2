@@ -1034,13 +1034,13 @@ class CPointPluginService:
             if market_type != 'bull':
                 return CPointPluginResult("阳包阴", False, 0, "")
             
-            # 仅对波段/中长线股性生效，其他股性直接失效
+            # 股性：波段/中长线/短线均可触发；短线不再视为失效
             date_str_nature = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
             current_chance_nature = self._daily_chance_cache.get(date_str_nature)
             if not current_chance_nature:
                 current_chance_nature = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str_nature)
             stock_nature = getattr(current_chance_nature, "stock_nature", None) if current_chance_nature else None
-            if stock_nature not in ["波段", "中长线"]:
+            if stock_nature not in ["波段", "中长线", "短线"]:
                 return CPointPluginResult("阳包阴", False, 0, "")
             
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -1070,31 +1070,53 @@ class CPointPluginService:
                     if not r_daily_chance:
                         r_daily_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, r_date_str)
                     
+                    # 需要R日放量且满足跌幅+实体要求
                     if r_daily_chance and r_daily_chance.volume_type:
                         has_r_volume = any(t in r_daily_chance.volume_type for t in ['X', 'Y', 'Z', 'H'])
                         if has_r_volume:
-                            r_point_in_range = r_point
-                            break
+                            # 取R日K线数据
+                            r_daily_data = self._daily_cache.get(r_date_str)
+                            if not r_daily_data:
+                                r_daily_data = self.daily_repo.find_by_date(stock_code, r_date_str)
+                            if not r_daily_data:
+                                continue
+                            
+                            # 跌幅：R-1收盘 -> R日收盘 跌幅<-5%
+                            pre_close = getattr(r_daily_data, "pre_close", None) or 0
+                            if pre_close <= 0:
+                                continue
+                            r_drop_pct = (r_daily_data.close - pre_close) / pre_close * 100
+                            
+                            # B占比：实体长度相对最低价
+                            r_abc = KLinePatternService.calculate_abc(
+                                r_daily_data.open, r_daily_data.close, r_daily_data.high, r_daily_data.low
+                            )
+                            r_b_ratio = (r_abc.b / r_daily_data.low * 100) if r_daily_data.low > 0 else 0
+                            
+                            if r_drop_pct <= -5.0 and r_b_ratio >= 4.0:
+                                r_point_in_range = r_point
+                                break
             
             if not r_point_in_range:
                 return CPointPluginResult("阳包阴", False, 0, "")
             
-            # 特殊失效：若最近R由乖离率偏离条件5/6触发，则阳包阴失效（仅牛市、仅波段/中长线）
-            try:
-                r_plugins = getattr(r_point_in_range, "plugins", None) or []
-                deviation_56 = False
-                for p in r_plugins:
-                    name = p.get("pluginName") or p.get("plugin_name")
-                    triggered = p.get("triggered", False)
-                    reason = p.get("reason") or ""
-                    if triggered and name == "乖离率偏离" and ("条件5" in reason or "条件6" in reason):
-                        deviation_56 = True
-                        break
-                if deviation_56:
+            # 特殊失效：若最近R由乖离率偏离条件5/6触发，则阳包阴失效（短线不受此限制）
+            if stock_nature != "短线":
+                try:
+                    r_plugins = getattr(r_point_in_range, "plugins", None) or []
+                    deviation_56 = False
+                    for p in r_plugins:
+                        name = p.get("pluginName") or p.get("plugin_name")
+                        triggered = p.get("triggered", False)
+                        reason = p.get("reason") or ""
+                        if triggered and name == "乖离率偏离" and ("条件5" in reason or "条件6" in reason):
+                            deviation_56 = True
+                            break
+                    if deviation_56:
+                        return CPointPluginResult("阳包阴", False, 0, "")
+                except Exception:
+                    # 出现异常时保持原逻辑，不让插件误发C
                     return CPointPluginResult("阳包阴", False, 0, "")
-            except Exception:
-                # 出现异常时保持原逻辑，不让插件误发C
-                return CPointPluginResult("阳包阴", False, 0, "")
             
             # 检查R点之后是否有C点（前面最近的信号点必须是R，不能是C）
             # 从R点日期到今天之间，检查是否有C点
@@ -1113,8 +1135,8 @@ class CPointPluginService:
             if has_c_after_r:
                 return CPointPluginResult("阳包阴", False, 0, "")
             
-            # 检查阳包阴：当日收盘价 > R日最高价（完全突破）
-            is_yang_bao_yin = current_data.close > r_point_in_range.high_price
+            # 检查阳包阴：当日收盘价 > R日开盘价（突破开盘价）
+            is_yang_bao_yin = current_data.close > r_point_in_range.open_price
             
             if not is_yang_bao_yin:
                 return CPointPluginResult("阳包阴", False, 0, "")

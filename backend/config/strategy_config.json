@@ -19,7 +19,7 @@
   },
   "r_point_plugins": {
     "pressure_stagnation": {
-      "distance_threshold_pct": 10.0,
+      "distance_threshold_pct": 15.0,
       "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
     },
     "high_position_r": {
@@ -33,7 +33,7 @@
   },
   "market_type": "bull",
   "market_type_description": "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市",
-  "last_updated": "2025-12-26 09:59:15",
+  "last_updated": "2025-12-26 11:22:59",
   "market_type_rule": {
     "mode": "date_rule",
     "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",
