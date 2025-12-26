@@ -333,6 +333,17 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             time=_to_dt(k.get("date") or k.get("time")),
         ))
 
+    def _kdate(idx: Optional[int]) -> Optional[str]:
+        try:
+            if idx is None or idx < 0 or idx >= len(k_objs):
+                return None
+            t = getattr(k_objs[idx], "time", None)
+            if hasattr(t, "strftime"):
+                return t.strftime("%Y-%m-%d")
+            return str(t) if t is not None else None
+        except Exception:
+            return None
+
     def _print_checks(checks: List[Dict[str, Any]]):
         for c in checks:
             label = c.get("label") or ""
@@ -881,7 +892,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
                 last_event = ("gold", i)
                 g1_idx = i
                 break
-    checks_p12.append({"label": "Step1 最近一次交叉事件必须是金叉G1(若最近为死叉则失败)", "ok": (last_event is not None and last_event[0] == "gold"), "detail": f"last_event={last_event}, g1_idx={g1_idx}"})
+    checks_p12.append({"label": "Step1 最近一次交叉事件必须是金叉G1(若最近为死叉则失败)", "ok": (last_event is not None and last_event[0] == "gold"), "detail": f"last_event={last_event}, g1_idx={g1_idx}, g1_date={_kdate(g1_idx)}"})
 
     s1_idx = None
     if g1_idx is not None:
@@ -894,7 +905,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
                 s1_idx = i
                 break
-    checks_p12.append({"label": "Step2 在G1之前找到最近死叉S1", "ok": (s1_idx is not None), "detail": f"s1_idx={s1_idx}"})
+    checks_p12.append({"label": "Step2 在G1之前找到最近死叉S1", "ok": (s1_idx is not None), "detail": f"s1_idx={s1_idx}, s1_date={_kdate(s1_idx)}"})
 
     h1_idx = None
     dif_h1 = None
@@ -919,7 +930,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
                 except Exception:
                     price_h1 = None
                 break
-    checks_p12.append({"label": "Step3 在S1之前找到最近DIF局部高点H1", "ok": (h1_idx is not None and dif_h1 is not None and price_h1 is not None), "detail": f"h1_idx={h1_idx}, price_h1={price_h1}, dif_h1={dif_h1}"})
+    checks_p12.append({"label": "Step3 在S1之前找到最近DIF局部高点H1", "ok": (h1_idx is not None and dif_h1 is not None and price_h1 is not None), "detail": f"h1_idx={h1_idx}, h1_date={_kdate(h1_idx)}, price_h1={price_h1}, dif_h1={dif_h1}"})
 
     h2_idx = None
     h2_dif = None
@@ -946,7 +957,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
                 price_h2 = float(getattr(k_objs[h2_idx], "high"))
             except Exception:
                 price_h2 = None
-    checks_p12.append({"label": "Step4 找到H2(局部高点中DIF最大)", "ok": (h2_idx is not None and h2_dif is not None and price_h2 is not None), "detail": f"h2_idx={h2_idx}, price_h2={price_h2}, dif_h2={h2_dif}"})
+    checks_p12.append({"label": "Step4 找到H2(局部高点中DIF最大)", "ok": (h2_idx is not None and h2_dif is not None and price_h2 is not None), "detail": f"h2_idx={h2_idx}, h2_date={_kdate(h2_idx)}, price_h2={price_h2}, dif_h2={h2_dif}"})
 
     ok_price_higher = (price_h2 is not None and price_h1 is not None and price_h2 > price_h1)
     ok_dif_lower = (h2_dif is not None and dif_h1 is not None and h2_dif < dif_h1)
