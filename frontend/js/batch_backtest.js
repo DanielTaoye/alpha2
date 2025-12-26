@@ -4,6 +4,8 @@ const API_BASE_URL = '/api';
 let allStockGroups = {};
 let isRunning = false;
 let importedStocksCache = [];
+let currentJobId = null;
+let interruptRequested = false;
 
 function clampInt(v, min, max, fallback) {
     const n = Number.parseInt(String(v), 10);
@@ -291,6 +293,8 @@ async function startBatchBacktest() {
     const selectedStocks = stocks; // 不再截断数量
 
     isRunning = true;
+    interruptRequested = false;
+    currentJobId = null;
     
     // 显示进度条
     const progressContainer = document.getElementById('progressContainer');
@@ -300,73 +304,137 @@ async function startBatchBacktest() {
     
     // 禁用按钮
     const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
     runBtn.disabled = true;
     runBtn.innerHTML = '<span class="loading-spinner"></span> 回测中...';
+    if (stopBtn) {
+        stopBtn.style.display = 'inline-block';
+        stopBtn.disabled = false;
+        stopBtn.textContent = '打断';
+    }
     
     // 执行批量回测（推荐：由后端统一调度，前端只轮询进度，避免前端高并发/大量HTTP请求）
     let successCount = 0;
     let failCount = 0;
     let skippedCount = 0;
 
-    const nature = strategy || '波段';
-    const startResp = await fetchJsonWithRetry(`${API_BASE_URL}/batch_backtest/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            stocks: selectedStocks,
-            stockNature: nature,
-            period: 'day',
-            concurrency,
-            backtestConfig
-        })
-    }, 60000, 0);
+    try {
+        const nature = strategy || '波段';
+        const startResp = await fetchJsonWithRetry(`${API_BASE_URL}/batch_backtest/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                stocks: selectedStocks,
+                stockNature: nature,
+                period: 'day',
+                concurrency,
+                backtestConfig
+            })
+        }, 60000, 0);
 
-    const startJson = await startResp.json();
-    if (!startJson || startJson.code !== 200 || !startJson.data || !startJson.data.jobId) {
-        throw new Error(startJson?.message || '启动批量回测失败');
+        const startJson = await startResp.json();
+        if (!startJson || startJson.code !== 200 || !startJson.data || !startJson.data.jobId) {
+            throw new Error(startJson?.message || '启动批量回测失败');
+        }
+
+        const jobId = startJson.data.jobId;
+        currentJobId = jobId;
+
+        // 轮询任务状态
+        let results = [];
+        while (true) {
+            await sleep(800);
+            const stResp = await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/status/${jobId}`, {}, 20000);
+            const stJson = await stResp.json();
+            if (!stJson || stJson.code !== 200) {
+                continue;
+            }
+            const st = stJson.data || {};
+            const finished = st.finished || 0;
+            const total = st.total || selectedStocks.length;
+            const progress = total > 0 ? ((finished) / total * 100).toFixed(1) : '0.0';
+
+            const stMessage = st.cancelled
+                ? `已打断：已完成 ${finished}/${total}（展示已完成数据）`
+                : `后端任务处理中：已完成 ${finished}/${total}（并发=${concurrency}）`;
+            updateProgress(progress, stMessage);
+
+            if (Array.isArray(st.results)) {
+                // 后端 results 里会有 null 占位；极端情况下也可能出现空对象占位（历史版本）
+                results = st.results.filter(r => {
+                    if (!r) return false;
+                    if (typeof r !== 'object') return true;
+                    return Object.keys(r).length > 0;
+                });
+            }
+
+            // 前端发起了打断：一旦后端标记 done/cancelled，就退出轮询并展示已完成数据
+            if (st.done) {
+                successCount = st.success || 0;
+                failCount = st.failed || 0;
+                skippedCount = st.skipped || 0;
+                break;
+            }
+        }
+
+        // 隐藏进度条
+        progressContainer.style.display = 'none';
+
+        // 显示结果（无论完成还是取消，都展示已完成数据）
+        try {
+            displayResults(results, successCount, failCount, skippedCount);
+        } catch (e) {
+            console.error('displayResults 渲染异常:', e);
+            showError('结果渲染异常（已在控制台输出错误），请稍后重试或降低并发数');
+        }
+
+        updateStatus(true, interruptRequested ? '已打断（已展示已完成数据）' : '回测完成');
+    } catch (err) {
+        console.error(err);
+        showError(err?.message || '批量回测失败');
+        updateStatus(false, '回测失败');
+    } finally {
+        // 恢复按钮/状态
+        runBtn.disabled = false;
+        runBtn.innerHTML = '开始批量回测';
+        if (stopBtn) {
+            stopBtn.disabled = true;
+            stopBtn.style.display = 'none';
+            stopBtn.textContent = '打断';
+        }
+        isRunning = false;
+        currentJobId = null;
+        interruptRequested = false;
+    }
+}
+
+// 打断批量回测：调用后端 cancel 接口；已完成的数据仍可在 status 里拿到并展示
+async function interruptBatchBacktest() {
+    if (!isRunning) return;
+    if (!currentJobId) {
+        showError('任务尚未启动完成，请稍候...');
+        return;
+    }
+    if (interruptRequested) return;
+    interruptRequested = true;
+
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.textContent = '正在打断...';
     }
 
-    const jobId = startJson.data.jobId;
-
-    // 轮询任务状态
-    let results = [];
-    while (true) {
-        await sleep(800);
-        const stResp = await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/status/${jobId}`, {}, 20000);
-        const stJson = await stResp.json();
-        if (!stJson || stJson.code !== 200) {
-            continue;
-        }
-        const st = stJson.data || {};
-        const finished = st.finished || 0;
-        const total = st.total || selectedStocks.length;
-        const progress = total > 0 ? ((finished) / total * 100).toFixed(1) : '0.0';
-        updateProgress(progress, `后端任务处理中：已完成 ${finished}/${total}（并发=${concurrency}）`);
-
-        if (Array.isArray(st.results)) {
-            results = st.results.filter(Boolean);
-        }
-
-        if (st.done) {
-            successCount = st.success || 0;
-            failCount = st.failed || 0;
-            skippedCount = st.skipped || 0;
-            break;
-        }
+    try {
+        await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/cancel/${currentJobId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }, 10000);
+        // 轮询逻辑会在 st.done 时自动展示已完成数据
+    } catch (err) {
+        // 即便 cancel 请求失败，也让轮询继续；用户可再次点击（这里保持 interruptRequested=true 防抖）
+        console.warn('取消请求失败:', err);
+        showError('打断请求发送失败（可稍后重试）');
     }
-    
-    // 隐藏进度条
-    progressContainer.style.display = 'none';
-    
-    // 显示结果
-    displayResults(results, successCount, failCount, skippedCount);
-    
-    // 恢复按钮
-    runBtn.disabled = false;
-    runBtn.innerHTML = '开始批量回测';
-    isRunning = false;
-    
-    updateStatus(true, '回测完成');
 }
 
 // 回测单个股票（调试用：批量回测已改为后端任务）
@@ -512,6 +580,22 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'block';
     
+    // 兜底：没有任何可展示的结果时，给出提示
+    if (!Array.isArray(results) || results.length === 0) {
+        document.getElementById('totalStocks').textContent = 0;
+        document.getElementById('avgReturn').textContent = '0%';
+        document.getElementById('returnSumAll').textContent = '0%';
+        document.getElementById('totalTrades').textContent = 0;
+        document.getElementById('avgWinRate').textContent = '0%';
+        document.getElementById('successCount').textContent = successCount || 0;
+        document.getElementById('failCount').textContent = failCount || 0;
+        document.getElementById('avgHoldingDaysStocks').textContent = `0天`;
+        const tableBody = document.getElementById('resultsTableBody');
+        tableBody.innerHTML = `<tr><td colspan="10" style="color:#999;">暂无可展示结果（可能全部超时/失败，或后端任务异常）</td></tr>`;
+        resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+
     // 计算汇总数据
     // 注意：统计/平均值只基于“真正跑出回测数据”的股票：
     // - success=true 且 skipped=false 且 data.summary 存在（后端保证此时 trades 非空）
@@ -562,11 +646,17 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
     
     results.forEach((result, index) => {
         const row = document.createElement('tr');
+
+        // 安全获取股票代码（后端可能返回 dict 或字符串）
+        const stockObj = result && result.stock;
+        const stockCode = (stockObj && typeof stockObj === 'object')
+            ? (stockObj.code || stockObj.stockCode || stockObj.stock_code || '未知')
+            : (stockObj ? String(stockObj) : '未知');
         
         if (result.success && result.skipped) {
             const cells = [
                 index + 1,
-                result.stock?.code || '未知',
+                stockCode,
             ];
             row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('') +
                 `<td colspan="8" style="color: #999;">
@@ -583,7 +673,7 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
             
             const cells = [
                 index + 1,
-                result.stock?.code || '未知',
+                stockCode,
                 summary.total_trades || 0,
                 `<span class="${totalReturn >= 0 ? 'positive' : 'negative'}">${totalReturn.toFixed(2)}%</span>`,
                 `<span class="${avgReturn >= 0 ? 'positive' : 'negative'}">${avgReturn.toFixed(2)}%</span>`,
@@ -598,12 +688,12 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
         } else {
             const cells = [
                 index + 1,
-                result.stock.code || '未知'
+                stockCode
             ];
             
             row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('') + 
                 `<td colspan="8" style="color: #999;">
-                    <span style="color: #e74c3c; font-weight: bold;">✗ 失败</span> - ${result.error || '未知错误'}
+                    <span style="color: #e74c3c; font-weight: bold;">✗ 失败</span> - ${result.error || result.message || '未知错误'}
                 </td>`;
         }
         

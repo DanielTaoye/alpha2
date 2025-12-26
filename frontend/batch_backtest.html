@@ -71,6 +71,32 @@
             transform: none;
         }
 
+        .stop-btn {
+            padding: 12px 24px;
+            background: #ffffff;
+            color: #c0392b;
+            border: 2px solid #c0392b;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stop-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(192, 57, 43, 0.25);
+        }
+
+        .stop-btn:disabled {
+            background: #f5f5f5;
+            color: #999;
+            border-color: #ddd;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
         .progress-container {
             background: white;
             padding: 20px;
@@ -311,18 +337,21 @@
                     <option value="4">4</option>
                     <option value="6">6</option>
                     <option value="8">8</option>
-                    <option value="10">10</option>
+                    <option value="10" selected>10（默认）</option>
                     <option value="20">20</option>
                     <option value="30">30</option>
                     <option value="40">40</option>
-                    <option value="50" selected>50（默认）</option>
+                    <option value="50">50</option>
                 </select>
-                <span style="color:#666; font-size:14px;">默认50；若后端/DB吃紧可调低</span>
+                <span style="color:#666; font-size:14px;">默认10；若后端/DB吃紧可调低</span>
             </div>
 
             <div class="control-row">
                 <button class="run-btn" id="runBtn" onclick="startBatchBacktest()">
                     🚀 开始批量回测
+                </button>
+                <button class="stop-btn" id="stopBtn" onclick="interruptBatchBacktest()" style="display:none;">
+                    打断
                 </button>
             </div>
 

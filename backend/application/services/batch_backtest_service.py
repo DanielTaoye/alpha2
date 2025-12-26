@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 from threading import Lock, Thread
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from infrastructure.logging.logger import get_logger
 from application.services.kline_service import KLineApplicationService
@@ -46,6 +47,7 @@ class BatchBacktestService:
     _lock = Lock()
     _jobs: Dict[str, BatchJobStatus] = {}
     _cancel_flags: Dict[str, bool] = {}
+    _per_stock_timeout_sec: int = 120
 
     @classmethod
     def start_job(
@@ -70,7 +72,8 @@ class BatchBacktestService:
             failed=0,
             skipped=0,
             message="running",
-            results=[{} for _ in range(len(stocks))],
+            # 用 None 做占位：前端轮询时会过滤掉 None；避免 {} 被当成“有结果”导致渲染异常
+            results=[None for _ in range(len(stocks))],
         )
         with cls._lock:
             cls._jobs[job_id] = status
@@ -138,7 +141,11 @@ class BatchBacktestService:
                         "skipped": True,
                         "message": "已取消(未执行)",
                     }
-                return idx, cls._run_single(stock, stock_nature, backtest_config, period)
+                try:
+                    return idx, cls._run_single(stock, stock_nature, backtest_config, period)
+                except Exception as e:
+                    logger.error(f"[batch_backtest] job={job_id} single crashed: {e}", exc_info=True)
+                    return idx, {"stock": stock, "success": False, "message": f"异常: {e}"}
 
             finished = 0
             succ = 0
@@ -146,29 +153,111 @@ class BatchBacktestService:
             skip = 0
             results = [None for _ in range(len(stocks))]
 
-            with ThreadPoolExecutor(max_workers=conc) as ex:
-                futures = [ex.submit(worker, (i, s)) for i, s in enumerate(stocks)]
-                for fut in as_completed(futures):
-                    idx, res = fut.result()
-                    results[idx] = res
-                    finished += 1
-                    if res.get("success") and res.get("skipped"):
-                        skip += 1
-                    elif res.get("success"):
-                        succ += 1
-                    else:
-                        fail += 1
-                    cls._set_status(
-                        job_id,
-                        finished=finished,
-                        success=succ,
-                        failed=fail,
-                        skipped=skip,
-                        results=results,
-                        message="running",
-                    )
+            ex = ThreadPoolExecutor(max_workers=conc)
+            futures = []
+            future_meta: Dict[Any, tuple[int, Any, float]] = {}
+            try:
+                for i, s in enumerate(stocks):
+                    fut = ex.submit(worker, (i, s))
+                    futures.append(fut)
+                    future_meta[fut] = (i, s, time.monotonic())
+
+                pending = set(futures)
+                # 用 wait + 超时扫描：单股票超过 30s 仍未返回，则记为超时并“自动下一个”
+                while pending:
+                    done_set, _ = wait(pending, timeout=0.4, return_when=FIRST_COMPLETED)
+                    now = time.monotonic()
+
+                    # 处理完成的
+                    for fut in list(done_set):
+                        pending.discard(fut)
+                        try:
+                            idx, res = fut.result()
+                        except Exception as e:
+                            idx, stock, _st = future_meta.get(fut, (-1, None, 0.0))
+                            res = {"stock": stock, "success": False, "message": f"异常: {e}"}
+                        if idx is None or idx < 0:
+                            continue
+                        # 如果该 idx 已被超时/取消提前写入，就忽略真实结果（避免反复计数）
+                        if results[idx] is not None:
+                            continue
+                        results[idx] = res
+                        finished += 1
+                        if res.get("success") and res.get("skipped"):
+                            skip += 1
+                        elif res.get("success"):
+                            succ += 1
+                        else:
+                            fail += 1
+                        cls._set_status(
+                            job_id,
+                            finished=finished,
+                            success=succ,
+                            failed=fail,
+                            skipped=skip,
+                            results=results,
+                            message="running",
+                        )
+
+                    # 扫描超时（不杀线程，只是不再等待它；并把它计入 finished，让进度能继续走）
+                    for fut in list(pending):
+                        idx, stock, start_ts = future_meta.get(fut, (-1, None, now))
+                        if idx < 0:
+                            continue
+                        if results[idx] is not None:
+                            pending.discard(fut)
+                            continue
+                        if now - start_ts >= float(cls._per_stock_timeout_sec):
+                            results[idx] = {
+                                "stock": stock,
+                                "success": False,
+                                "timeout": True,
+                                "message": f"超时({cls._per_stock_timeout_sec}s)已跳过",
+                            }
+                            finished += 1
+                            fail += 1
+                            pending.discard(fut)
+                            cls._set_status(
+                                job_id,
+                                finished=finished,
+                                success=succ,
+                                failed=fail,
+                                skipped=skip,
+                                results=results,
+                                message="running",
+                            )
+
+                    # 打断：把仍未落盘的标记为“已取消(未执行)”并结束
                     if cls._is_cancelled(job_id):
+                        for fut in list(pending):
+                            idx, stock, _st = future_meta.get(fut, (-1, None, now))
+                            if idx < 0:
+                                continue
+                            if results[idx] is not None:
+                                continue
+                            results[idx] = {
+                                "stock": stock,
+                                "success": True,
+                                "skipped": True,
+                                "message": "已取消(未执行)",
+                            }
+                            finished += 1
+                            skip += 1
+                        pending.clear()
+                        cls._set_status(
+                            job_id,
+                            finished=finished,
+                            success=succ,
+                            failed=fail,
+                            skipped=skip,
+                            results=results,
+                            message="running",
+                        )
                         break
+            finally:
+                cancelled = cls._is_cancelled(job_id)
+                # 取消时不等待线程池把所有计算跑完；超时的单股任务也不阻塞整个 job 结束
+                ex.shutdown(wait=not cancelled, cancel_futures=cancelled)
 
             cancelled = cls._is_cancelled(job_id)
             cls._set_status(
