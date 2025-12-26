@@ -4,7 +4,7 @@
     "nature_thresholds": {
       "短线": 70.0,
       "波段": 60.0,
-      "中长线": 70.0
+      "中长线": 60.0
     },
     "description": "策略1 C点触发阈值（基于赔率分+胜率分+插件）"
   },
@@ -13,13 +13,13 @@
     "nature_thresholds": {
       "短线": 70.0,
       "波段": 80.0,
-      "中长线": 75.0
+      "中长线": 70.0
     },
     "description": "策略2 C点触发阈值（基于MA+MACD+成交量+K线组合）"
   },
   "r_point_plugins": {
     "pressure_stagnation": {
-      "distance_threshold_pct": 15.0,
+      "distance_threshold_pct": 10.0,
       "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
     },
     "high_position_r": {
@@ -27,13 +27,13 @@
       "description": "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值"
     },
     "high_stagnation_bearish": {
-      "gain_threshold_pct": 15.0,
+      "gain_threshold_pct": 18.0,
       "description": "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值"
     }
   },
   "market_type": "bull",
   "market_type_description": "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市",
-  "last_updated": "2025-12-26 11:22:59",
+  "last_updated": "2025-12-26 13:54:54",
   "market_type_rule": {
     "mode": "date_rule",
     "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",

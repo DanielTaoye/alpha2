@@ -18,6 +18,11 @@ import argparse
 import requests
 from functools import lru_cache
 import logging
+try:
+    from pypinyin import lazy_pinyin, Style  # type: ignore  # 可选：用于首字母模糊匹配
+except Exception:
+    lazy_pinyin = None
+    Style = None
 
 # 控制台输出强制使用UTF-8
 try:
@@ -70,6 +75,22 @@ def _as_dt(s: Optional[str]) -> Optional[datetime]:
         return datetime.strptime(str(s).split(" ")[0], "%Y-%m-%d")
     except Exception:
         return None
+
+def _initials(name: str) -> str:
+    """
+    获取名称的首字母串（支持中文，优先用pypinyin，失败则仅取英文/数字首字符）。
+    """
+    if not name:
+        return ""
+    name = str(name).strip()
+    if lazy_pinyin and Style:
+        try:
+            return "".join(lazy_pinyin(name, style=Style.FIRST_LETTER)).upper()
+        except Exception:
+            pass
+    # 退化：仅保留ASCII字母/数字的首字符
+    letters = [ch.upper() for ch in name if ch.isalnum()]
+    return "".join(letters)
 
 
 def get_cr_points_from_api(stock_code: str, table_name: str, start_date: str = None, end_date: str = None) -> Optional[Dict]:
@@ -312,7 +333,14 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             time=_to_dt(k.get("date") or k.get("time")),
         ))
 
-    def _run_plugin(name: str, cond_text: List[str], fn, args: List[Any], requires: List[str] = None):
+    def _print_checks(checks: List[Dict[str, Any]]):
+        for c in checks:
+            label = c.get("label") or ""
+            ok = bool(c.get("ok"))
+            detail = c.get("detail") or ""
+            lines.append(f"- {_mark(ok)} {label}{(' | ' + detail) if detail else ''}")
+
+    def _run_plugin(name: str, cond_text: List[str], fn, args: List[Any], requires: List[str] = None, checks: Optional[List[Dict[str, Any]]] = None):
         requires = requires or []
         lines.append("")
         lines.append("-" * 88)
@@ -340,73 +368,666 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             triggered = bool(getattr(res, "triggered", False))
             reason = getattr(res, "reason", "") or ""
             lines.append(f"结果: {_mark(triggered)}")
+            if checks:
+                lines.append("逐条检查:")
+                _print_checks(checks)
             if reason:
                 lines.append(f"原因: {reason}")
             else:
-                lines.append("原因: 未满足条件(插件未给出细分原因)")
+                lines.append("原因: 未触发(见逐条检查)")
         except Exception as e:
             lines.append(f"结果: {_mark3('ERROR')} {e}")
 
     # 逐插件执行（顺序与 RPointPluginService.check_r_point 一致）
+    # ========== 逐插件：生成“逐条检查” ==========
+    # 工具：获取前一交易日（用于多个插件）
+    prev_dates = []
+    try:
+        prev_dates = rp._get_previous_trading_dates_from_cache(date_str, stock_code)
+    except Exception:
+        prev_dates = []
+    prev_date_str = prev_dates[0] if prev_dates else None
+    prev_day_data = get_daily_data(stock_code, prev_date_str) if prev_date_str else None
+    prev_day_chance = get_daily_chance(stock_code, prev_date_str) if prev_date_str else None
+
+    # 插件1（简化版逐条检查：输出核心门槛；该插件内部子条件较多）
+    checks_p1: List[Dict[str, Any]] = []
+    vol = (current_chance.get("volume_type") or "").strip()
+    vols = [v.strip() for v in vol.split(",") if v.strip()]
+    has_xyh = any(v in {"X", "Y", "H"} for v in vols)
+    has_xyzh = any(v in {"X", "Y", "Z", "H"} for v in vols)
+    checks_p1.append({"label": "当日放量(X/Y/H)（用于条件1-4）", "ok": has_xyh, "detail": f"volume_type={vol or '无'}"})
+    checks_p1.append({"label": "当日放量(X/Y/Z/H)（用于条件5-6）", "ok": has_xyzh, "detail": f"volume_type={vol or '无'}"})
+    bp = (current_chance.get("bearish_pattern") or "").strip()
+    checks_p1.append({"label": "当日存在空头组合", "ok": bool(bp), "detail": bp or "无"})
+    hist = get_historical_daily_data(stock_code, date_str, 25)
+    if hist and len(hist) >= 6:
+        close_today = _safe_float(current_data.get("close"))
+        c3 = _safe_float(hist[-4].get("close")) if len(hist) >= 4 else 0
+        c5 = _safe_float(hist[-6].get("close")) if len(hist) >= 6 else 0
+        g3 = (close_today - c3) / c3 * 100 if c3 > 0 else 0
+        g5 = (close_today - c5) / c5 * 100 if c5 > 0 else 0
+        checks_p1.append({"label": "前3日累计涨幅过大(示意输出)", "ok": False, "detail": f"涨幅={g3:.2f}%（是否过大由插件内部阈值判定）"})
+        checks_p1.append({"label": "前5日累计涨幅过大(示意输出)", "ok": False, "detail": f"涨幅={g5:.2f}%（是否过大由插件内部阈值判定）"})
+    else:
+        checks_p1.append({"label": "历史数据(用于涨幅类子条件)", "ok": False, "detail": f"历史条数={len(hist) if hist else 0}"})
+
     _run_plugin(
         "插件1: 乖离率偏离",
         ["包含多个子条件(涨幅/放量/空头形态/乖离等)，满足任一子条件即可触发(详见插件逻辑)"],
         rp._check_deviation,
         [stock_code, check_date, ma_data if ma_data else None, target_index],
         requires=["ma_macd_index"],  # 该插件很多子条件依赖MA/index
+        checks=checks_p1,
     )
+
+    # 插件3：强转弱未反转
+    checks_p3: List[Dict[str, Any]] = []
+    if prev_date_str and prev_day_chance and prev_day_data and current_chance and current_data:
+        prev_bp = (prev_day_chance.get("bearish_pattern") or "")
+        ok1 = ("强转弱" in prev_bp)
+        mid_prev = (_safe_float(prev_day_data.get("close")) + _safe_float(prev_day_data.get("open"))) / 2
+        ok2 = _safe_float(current_data.get("close")) < mid_prev
+        vt_today = (current_chance.get("volume_type") or "")
+        ok3 = ("G" in [v.strip() for v in vt_today.split(",") if v.strip()])
+        checks_p3 += [
+            {"label": "前一日空头组合包含“强转弱”", "ok": ok1, "detail": prev_bp or "无"},
+            {"label": "今日未修复(close < (前日收盘+前日开盘)/2)", "ok": ok2, "detail": f"close={_safe_float(current_data.get('close')):.2f}, mid_prev={mid_prev:.2f}"},
+            {"label": "今日成交量类型包含G", "ok": ok3, "detail": f"volume_type={vt_today or '无'}"},
+        ]
+    else:
+        checks_p3.append({"label": "所需数据齐全(prev/current daily+chance)", "ok": False, "detail": f"prev_date={prev_date_str}"})
+
     _run_plugin(
         "插件3: 强转弱未反转",
         ["前一日空头组合包含“强转弱”", "今日未修复: close < (前日收盘+前日开盘)/2", "今日成交量类型包含G"],
         rp._check_strong_to_weak_not_reversed,
         [stock_code, check_date],
+        checks=checks_p3,
     )
+
+    # 插件4：基本面突发利空
+    checks_p4: List[Dict[str, Any]] = []
+    is_main = KLinePatternService.is_main_board(stock_code) if stock_code else True
+    limit_th = -9.9 if is_main else -19.8
+    pre_close = _safe_float(current_data.get("pre_close"))
+    change_pct = (_safe_float(current_data.get("close")) - pre_close) / pre_close * 100 if pre_close > 0 else 0
+    ok_limit = (pre_close > 0 and change_pct <= limit_th)
+    O = _safe_float(current_data.get("open")); H = _safe_float(current_data.get("high")); L = _safe_float(current_data.get("low")); Cc = _safe_float(current_data.get("close"))
+    ok_one = (O == H == L == Cc)
+    ok_t = (O == L == Cc and H > Cc)
+    checks_p4 += [
+        {"label": "当日达到跌停阈值", "ok": ok_limit, "detail": f"涨跌幅={change_pct:.2f}%, 阈值={limit_th}%"},
+        {"label": "一字跌停(O=H=L=C)", "ok": ok_one, "detail": f"O/H/L/C={O:.2f}/{H:.2f}/{L:.2f}/{Cc:.2f}"},
+        {"label": "T字跌停(O=L=C 且 H>C)", "ok": ok_t, "detail": f"O/L/C/H={O:.2f}/{L:.2f}/{Cc:.2f}/{H:.2f}"},
+    ]
+
     _run_plugin(
         "插件4: 基本面突发利空",
         ["一字跌停 或 T字跌停"],
         rp._check_fundamental_negative,
         [stock_code, check_date],
+        checks=checks_p4,
     )
+
+    # 插件5：上冲乏力（按代码门槛逐条列）
+    checks_p5: List[Dict[str, Any]] = []
+    # market_type（只用于展示，不依赖）
+    try:
+        from domain.services.config_service import get_config_service
+        market_type = get_config_service().get_market_type(check_date)
+    except Exception:
+        market_type = None
+    checks_p5.append({"label": "仅熊市生效", "ok": (market_type == "bear"), "detail": f"market_type={market_type or '未知'}"})
+    checks_p5.append({"label": "最近有效信号必须是C", "ok": (last_valid_type == "C"), "detail": f"last_valid_type={last_valid_type or '无'}"})
+    checks_p5.append({"label": "存在最近C点日期", "ok": (last_c_dt is not None), "detail": f"last_c={last_c_str or '无'}"})
+    # 下面条件要依赖数据齐全
+    if last_c_dt is not None and prev_date_str and prev_day_chance:
+        c_data = get_daily_data(stock_code, last_c_str) if last_c_str else None
+        if c_data:
+            c_low = _safe_float(c_data.get("low"))
+            cum_gain = (_safe_float(current_data.get("close")) - c_low) / c_low * 100 if c_low > 0 else 0
+            checks_p5.append({"label": "从C日最低价到今日收盘累计涨幅>15%", "ok": (cum_gain > 15), "detail": f"涨幅={cum_gain:.2f}% (C_low={c_low:.2f})"})
+        else:
+            checks_p5.append({"label": "获取C日K线数据", "ok": False, "detail": f"c_date={last_c_str}"})
+        # 前一日赔率阈值：由插件内部按股性取阈值，这里只展示“0<赔率”
+        day_wr = _safe_float(prev_day_chance.get("day_win_ratio_score"))
+        checks_p5.append({"label": "前一日赔率>0(且小于股性阈值由插件内部判定)", "ok": (day_wr > 0), "detail": f"day_win_ratio_score={day_wr:.2f}"})
+        # 压力位距离
+        pp_raw = _safe_float(prev_day_chance.get("pressure_price"))
+        if pp_raw > 0:
+            pressure = pp_raw / 100.0
+            close_today = _safe_float(current_data.get("close"))
+            dist = (pressure - close_today) / close_today * 100 if close_today > 0 else 0
+            checks_p5.append({"label": "股价距压 0%<距离<阈值(默认10%)", "ok": (0 < dist < 10), "detail": f"distance={dist:.2f}%, pressure={pressure:.2f}"})
+        else:
+            checks_p5.append({"label": "前一日存在压力位", "ok": False, "detail": f"pressure_price={prev_day_chance.get('pressure_price')}"})
+        # 昨日涨幅
+        if prev_day_data:
+            y_pre = _safe_float(prev_day_data.get("pre_close"))
+            y_change = (_safe_float(prev_day_data.get("close")) - y_pre) / y_pre * 100 if y_pre > 0 else 0
+            y_th = 6 if is_main else 8
+            checks_p5.append({"label": "前一日涨幅>=阈值(主板6/非主板8)", "ok": (y_change >= y_th), "detail": f"y_change={y_change:.2f}%, th={y_th}%"})
+        else:
+            checks_p5.append({"label": "获取前一日K线用于涨幅", "ok": False, "detail": f"prev_date={prev_date_str}"})
+        # 今日放量(AXYZH)
+        vt_today = (current_chance.get("volume_type") or "")
+        vols_today = [v.strip() for v in vt_today.split(",") if v.strip()]
+        ok_vol = any(v in {"A", "X", "Y", "Z", "H"} for v in vols_today)
+        checks_p5.append({"label": "今日放量(AXYZH)", "ok": ok_vol, "detail": f"volume_type={vt_today or '无'}"})
+        # 今日空头K线形态：用 pattern + 振幅/跌幅做可解释输出（与插件集合一致）
+        pattern_today = KLinePatternService.identify_pattern(stock_code, O, Cc, H, L, pre_close)
+        amp_th = 6 if is_main else 8
+        amp = ((H - L) / pre_close * 100) if pre_close > 0 else 0
+        decline_th = 3 if is_main else 5
+        is_bearish = Cc < O
+        decline = (Cc - O) / O * 100 if O > 0 else 0
+        risky_set = {"冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", "冲高回落阴十字星", "高开低走"}
+        ok_risk = ((pattern_today in risky_set and amp > amp_th) or (is_bearish and decline <= -decline_th))
+        checks_p5.append({"label": "今日空头风险形态(振幅/跌幅门槛)", "ok": ok_risk, "detail": f"pattern={pattern_today or '无'}, amp={amp:.2f}%> {amp_th}?, decline={decline:.2f}%<=-{decline_th}?"})
+
     _run_plugin(
         "插件5: 上冲乏力(熊市特定)",
         ["需要最近C点且上一有效点为C", "具体条件较多，详见插件reason/插件实现"],
         rp._check_weak_breakout,
         [stock_code, check_date, last_c_dt, last_valid_type],
         requires=["c_point", "last_valid_type"],
+        checks=checks_p5,
     )
+
+    # 插件6：跌破支撑位（按代码门槛逐条列）
+    checks_p6: List[Dict[str, Any]] = []
+    # 前一日支撑位来自 prev_day_chance
+    if prev_day_chance:
+        sp_raw = _safe_float(prev_day_chance.get("support_price"))
+        sp = sp_raw / 100.0 if sp_raw > 0 else 0
+        close_today = _safe_float(current_data.get("close"))
+        ok_break = (sp > 0 and close_today < sp)
+        checks_p6.append({"label": "当日收盘价 < 前一日支撑位", "ok": ok_break, "detail": f"close={close_today:.2f}, support={sp:.2f}"})
+    else:
+        checks_p6.append({"label": "存在前一日daily_chance(含支撑位)", "ok": False, "detail": ""})
+    vt_today = (current_chance.get("volume_type") or "")
+    vols_today = [v.strip() for v in vt_today.split(",") if v.strip()]
+    ok_xyz = any(v in {"X", "Y", "Z"} for v in vols_today)
+    checks_p6.append({"label": "当日放量(X/Y/Z)", "ok": ok_xyz, "detail": f"volume_type={vt_today or '无'}"})
+
     _run_plugin(
         "插件6: 跌破支撑位",
         ["跌破前一日支撑位", "当日放量(X/Y/Z)"],
         rp._check_break_support,
         [stock_code, check_date],
+        checks=checks_p6,
     )
+    # 插件7：高位发R（按代码门槛逐条列）
+    checks_p7: List[Dict[str, Any]] = []
+    if ma_data and macd_data and target_index is not None:
+        def _ma_at(key):
+            arr = ma_data.get(key) or []
+            return arr[target_index] if target_index < len(arr) else None
+        m5 = _ma_at("ma5"); m10 = _ma_at("ma10"); m20 = _ma_at("ma20"); m30 = _ma_at("ma30"); m60 = _ma_at("ma60")
+        ok_ma_ready = None not in (m5, m10, m20, m30, m60)
+        if ok_ma_ready:
+            ok_align_now = (m5 > m10 > m20 > m30 > m60)
+            checks_p7.append({"label": "均线多头排列(当日)", "ok": ok_align_now, "detail": f"MA5/10/20/30/60={m5:.2f}/{m10:.2f}/{m20:.2f}/{m30:.2f}/{m60:.2f}"})
+            ok_align_recent = ok_align_now
+            for back in range(1, 4):
+                idx = target_index - back
+                if idx < 0:
+                    continue
+                arrs = [ma_data.get(k) or [] for k in ("ma5", "ma10", "ma20", "ma30", "ma60")]
+                if any(idx >= len(a) for a in arrs):
+                    continue
+                vals = [a[idx] for a in arrs]
+                if None in vals:
+                    continue
+                if vals[0] > vals[1] > vals[2] > vals[3] > vals[4]:
+                    ok_align_recent = True
+                    break
+            checks_p7.append({"label": "均线多头排列(近3日出现过)", "ok": ok_align_recent, "detail": ""})
+        else:
+            checks_p7.append({"label": "均线数据完整(MA5/10/20/30/60)", "ok": False, "detail": "缺失MA值"})
+        # 20日低点涨幅
+        if kline_list and target_index is not None and target_index >= 20:
+            lows = []
+            for k in kline_list[target_index-20:target_index]:
+                lows.append(_safe_float(k.get("low"), 0))
+            lowest = min([x for x in lows if x > 0], default=0)
+            cur_price = _safe_float(current_data.get("close"))
+            gain = (cur_price - lowest) / lowest * 100 if lowest > 0 else 0
+            checks_p7.append({"label": "20日最低价涨幅>18%", "ok": (gain > 18), "detail": f"lowest={lowest:.2f}, gain={gain:.2f}%"})
+        else:
+            checks_p7.append({"label": "20日最低价涨幅检查(需要>=20根K线)", "ok": False, "detail": f"target_index={target_index}"})
+        # 股价>MA10
+        if m10 is not None:
+            cur_price = _safe_float(current_data.get("close"))
+            checks_p7.append({"label": "股价>MA10", "ok": (cur_price > m10), "detail": f"close={cur_price:.2f}, ma10={m10:.2f}"})
+        # 跌破支撑位（用前一日支撑）
+        if prev_day_chance:
+            sp_raw = _safe_float(prev_day_chance.get("support_price"))
+            sp = sp_raw / 100.0 if sp_raw > 0 else 0
+            cur_price = _safe_float(current_data.get("close"))
+            checks_p7.append({"label": "跌破前一日支撑位", "ok": (sp > 0 and cur_price < sp), "detail": f"close={cur_price:.2f}, support={sp:.2f}"})
+        # MACD死叉（当日或近5日）
+        dif_list = macd_data.get("dif") or []
+        dea_list = macd_data.get("dea") or []
+        macd_list = macd_data.get("macd") or []
+        ok_macd_ready = target_index < len(dif_list) and target_index < len(dea_list) and target_index < len(macd_list)
+        if ok_macd_ready:
+            td = dif_list[target_index]; te = dea_list[target_index]
+            ok_state = (td is not None and te is not None and td < te)
+            ok_cross = False
+            if ok_state:
+                start_i = max(1, target_index - 5)
+                for i in range(start_i, target_index + 1):
+                    if None in (dif_list[i-1], dea_list[i-1], dif_list[i], dea_list[i]):
+                        continue
+                    if dif_list[i-1] > dea_list[i-1] and dif_list[i] < dea_list[i]:
+                        ok_cross = True
+                        break
+                # 兼容“已死叉”也算
+                ok_cross = ok_cross or ok_state
+            checks_p7.append({"label": "MACD死叉(当日或近5日)", "ok": ok_cross, "detail": f"DIF={td}, DEA={te}"})
+        else:
+            checks_p7.append({"label": "MACD数据齐全(dif/dea/macd)", "ok": False, "detail": ""})
+    else:
+        checks_p7.append({"label": "所需数据(MA/MACD/target_index)", "ok": False, "detail": f"target_index={target_index}"})
+
     _run_plugin(
         "插件7: 高位发R",
         ["均线多头排列(当前或近3日出现过)", "20日低点涨幅>阈值", "股价>MA10", "跌破前一日支撑位"],
         rp._check_high_position_r,
         [stock_code, check_date, ma_data, macd_data, target_index],
         requires=["ma_macd_index"],
+        checks=checks_p7,
     )
+
+    # 插件8：箱体回踩被跌破（按插件实现逐条列条件）
+    checks_p8: List[Dict[str, Any]] = []
+    cur_price = _safe_float(current_data.get("close"))
+    if target_index is None or not k_objs:
+        checks_p8.append({"label": "需要K线序列与target_index", "ok": False, "detail": f"target_index={target_index}"})
+    else:
+        ok_len = target_index >= 42
+        checks_p8.append({"label": "数据至少42个交易日(current_index>=42)", "ok": ok_len, "detail": f"current_index={target_index}"})
+
+        x_day_high = 0.0
+        x_day_index = -1
+        if ok_len:
+            for i in range(target_index - 19, target_index + 1):
+                if k_objs[i].high > x_day_high:
+                    x_day_high = k_objs[i].high
+                    x_day_index = i
+        checks_p8.append({"label": "近20日最高价X日存在", "ok": (x_day_index >= 0), "detail": f"x_idx={x_day_index}, x_high={x_day_high:.2f}"})
+
+        if x_day_index >= 0 and x_day_high > 0:
+            drop_ratio = (x_day_high - cur_price) / x_day_high
+            checks_p8.append({"label": "X日最高价距当前回落>20%", "ok": (drop_ratio > 0.20), "detail": f"drop={drop_ratio*100:.2f}%, x_high={x_day_high:.2f}, close={cur_price:.2f}"})
+        else:
+            checks_p8.append({"label": "X日最高价距当前回落>20%", "ok": False, "detail": "缺少X日最高价"})
+
+        ok_x_back = (x_day_index >= 22)
+        checks_p8.append({"label": "X日之前至少还有22个交易日(x_idx>=22)", "ok": ok_x_back, "detail": f"x_idx={x_day_index}"})
+
+        y_day_high = None
+        y_day_index = None
+        z_day_low = None
+        z_day_index = None
+        if ok_x_back:
+            box_start = x_day_index - 22
+            box_end = x_day_index - 1
+            for i in range(box_start, box_end + 1):
+                if k_objs[i].high > x_day_high:
+                    if y_day_high is None or k_objs[i].high > y_day_high:
+                        y_day_high = k_objs[i].high
+                        y_day_index = i
+                if z_day_low is None or k_objs[i].low < z_day_low:
+                    z_day_low = k_objs[i].low
+                    z_day_index = i
+        checks_p8.append({"label": "X-22..X-1区间最低价Z日存在", "ok": (z_day_low is not None and z_day_low > 0), "detail": f"z_idx={z_day_index}, z_low={(z_day_low or 0):.2f}"})
+        checks_p8.append({"label": "是否存在更高Y日(有/无都可)", "ok": True, "detail": f"has_y={y_day_high is not None}, y_idx={y_day_index}, y_high={(y_day_high or 0):.2f}"})
+
+        if z_day_low and z_day_low > 0 and x_day_high > 0:
+            if y_day_high is not None:
+                box_gain = (y_day_high - z_day_low) / z_day_low
+                checks_p8.append({"label": "箱体确认(Y-Z涨幅>20%)", "ok": (box_gain > 0.20), "detail": f"gain={box_gain*100:.2f}%"})
+            else:
+                box_gain = (x_day_high - z_day_low) / z_day_low
+                checks_p8.append({"label": "箱体确认(X-Z涨幅>20%)", "ok": (box_gain > 0.20), "detail": f"gain={box_gain*100:.2f}%"})
+        else:
+            checks_p8.append({"label": "箱体确认(>20%)", "ok": False, "detail": "缺少X/Z价格"})
+
+        if prev_day_chance:
+            sp_raw = _safe_float(prev_day_chance.get("support_price"))
+            sp = sp_raw / 100.0 if sp_raw > 0 else 0
+            checks_p8.append({"label": "前一日存在支撑位", "ok": (sp > 0), "detail": f"support={sp:.2f}"})
+            checks_p8.append({"label": "当日跌破前一日支撑位", "ok": (sp > 0 and cur_price < sp), "detail": f"close={cur_price:.2f}, support={sp:.2f}"})
+        else:
+            checks_p8.append({"label": "前一日daily_chance可用(支撑位)", "ok": False, "detail": ""})
+
+        dif_list8 = macd_data.get("dif") or []
+        dea_list8 = macd_data.get("dea") or []
+        ok_macd8 = target_index < len(dif_list8) and target_index < len(dea_list8) and target_index >= 1
+        checks_p8.append({"label": "MACD数据齐全(dif/dea)", "ok": ok_macd8, "detail": f"len_dif={len(dif_list8)}, len_dea={len(dea_list8)}"})
+        cross_found = False
+        cross_idx = None
+        if ok_macd8:
+            start_i = max(1, target_index - 5)
+            for i in range(start_i, target_index + 1):
+                if None in (dif_list8[i-1], dea_list8[i-1], dif_list8[i], dea_list8[i]):
+                    continue
+                if dif_list8[i-1] > dea_list8[i-1] and dif_list8[i] < dea_list8[i]:
+                    cross_found = True
+                    cross_idx = i
+                    break
+        checks_p8.append({"label": "近5日出现死叉转换点(前一日DIF>DEA，当日DIF<DEA)", "ok": cross_found, "detail": f"cross_idx={cross_idx}"})
     _run_plugin(
         "插件8: 箱体回踩被跌破",
         ["回踩箱体并跌破支撑 + 结合MACD状态(详见插件实现)"],
         rp._check_box_breakdown,
         [stock_code, check_date, macd_data, target_index, k_objs],
         requires=["macd_index", "kline_index"],
+        checks=checks_p8,
     )
+
+    # 插件9：趋势向下+未放量跌破支撑+MACD死叉（按插件实现逐条列条件）
+    checks_p9: List[Dict[str, Any]] = []
+    low_c_date_str = last_c_str
+    checks_p9.append({"label": "存在最近C点日期", "ok": bool(low_c_date_str), "detail": f"last_c={low_c_date_str or '无'}"})
+    low_c_index = None
+    if low_c_date_str and k_objs and target_index is not None:
+        for i in range(target_index, -1, -1):
+            kt = getattr(k_objs[i], "time", None)
+            kt_str = kt.strftime("%Y-%m-%d") if kt else None
+            if kt_str == low_c_date_str:
+                low_c_index = i
+                break
+    checks_p9.append({"label": "在K线序列中找到上个C点索引", "ok": (low_c_index is not None), "detail": f"low_c_index={low_c_index}"})
+    ma60_list = ma_data.get("ma60") or []
+    if low_c_index is not None and low_c_index < len(ma60_list):
+        ma60_low_c = ma60_list[low_c_index]
+        low_c_close = getattr(k_objs[low_c_index], "close", None)
+        ok_low_c = (ma60_low_c is not None and ma60_low_c > 0 and low_c_close is not None and float(low_c_close) < float(ma60_low_c))
+        checks_p9.append({"label": "低位C：C日收盘 < C日MA60", "ok": ok_low_c, "detail": f"C_close={float(low_c_close or 0):.2f}, MA60={float(ma60_low_c or 0):.2f}"})
+    else:
+        checks_p9.append({"label": "低位C：需要MA60与C索引", "ok": False, "detail": f"len_ma60={len(ma60_list)}, low_c_index={low_c_index}"})
+
+    # 跌破支撑：今日或近3日跌破前一日支撑，或跌破低位C当日支撑
+    break_recent = False
+    break_recent_detail = ""
+    check_dates = [date_str] + (prev_dates[:3] if prev_dates else [])
+    for d in check_dates:
+        try:
+            is_break, _, _, detail = rp._is_close_break_prev_support(stock_code, d)
+            if is_break:
+                break_recent = True
+                break_recent_detail = detail or d
+                break
+        except Exception:
+            continue
+    checks_p9.append({"label": "今日或近3日出现“收盘跌破前一日支撑”", "ok": break_recent, "detail": break_recent_detail})
+    break_low_c = False
+    low_c_support_detail = ""
+    if low_c_date_str:
+        low_c_chance = get_daily_chance(stock_code, low_c_date_str) or {}
+        low_c_support_raw = _safe_float(low_c_chance.get("support_price"))
+        if low_c_support_raw > 0:
+            low_c_support = low_c_support_raw / 100.0
+            break_low_c = (cur_price < low_c_support)
+            low_c_support_detail = f"low_c_support={low_c_support:.2f}, close={cur_price:.2f}"
+        else:
+            low_c_support_detail = f"support_price={low_c_chance.get('support_price')}"
+    checks_p9.append({"label": "当前跌破低位C当日支撑(可替代近3日支撑跌破)", "ok": break_low_c, "detail": low_c_support_detail})
+    checks_p9.append({"label": "支撑跌破条件(近3日或低位C支撑)满足其一", "ok": (break_recent or break_low_c), "detail": ""})
+
+    dif_list9 = macd_data.get("dif") or []
+    dea_list9 = macd_data.get("dea") or []
+    ok_macd9 = target_index is not None and target_index < len(dif_list9) and target_index < len(dea_list9) and target_index >= 1
+    checks_p9.append({"label": "MACD数据齐全(dif/dea)", "ok": ok_macd9, "detail": f"len_dif={len(dif_list9)}, len_dea={len(dea_list9)}, idx={target_index}"})
+    macd_dead_state = False
+    macd_cross_3d = False
+    cross_idx_3d = None
+    if ok_macd9:
+        td = dif_list9[target_index]
+        te = dea_list9[target_index]
+        macd_dead_state = (td is not None and te is not None and td < te)
+        if not macd_dead_state:
+            start_i = max(1, target_index - 3)
+            for i in range(start_i, target_index + 1):
+                if None in (dif_list9[i-1], dea_list9[i-1], dif_list9[i], dea_list9[i]):
+                    continue
+                if dif_list9[i-1] > dea_list9[i-1] and dif_list9[i] < dea_list9[i]:
+                    macd_cross_3d = True
+                    cross_idx_3d = i
+                    break
+    checks_p9.append({"label": "MACD当日死叉状态(DIF<DEA)", "ok": macd_dead_state, "detail": f"DIF={dif_list9[target_index] if ok_macd9 else None}, DEA={dea_list9[target_index] if ok_macd9 else None}"})
+    checks_p9.append({"label": "前三日内出现死叉转换点", "ok": macd_cross_3d, "detail": f"cross_idx={cross_idx_3d}"})
     _run_plugin(
         "插件9: 趋势向下+未放量跌破支撑+MACD死叉",
         ["股价<MA60", "跌破支撑位", "MACD死叉(含近几日)", "需要最近C点参与低位C判定"],
         rp._check_downtrend_break_support,
         [stock_code, check_date, ma_data, macd_data, target_index, k_objs, last_c_dt],
         requires=["ma_macd_index", "kline_index", "c_point"],
+        checks=checks_p9,
     )
+
+    # 插件11：MACD中长线死叉+跌破支撑（按插件实现逐条列条件）
+    checks_p11: List[Dict[str, Any]] = []
+    stock_nature = (current_chance.get("stock_nature") or "波段")
+    vt_today = (current_chance.get("volume_type") or "")
+    checks_p11.append({"label": "股性为中长线", "ok": (stock_nature == "中长线"), "detail": f"stock_nature={stock_nature}"})
+    checks_p11.append({"label": "成交量类型非空(任意类型)", "ok": bool(vt_today.strip()), "detail": f"volume_type={vt_today or '无'}"})
+
+    dif_list11 = macd_data.get("dif") or []
+    dea_list11 = macd_data.get("dea") or []
+    macd_list11 = macd_data.get("macd") or []
+    ok_macd11 = (target_index is not None and target_index < len(dif_list11) and target_index < len(dea_list11) and target_index < len(macd_list11) and target_index >= 1)
+    checks_p11.append({"label": "MACD数组齐全(dif/dea/macd)且索引>=1", "ok": ok_macd11, "detail": f"len_dif={len(dif_list11)}, len_dea={len(dea_list11)}, len_macd={len(macd_list11)}, idx={target_index}"})
+    dead_cross = False
+    dead_cross_idx = None
+    if ok_macd11:
+        start_i = max(1, target_index - 2)  # 近3日: i=current-2..current
+        for i in range(start_i, target_index + 1):
+            if None in (dif_list11[i], dea_list11[i]):
+                continue
+            mp = macd_list11[i - 1]
+            mc = macd_list11[i]
+            if mp is None or mc is None:
+                continue
+            if mp > 0 and mc < 0 and dif_list11[i] < dea_list11[i]:
+                dead_cross = True
+                dead_cross_idx = i
+                break
+    checks_p11.append({"label": "MACD近3日出现红柱->蓝柱且当日DIF<DEA", "ok": dead_cross, "detail": f"cross_idx={dead_cross_idx}"})
+    if prev_day_chance:
+        sp_raw = _safe_float(prev_day_chance.get("support_price"))
+        sp = sp_raw / 100.0 if sp_raw > 0 else 0
+        close_today = _safe_float(current_data.get("close"))
+        checks_p11.append({"label": "前一日存在支撑位", "ok": (sp > 0), "detail": f"support={sp:.2f}"})
+        checks_p11.append({"label": "当日收盘跌破前一日支撑", "ok": (sp > 0 and close_today < sp), "detail": f"close={close_today:.2f}, support={sp:.2f}"})
+    else:
+        checks_p11.append({"label": "前一日daily_chance可用(支撑位)", "ok": False, "detail": ""})
+
+    # 插件12：中长线顶背离（按插件实现逐条列步骤）
+    checks_p12: List[Dict[str, Any]] = []
+    bp_today = (current_chance.get("bearish_pattern") or "").strip()
+    has_bearish_combo = bool(bp_today)
+    three_down = False
+    if target_index is not None and k_objs and target_index >= 2:
+        k0 = k_objs[target_index]
+        k1 = k_objs[target_index - 1]
+        k2 = k_objs[target_index - 2]
+        three_down = (k0.close < k0.open) and (k1.close < k1.open) and (k2.close < k2.open)
+    checks_p12.append({"label": "股性为中长线", "ok": (stock_nature == "中长线"), "detail": f"stock_nature={stock_nature}"})
+    checks_p12.append({"label": "前置：空头组合非空 或 三连阴", "ok": (has_bearish_combo or three_down), "detail": f"bearish={'有' if has_bearish_combo else '无'}, three_down={three_down}"})
+    dif_arr = macd_data.get("dif") or []
+    dea_arr = macd_data.get("dea") or []
+    macd_arr = macd_data.get("macd") or []
+    ok_macd12 = (target_index is not None and target_index > 0 and target_index < len(dif_arr) and target_index < len(dea_arr) and target_index < len(macd_arr))
+    checks_p12.append({"label": "MACD数组齐全(dif/dea/macd)", "ok": ok_macd12, "detail": f"len_dif={len(dif_arr)}, len_dea={len(dea_arr)}, len_macd={len(macd_arr)}, idx={target_index}"})
+
+    g1_idx = None
+    last_event = None
+    if ok_macd12:
+        for i in range(target_index - 1, 0, -1):
+            dif_prev, dea_prev = dif_arr[i - 1], dea_arr[i - 1]
+            dif_curr, dea_curr = dif_arr[i], dea_arr[i]
+            macd_prev, macd_curr = macd_arr[i - 1], macd_arr[i]
+            if None in (dif_prev, dea_prev, dif_curr, dea_curr, macd_prev, macd_curr):
+                continue
+            if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
+                last_event = ("dead", i)
+                break
+            if (dif_prev < dea_prev) and (dif_curr > dea_curr) and (macd_prev < 0) and (macd_curr > 0) and (dif_curr > dea_curr):
+                last_event = ("gold", i)
+                g1_idx = i
+                break
+    checks_p12.append({"label": "Step1 最近一次交叉事件必须是金叉G1(若最近为死叉则失败)", "ok": (last_event is not None and last_event[0] == "gold"), "detail": f"last_event={last_event}, g1_idx={g1_idx}"})
+
+    s1_idx = None
+    if g1_idx is not None:
+        for i in range(g1_idx - 1, 0, -1):
+            dif_prev, dea_prev = dif_arr[i - 1], dea_arr[i - 1]
+            dif_curr, dea_curr = dif_arr[i], dea_arr[i]
+            macd_prev, macd_curr = macd_arr[i - 1], macd_arr[i]
+            if None in (dif_prev, dea_prev, dif_curr, dea_curr, macd_prev, macd_curr):
+                continue
+            if (dif_prev > dea_prev) and (dif_curr < dea_curr) and (macd_prev > 0) and (macd_curr < 0) and (dif_curr < dea_curr):
+                s1_idx = i
+                break
+    checks_p12.append({"label": "Step2 在G1之前找到最近死叉S1", "ok": (s1_idx is not None), "detail": f"s1_idx={s1_idx}"})
+
+    h1_idx = None
+    dif_h1 = None
+    price_h1 = None
+    if s1_idx is not None:
+        for j in range(s1_idx - 1, 8, -1):
+            if j - 9 < 0:
+                continue
+            dif_j = dif_arr[j]
+            dif_j1 = dif_arr[j - 1]
+            if dif_j is None or dif_j1 is None:
+                continue
+            prev8 = [dif_arr[j - k] for k in range(2, 10)]
+            if any(v is None for v in prev8):
+                continue
+            m = max(prev8)
+            if dif_j > m and dif_j1 > m:
+                h1_idx = j
+                dif_h1 = dif_j
+                try:
+                    price_h1 = float(getattr(k_objs[h1_idx], "high"))
+                except Exception:
+                    price_h1 = None
+                break
+    checks_p12.append({"label": "Step3 在S1之前找到最近DIF局部高点H1", "ok": (h1_idx is not None and dif_h1 is not None and price_h1 is not None), "detail": f"h1_idx={h1_idx}, price_h1={price_h1}, dif_h1={dif_h1}"})
+
+    h2_idx = None
+    h2_dif = None
+    price_h2 = None
+    if g1_idx is not None and target_index is not None:
+        for j in range(g1_idx + 1, target_index):
+            if j - 9 < 0:
+                continue
+            dif_j = dif_arr[j]
+            dif_j1 = dif_arr[j - 1]
+            if dif_j is None or dif_j1 is None:
+                continue
+            prev8 = [dif_arr[j - k] for k in range(2, 10)]
+            if any(v is None for v in prev8):
+                continue
+            m = max(prev8)
+            if not (dif_j > m and dif_j1 > m):
+                continue
+            if h2_dif is None or dif_j > h2_dif or (dif_j == h2_dif and (h2_idx is None or j > h2_idx)):
+                h2_dif = dif_j
+                h2_idx = j
+        if h2_idx is not None:
+            try:
+                price_h2 = float(getattr(k_objs[h2_idx], "high"))
+            except Exception:
+                price_h2 = None
+    checks_p12.append({"label": "Step4 找到H2(局部高点中DIF最大)", "ok": (h2_idx is not None and h2_dif is not None and price_h2 is not None), "detail": f"h2_idx={h2_idx}, price_h2={price_h2}, dif_h2={h2_dif}"})
+
+    ok_price_higher = (price_h2 is not None and price_h1 is not None and price_h2 > price_h1)
+    ok_dif_lower = (h2_dif is not None and dif_h1 is not None and h2_dif < dif_h1)
+    checks_p12.append({"label": "Step5 价高创新高(price_h2>price_h1)", "ok": ok_price_higher, "detail": f"price_h2={price_h2}, price_h1={price_h1}"})
+    checks_p12.append({"label": "Step5 DIF降低(dif_h2<dif_h1)", "ok": ok_dif_lower, "detail": f"dif_h2={h2_dif}, dif_h1={dif_h1}"})
+
+    # 插件10：高位滞涨+空头组合（按插件实现逐条列条件）
+    checks_p10: List[Dict[str, Any]] = []
+    all_dates = sorted(getattr(rp, "_daily_cache", {}).keys(), reverse=True)
+    prev_dates_cache = [d for d in all_dates if d < date_str]
+    ok_40 = len(prev_dates_cache) >= 39
+    checks_p10.append({"label": "至少40个交易日数据(20+20回溯)", "ok": ok_40, "detail": f"prev_dates={len(prev_dates_cache)}"})
+    x_high = None
+    x_date_str = None
+    if ok_40:
+        check_dates = [date_str] + prev_dates_cache[:19]
+        for d in check_dates:
+            k = rp._daily_cache.get(d)
+            if not k or getattr(k, "high", None) is None:
+                continue
+            if x_high is None or k.high > x_high:
+                x_high = k.high
+                x_date_str = d
+    checks_p10.append({"label": "步骤1：20日内最高价X日存在", "ok": (x_high is not None and x_date_str is not None), "detail": f"x_date={x_date_str}, x_high={float(x_high or 0):.2f}"})
+    y_low = None
+    y_date_str = None
+    if x_date_str:
+        prev_before_x = [d for d in all_dates if d < x_date_str]
+        ok_y = len(prev_before_x) >= 20
+        checks_p10.append({"label": "步骤2：X日之前至少20个交易日", "ok": ok_y, "detail": f"count={len(prev_before_x)}"})
+        if ok_y:
+            for d in prev_before_x[:20]:
+                k = rp._daily_cache.get(d)
+                if not k or getattr(k, "low", None) is None:
+                    continue
+                if y_low is None or k.low < y_low:
+                    y_low = k.low
+                    y_date_str = d
+    else:
+        checks_p10.append({"label": "步骤2：X日之前至少20个交易日", "ok": False, "detail": "缺少X日"})
+    try:
+        from domain.services.config_service import get_config_service
+        gain_th = float(get_config_service().get_high_stagnation_gain_threshold() or 15.0)
+    except Exception:
+        gain_th = 15.0
+    if x_high is not None and y_low is not None and float(y_low) > 0:
+        gain_pct = (float(x_high) - float(y_low)) / float(y_low) * 100
+        checks_p10.append({"label": "步骤3：高位涨幅>阈值", "ok": (gain_pct > gain_th), "detail": f"gain={gain_pct:.2f}%, th={gain_th:.2f}%"})
+    else:
+        checks_p10.append({"label": "步骤3：高位涨幅>阈值", "ok": False, "detail": "缺少X/Y价格"})
+    try:
+        is_break, _, _, break_detail = rp._is_close_break_prev_support(stock_code, date_str, use_cache_only=True)
+    except TypeError:
+        # 兼容旧签名
+        is_break, _, _, break_detail = rp._is_close_break_prev_support(stock_code, date_str)
+    checks_p10.append({"label": "跌破前一日支撑(收盘跌破)", "ok": bool(is_break), "detail": break_detail or ""})
+    checks_p10.append({"label": "条件A：当日空头组合非空", "ok": bool(bp_today), "detail": bp_today or "无"})
+    death_cross_found = False
+    death_cross_idx = None
+    if ok_macd11:
+        start_i = max(1, target_index - 5)
+        for i in range(start_i, target_index + 1):
+            if None in (dif_list11[i-1], dea_list11[i-1], dif_list11[i], dea_list11[i]):
+                continue
+            if dif_list11[i-1] > dea_list11[i-1] and dif_list11[i] < dea_list11[i]:
+                death_cross_found = True
+                death_cross_idx = i
+                break
+            if i == target_index and dif_list11[i] < dea_list11[i]:
+                death_cross_found = True
+                death_cross_idx = i
+                break
+    checks_p10.append({"label": "条件B：MACD死叉(含近5日转换或当日处于死叉)", "ok": death_cross_found, "detail": f"idx={death_cross_idx}"})
+    checks_p10.append({"label": "条件A或B满足其一(且均需跌破支撑)", "ok": (bool(is_break) and (bool(bp_today) or death_cross_found)), "detail": ""})
     _run_plugin(
         "插件11: MACD中长线死叉+跌破支撑",
         ["MACD进入死叉/死叉形成", "并满足跌破支撑等组合条件(详见插件实现)"],
         rp._check_macd_long_dead_cross_break_support,
         [stock_code, check_date, macd_data, target_index],
         requires=["macd_index"],
+        checks=checks_p11,
     )
     _run_plugin(
         "插件12: 中长线顶背离",
@@ -414,6 +1035,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         rp._check_macd_long_top_divergence,
         [stock_code, check_date, macd_data, target_index, k_objs],
         requires=["macd_index", "kline_index"],
+        checks=checks_p12,
     )
     _run_plugin(
         "插件10: 高位滞涨+空头组合",
@@ -421,7 +1043,52 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         rp._check_high_stagnation_bearish,
         [stock_code, check_date, macd_data, target_index],
         requires=["macd_index"],
+        checks=checks_p10,
     )
+    # 插件2：临近压力位滞涨（逐条列公共前置+四种情形核心门槛）
+    checks_p2: List[Dict[str, Any]] = []
+    checks_p2.append({"label": "存在最近C点", "ok": (last_c_dt is not None), "detail": f"last_c={last_c_str or '无'}"})
+    checks_p2.append({"label": "上一有效点类型为C", "ok": (last_valid_type == "C"), "detail": f"last_valid_type={last_valid_type or '无'}"})
+    # 前一日赔率
+    if prev_day_chance:
+        day_wr = _safe_float(prev_day_chance.get("day_win_ratio_score"))
+        checks_p2.append({"label": "前一日赔率>0", "ok": (day_wr > 0), "detail": f"day_win_ratio_score={day_wr:.2f}"})
+    else:
+        checks_p2.append({"label": "存在前一日daily_chance(赔率/压力位)", "ok": False, "detail": ""})
+    # 距压
+    if prev_day_chance:
+        pp_raw = _safe_float(prev_day_chance.get("pressure_price"))
+        if pp_raw > 0:
+            pressure = pp_raw / 100.0
+            close_today = _safe_float(current_data.get("close"))
+            dist = (pressure - close_today) / close_today * 100 if close_today > 0 else 0
+            checks_p2.append({"label": "距离压力位 0<距离<10%", "ok": (0 < dist < 10), "detail": f"distance={dist:.2f}%, pressure={pressure:.2f}"})
+        else:
+            checks_p2.append({"label": "存在压力位", "ok": False, "detail": f"pressure_price={prev_day_chance.get('pressure_price')}"})
+    # 情形4 MACD死叉
+    if macd_data and target_index is not None:
+        dif_list = macd_data.get("dif") or []
+        dea_list = macd_data.get("dea") or []
+        macd_list = macd_data.get("macd") or []
+        if target_index < len(dif_list) and target_index < len(dea_list) and target_index < len(macd_list):
+            td = dif_list[target_index]; te = dea_list[target_index]; tm = macd_list[target_index]
+            ok_today = (td is not None and te is not None and tm is not None and td < te and tm < 0)
+            ok_cross = False
+            if ok_today:
+                start_i = max(1, target_index - 4)
+                for i in range(start_i, target_index + 1):
+                    if None in (macd_list[i-1], dif_list[i-1], dea_list[i-1], macd_list[i], dif_list[i], dea_list[i]):
+                        continue
+                    if macd_list[i-1] > 0 and dif_list[i-1] > dea_list[i-1] and macd_list[i] < 0 and dif_list[i] < dea_list[i]:
+                        ok_cross = True
+                        break
+            checks_p2.append({"label": "情形4-当日DIF<DEA且MACD<0", "ok": ok_today, "detail": f"DIF={td}, DEA={te}, MACD={tm}"})
+            checks_p2.append({"label": "情形4-近5日出现死叉转换", "ok": ok_cross, "detail": ""})
+        else:
+            checks_p2.append({"label": "情形4-MACD数据齐全", "ok": False, "detail": ""})
+    else:
+        checks_p2.append({"label": "情形4-需要MACD与target_index", "ok": False, "detail": ""})
+
     _run_plugin(
         "插件2: 临近压力位滞涨(最后检查)",
         [
@@ -432,6 +1099,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         rp._check_pressure_stagnation,
         [stock_code, check_date, last_c_dt, last_valid_type, macd_data, target_index],
         requires=["c_point", "last_valid_type"],
+        checks=checks_p2,
     )
 
     lines.append("")
@@ -445,20 +1113,24 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
 
 def search_stock(keyword: str) -> Optional[Dict]:
     """
-    根据关键词（股票名称或代码）搜索股票
+    根据关键词（股票名称/代码/首字母）搜索股票
     """
+    kw = (keyword or "").strip()
+    if not kw:
+        return None
+    kw_upper = kw.upper()
     try:
         with DatabaseConnection.get_connection_context() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # 先尝试精确匹配代码
+            # 1) 精确匹配代码 / 名称
             sql = """
                 SELECT code, name, nature
                 FROM all_stock
                 WHERE code = %s OR name = %s
                 LIMIT 1
             """
-            cursor.execute(sql, (keyword.upper(), keyword))
+            cursor.execute(sql, (kw_upper, kw))
             result = cursor.fetchone()
             
             if result:
@@ -469,14 +1141,32 @@ def search_stock(keyword: str) -> Optional[Dict]:
                     'table_name': f"basic_data_{result['code'].lower()}"
                 }
             
-            # 尝试模糊匹配名称
+            # 2) 模糊匹配代码
+            sql = """
+                SELECT code, name, nature
+                FROM all_stock
+                WHERE code LIKE %s
+                LIMIT 1
+            """
+            cursor.execute(sql, (f"%{kw_upper}%",))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'code': result['code'],
+                    'name': result['name'],
+                    'nature': result.get('nature', '波段'),
+                    'table_name': f"basic_data_{result['code'].lower()}"
+                }
+            
+            # 3) 模糊匹配名称
             sql = """
                 SELECT code, name, nature
                 FROM all_stock
                 WHERE name LIKE %s
                 LIMIT 1
             """
-            cursor.execute(sql, (f"%{keyword}%",))
+            cursor.execute(sql, (f"%{kw}%",))
             result = cursor.fetchone()
             
             if result:
@@ -486,10 +1176,30 @@ def search_stock(keyword: str) -> Optional[Dict]:
                     'nature': result.get('nature', '波段'),
                     'table_name': f"basic_data_{result['code'].lower()}"
                 }
-            
+
+            # 4) 首字母匹配（需要pypinyin，缺失则退化为仅ASCII）
+            initials_kw = _initials(kw)
+            if initials_kw:
+                sql = """
+                    SELECT code, name, nature
+                    FROM all_stock
+                    LIMIT 200
+                """
+                cursor.execute(sql)
+                rows = cursor.fetchall() or []
+                for row in rows:
+                    ini = _initials(row.get('name') or "")
+                    if ini.startswith(initials_kw.upper()):
+                        return {
+                            'code': row['code'],
+                            'name': row['name'],
+                            'nature': row.get('nature', '波段'),
+                            'table_name': f"basic_data_{row['code'].lower()}"
+                        }
+
             return None
     except Exception as e:
-        print(f"❌ 搜索股票失败: {e}")
+        print(f"[ERROR] 搜索股票失败: {e}")
         return None
 
 
@@ -518,7 +1228,7 @@ def get_prev_trading_day_close(stock_code: str, date_str: str) -> Tuple[Optional
                 return close_price, trade_date
             return None, None
     except Exception as e:
-        print(f"❌ 获取前一交易日收盘价失败: {e}")
+        print(f"[ERROR] 获取前一交易日收盘价失败: {e}")
         return None, None
 
 
@@ -563,7 +1273,7 @@ def get_daily_data(stock_code: str, date_str: str) -> Optional[Dict]:
                 }
             return None
     except Exception as e:
-        print(f"❌ 获取日K线数据失败: {e}")
+        print(f"[ERROR] 获取日K线数据失败: {e}")
         return None
 
 
@@ -582,7 +1292,7 @@ def get_daily_chance(stock_code: str, date_str: str) -> Optional[Dict]:
             result = cursor.fetchone()
             return result
     except Exception as e:
-        print(f"❌ 获取daily_chance数据失败: {e}")
+        print(f"[ERROR] 获取daily_chance数据失败: {e}")
         return None
 
 
@@ -601,7 +1311,7 @@ def get_prev_daily_chances(stock_code: str, date_str: str, limit: int = 2) -> Li
             cursor.execute(sql, (stock_code, date_str, limit))
             return cursor.fetchall() or []
     except Exception as e:
-        print(f"❌ 获取历史daily_chance失败: {e}")
+        print(f"[ERROR] 获取历史daily_chance失败: {e}")
         return []
 
 
@@ -1410,7 +2120,12 @@ def diagnose_high_stagnation_bearish(stock_code: str, date_str: str, current_dat
     print("📊 插件10: 高位滞涨+空头组合")
     print("=" * 80)
     
-    gain_threshold_pct = config_service.get_high_stagnation_gain_threshold()
+    # 兼容：旧诊断函数内使用了已移除的全局 config_service
+    try:
+        from domain.services.config_service import get_config_service
+        gain_threshold_pct = get_config_service().get_high_stagnation_gain_threshold()
+    except Exception:
+        gain_threshold_pct = 15.0
     
     if not current_chance or not prev_chance:
         print("  ❌ 缺少当日或前一日daily_chance数据")
