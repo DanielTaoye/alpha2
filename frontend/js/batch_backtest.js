@@ -249,7 +249,7 @@ async function startBatchBacktest() {
 
     const strategySelect = document.getElementById('strategySelect');
     const strategy = strategySelect.value;
-    const concurrency = clampInt(document.getElementById('btConcurrency')?.value, 1, 12, 10);
+    const concurrency = clampInt(document.getElementById('btConcurrency')?.value, 1, 50, 50);
 
     // 回测配置（与个股页一致）
     const startDate = document.getElementById('btStartDate')?.value || '';
@@ -513,7 +513,10 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
     resultsContainer.style.display = 'block';
     
     // 计算汇总数据
-    const successResults = results.filter(r => r.success);
+    // 注意：统计/平均值只基于“真正跑出回测数据”的股票：
+    // - success=true 且 skipped=false 且 data.summary 存在（后端保证此时 trades 非空）
+    const successResults = results.filter(r => r && r.success && !r.skipped);
+    const statResults = successResults.filter(r => r.data && r.data.summary);
     
     let totalTrades = 0;
     let totalReturnSum = 0;
@@ -521,7 +524,7 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
     let winRateSum = 0;
     let holdingDaysSum = 0;
     
-    successResults.forEach(r => {
+    statResults.forEach(r => {
         if (r.data && r.data.summary) {
             totalTrades += r.data.summary.total_trades || 0;
             totalReturnSum += (r.data.summary.return_sum ?? r.data.summary.total_return ?? 0);
@@ -531,9 +534,10 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
         }
     });
     
-    const avgReturn = successResults.length > 0 ? (avgReturnSum / successResults.length).toFixed(2) : 0;
-    const avgWinRate = successResults.length > 0 ? (winRateSum / successResults.length).toFixed(2) : 0;
-    const avgHoldingDaysStocks = successResults.length > 0 ? (holdingDaysSum / successResults.length).toFixed(2) : 0;
+    const denom = statResults.length;
+    const avgReturn = denom > 0 ? (avgReturnSum / denom).toFixed(2) : 0;
+    const avgWinRate = denom > 0 ? (winRateSum / denom).toFixed(2) : 0;
+    const avgHoldingDaysStocks = denom > 0 ? (holdingDaysSum / denom).toFixed(2) : 0;
     
     // 更新汇总卡片
     document.getElementById('totalStocks').textContent = results.length;

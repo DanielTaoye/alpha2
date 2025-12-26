@@ -54,7 +54,7 @@ class BatchBacktestService:
         stock_nature: str,
         backtest_config: Dict[str, Any],
         period: str = "day",
-        concurrency: int = 10,
+        concurrency: int = 50,
     ) -> str:
         job_id = uuid4().hex
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -126,7 +126,7 @@ class BatchBacktestService:
         concurrency: int,
     ):
         try:
-            conc = max(1, min(int(concurrency or 1), 10))
+            conc = max(1, min(int(concurrency or 1), 50))
             logger.info(f"[batch_backtest] job={job_id} start, total={len(stocks)}, concurrency={conc}")
 
             def worker(idx_stock):
@@ -192,17 +192,31 @@ class BatchBacktestService:
     @classmethod
     def _run_single(
         cls,
-        stock: Dict[str, Any],
+        stock: Any,
         stock_nature: str,
         backtest_config: Dict[str, Any],
         period: str,
     ) -> Dict[str, Any]:
-        stock_code = stock.get("code") or stock.get("stockCode") or stock.get("stock_code")
-        stock_name = stock.get("name") or stock.get("stockName") or ""
-        table_name = stock.get("table_name") or stock.get("tableName")
+        # 兼容多种输入：
+        # - {"code": "...", "table_name": "..."}（前端完整传参）
+        # - {"code": "..."}（只给code，后端推导表名）
+        # - "SZ300188"（stocks 直接是字符串列表）
+        stock_code = None
+        stock_name = ""
+        table_name = None
+        if isinstance(stock, str):
+            stock_code = stock.strip().upper()
+        elif isinstance(stock, dict):
+            stock_code = (stock.get("code") or stock.get("stockCode") or stock.get("stock_code") or "").strip().upper() or None
+            stock_name = stock.get("name") or stock.get("stockName") or ""
+            table_name = stock.get("table_name") or stock.get("tableName")
 
-        if not stock_code or not table_name:
-            return {"stock": stock, "success": False, "message": "缺少股票代码或表名"}
+        if not stock_code:
+            return {"stock": stock, "success": False, "message": "缺少股票代码"}
+
+        # 未传表名时，按约定自动推导：basic_data_{code.lower()}
+        if not table_name:
+            table_name = f"basic_data_{stock_code.lower()}"
 
         # 为了线程安全：每个任务都创建独立实例（CRPointService 内部有缓存）
         kline_service = KLineApplicationService(KLineRepositoryImpl())
