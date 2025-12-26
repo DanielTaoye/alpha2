@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, date
 from types import SimpleNamespace
 from infrastructure.logging.logger import get_logger
 from domain.services.kline_pattern_service import KLinePatternService
+from domain.services.macd_service import MACDService
 
 logger = get_logger(__name__)
 
@@ -185,6 +186,13 @@ class CPointPluginService:
             triggered_plugins.append(plugin4)
             adjusted_score += plugin4.score_adjustment
             logger.info(f"[插件-不追涨] {stock_code} {date}: {plugin4.reason}, 扣分{abs(plugin4.score_adjustment)}")
+        
+        # 插件4.5: MACD死叉+蓝柱放大拒绝（直接否决发C）
+        macd_reject = self._check_macd_death_cross_reject(stock_code, date)
+        if macd_reject.triggered:
+            triggered_plugins.append(macd_reject)
+            logger.info(f"[插件-MACD死叉拒绝] {stock_code} {date}: {macd_reject.reason}")
+            return 0, triggered_plugins, False  # 一票否决
         
         # 插件5: 乖离率R后不发C（减分插件）
         if normalized_r_points is not None:
@@ -543,6 +551,122 @@ class CPointPluginService:
         except Exception as e:
             logger.error(f"插件-不追涨检查失败: {e}")
             return CPointPluginResult("不追涨", False, 0, "")
+    
+    def _check_macd_death_cross_reject(self, stock_code: str, date: datetime) -> CPointPluginResult:
+        """
+        插件: MACD死叉+蓝柱放大拒绝（直接否决发C）
+        
+        触发条件：
+        1) 当日MACD柱<0 且 DIF<DEA
+        2) 往前数6个交易日内（不含当日）存在一次死叉：
+           前一日 MACD>0 且 DIF>DEA，当前日 MACD<0 且 DIF<DEA
+        3) 往前数三日（不含当日）MACD柱连续变小：0 > T-3 > T-2 > T-1
+        
+        满足则直接取消发C。
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else str(date)
+            
+            # 确保当日数据在缓存中
+            if date_str not in self._daily_cache:
+                current_data = self.daily_repo.find_by_date(stock_code, date_str)
+                if current_data:
+                    self._daily_cache[date_str] = current_data
+                    self._sorted_dates = sorted(self._daily_cache.keys(), reverse=True)
+            
+            if date_str not in self._daily_cache:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            # 使用缓存数据构建最近最多120个交易日的收盘价（升序）
+            asc_dates = sorted(self._daily_cache.keys())
+            if date_str not in asc_dates:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            idx_date = asc_dates.index(date_str)
+            start_idx = max(0, idx_date - 119)  # 含当日最多120个点
+            selected_dates = asc_dates[start_idx:idx_date + 1]
+            
+            closes = []
+            for d in selected_dates:
+                data = self._daily_cache.get(d)
+                if not data:
+                    data = self.daily_repo.find_by_date(stock_code, d)
+                    if data:
+                        self._daily_cache[d] = data
+                        self._sorted_dates = sorted(self._daily_cache.keys(), reverse=True)
+                if not data:
+                    return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+                closes.append(float(data.close) if data.close is not None else 0)
+            
+            # 数据不足无法计算MACD
+            if len(closes) < 35:  # 给DEA/DIF留缓冲
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            macd_res = MACDService.calculate_macd(closes)
+            dif_list = macd_res.get('dif') or []
+            dea_list = macd_res.get('dea') or []
+            macd_list = macd_res.get('macd') or []
+            
+            if not dif_list or not dea_list or not macd_list:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            cur_idx = len(selected_dates) - 1
+            today_macd = macd_list[cur_idx]
+            today_dif = dif_list[cur_idx]
+            today_dea = dea_list[cur_idx]
+            
+            # 条件1：当日MACD柱<0 且 DIF<DEA
+            if today_macd is None or today_dif is None or today_dea is None:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            if not (today_macd < 0 and today_dif < today_dea):
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            # 条件2：近6个交易日内存在死叉（不含当日）
+            has_death_cross = False
+            cross_date = None
+            max_check = min(6, cur_idx)  # 不含当日
+            for offset in range(1, max_check + 1):
+                j = cur_idx - offset
+                prev_j = j - 1
+                if prev_j < 0:
+                    break
+                cur_macd = macd_list[j]
+                cur_dif = dif_list[j]
+                cur_dea = dea_list[j]
+                prev_macd = macd_list[prev_j]
+                prev_dif = dif_list[prev_j]
+                prev_dea = dea_list[prev_j]
+                if None in (cur_macd, cur_dif, cur_dea, prev_macd, prev_dif, prev_dea):
+                    continue
+                if prev_macd > 0 and prev_dif > prev_dea and cur_macd < 0 and cur_dif < cur_dea:
+                    has_death_cross = True
+                    cross_date = selected_dates[j]
+                    break
+            
+            if not has_death_cross:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            # 条件3：T-3, T-2, T-1 连续变小（不含当日），且均为负值
+            if cur_idx < 3:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            m1 = macd_list[cur_idx - 1]
+            m2 = macd_list[cur_idx - 2]
+            m3 = macd_list[cur_idx - 3]
+            if None in (m1, m2, m3):
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            macd_trend_ok = (m3 < 0 and m2 < 0 and m1 < 0 and m3 > m2 > m1)  # 0 > T-3 > T-2 > T-1
+            if not macd_trend_ok:
+                return CPointPluginResult("MACD死叉拒绝", False, 0, "")
+            
+            reason = (
+                f"当日MACD<0且DIF<DEA，近6日内{cross_date}出现死叉，"
+                f"且MACD柱连续变小(T-3:{m3:.4f}, T-2:{m2:.4f}, T-1:{m1:.4f})"
+            )
+            return CPointPluginResult("MACD死叉拒绝", True, -999, reason)
+        
+        except Exception as e:
+            logger.error(f"插件-MACD死叉拒绝检查失败: {e}")
+            return CPointPluginResult("MACD死叉拒绝", False, 0, "")
     
     def _check_deviation_r_penalty(self, stock_code: str, date: datetime, historical_r_points: List) -> CPointPluginResult:
         """

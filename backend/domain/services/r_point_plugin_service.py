@@ -161,8 +161,11 @@ class RPointPluginService:
                 return True, triggered_plugins
 
         # 插件9: 趋势向下+未放量跌破支撑+MACD死叉
-        if ma_data and macd_data and current_index is not None:
-            plugin9 = self._check_downtrend_break_support(stock_code, date, ma_data, macd_data, current_index)
+        # 新逻辑依赖“上个C是否为低位C”，以及上个低位C当日支撑位，因此需要kline_data + c_point_date
+        if ma_data and macd_data and current_index is not None and kline_data is not None and c_point_date:
+            plugin9 = self._check_downtrend_break_support(
+                stock_code, date, ma_data, macd_data, current_index, kline_data, c_point_date
+            )
             if plugin9.triggered:
                 triggered_plugins.append(plugin9)
                 logger.info(f"[R点插件-趋势向下+未放量跌破支撑+MACD死叉] {stock_code} {date}: {plugin9.reason}")
@@ -1226,6 +1229,15 @@ class RPointPluginService:
             
             if not death_cross_found:
                 return RPointPluginResult("高位发R", False, "")
+
+            # 新逻辑：如果死叉发生在之前5日内，需要今天仍处于DIF<DEA
+            current_dif = dif_list[current_index] if current_index < len(dif_list) else None
+            current_dea = dea_list[current_index] if current_index < len(dea_list) else None
+            if None in [current_dif, current_dea]:
+                return RPointPluginResult("高位发R", False, "")
+
+            if death_cross_date != current_index and current_dif >= current_dea:
+                return RPointPluginResult("高位发R", False, "")
             
             # === 全部条件满足，触发高位发R ===
             # 构建多头排列描述
@@ -1439,14 +1451,19 @@ class RPointPluginService:
             return RPointPluginResult("箱体回踩被跌破", False, "")
     
     def _check_downtrend_break_support(self, stock_code: str, date: datetime, ma_data: dict,
-                                       macd_data: dict, current_index: int) -> RPointPluginResult:
+                                       macd_data: dict, current_index: int, kline_data: list,
+                                       c_point_date: datetime) -> RPointPluginResult:
         """
         插件8: 趋势向下+未放量跌破支撑+MACD死叉
         
         条件:
-        1. 股价在60天均线下方
-        2. 股票跌破支撑位，或前三交易日已发生过跌破支撑位
-        3. MACD当天已出现死叉，或前三交易日发生过出现死叉
+        1. 低位C定义：上个C（不管哪个策略）当日收盘 < 当日MA60
+        2. 跌破支撑：
+           - 今日跌破前一交易日支撑位，或前三交易日已跌破支撑位（按“跌破前一日支撑”规则判定）
+           - 或 当前股价跌破上个“低位C”当日的支撑位
+        3. MACD：
+           - 今日处于死叉状态（DIF < DEA）
+           - 或 前三交易日内出现过死叉转换点（前一日DIF>DEA，当日DIF<DEA）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -1459,82 +1476,121 @@ class RPointPluginService:
                 return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
             
             current_price = current_data.close
-            
-            # === 条件1: 股价在60天均线下方 ===
+
+            # === 条件1: 上个C是否为“低位C”（上个C日收盘 < 上个C日MA60）===
+            if not c_point_date:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+
+            low_c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else str(c_point_date)
+
+            # 找到上个C在kline_data中的索引（从当前索引向前找，避免全量扫描）
+            low_c_index = None
+            for i in range(current_index, -1, -1):
+                kt = getattr(kline_data[i], "time", None)
+                if not kt:
+                    continue
+                kt_str = kt.strftime('%Y-%m-%d') if isinstance(kt, datetime) else str(kt)
+                if kt_str == low_c_date_str:
+                    low_c_index = i
+                    break
+
+            if low_c_index is None:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+
             ma60_list = ma_data.get('ma60', [])
-            if not ma60_list or current_index >= len(ma60_list):
+            if not ma60_list or low_c_index >= len(ma60_list):
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+
+            ma60_low_c = ma60_list[low_c_index]
+            if ma60_low_c is None or ma60_low_c <= 0:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+
+            low_c_close = getattr(kline_data[low_c_index], "close", None)
+            if low_c_close is None:
+                low_c_data = self._daily_cache.get(low_c_date_str) or self.daily_repo.find_by_date(stock_code, low_c_date_str)
+                low_c_close = getattr(low_c_data, "close", None) if low_c_data else None
+            if low_c_close is None:
+                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
+
+            # 低位C门槛：上个C日收盘 < 上个C日MA60
+            if float(low_c_close) >= float(ma60_low_c):
                 return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
             
-            ma60_current = ma60_list[current_index]
-            if ma60_current is None or ma60_current <= 0:
-                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
-            
-            # 股价必须在60日均线下方
-            if current_price >= ma60_current:
-                return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
-            
-            # === 条件2: 当前或前三交易日发生过跌破支撑位 ===
-            # 获取当前日期及前3个交易日
+            # === 条件2: 跌破支撑（近3日跌破前一日支撑 或 跌破上个低位C当日支撑）===
+            break_support_recent_found = False
+            break_support_recent_detail = None
             all_prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            check_dates = [date_str] + all_prev_dates[:3]  # 当前日期 + 前3个交易日
-            
-            break_support_found = False
-            break_support_date = None
-            break_support_detail = None
-            
+            check_dates = [date_str] + all_prev_dates[:3]  # 今日 + 前3个交易日
+
             for check_date_str in check_dates:
                 is_break_support, support_price_actual, check_close, detail = self._is_close_break_prev_support(
                     stock_code, check_date_str
                 )
                 if is_break_support:
-                    break_support_found = True
-                    break_support_date = check_date_str
-                    break_support_detail = detail or (
-                        f"跌破支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
+                    break_support_recent_found = True
+                    break_support_recent_detail = detail or (
+                        f"跌破前一日支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
                     )
                     break
-            
-            if not break_support_found:
+
+            break_low_c_support_found = False
+            break_low_c_support_detail = None
+            low_c_chance = self._daily_chance_cache.get(low_c_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, low_c_date_str)
+            low_c_support_raw = getattr(low_c_chance, "support_price", None) if low_c_chance else None
+            if low_c_support_raw and low_c_support_raw > 0:
+                low_c_support_actual = float(low_c_support_raw) / 100.0
+                if current_price < low_c_support_actual:
+                    break_low_c_support_found = True
+                    break_low_c_support_detail = f"跌破上个低位C当日支撑({low_c_date_str}支撑{low_c_support_actual:.2f})"
+
+            if not (break_support_recent_found or break_low_c_support_found):
                 return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
             
-            # === 条件3: MACD当天或前三交易日出现死叉 ===
+            # === 条件3: MACD当天死叉状态 或 前三交易日出现死叉转换点 ===
             dif_list = macd_data.get('dif', [])
             dea_list = macd_data.get('dea', [])
             
             if not dif_list or not dea_list or current_index >= len(dif_list) or current_index < 1:
                 return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
             
-            # 检查当前及前3个交易日内是否出现死叉
-            death_cross_found = False
-            death_cross_date = None
-            start_check_index = max(1, current_index - 3)
-            
-            for check_index in range(start_check_index, current_index + 1):
-                if check_index <= 0:
-                    continue
-                
-                check_dif = dif_list[check_index]
-                check_dea = dea_list[check_index]
-                check_prev_dif = dif_list[check_index - 1]
-                check_prev_dea = dea_list[check_index - 1]
-                
-                if None in [check_dif, check_dea, check_prev_dif, check_prev_dea]:
-                    continue
-                
-                # 死叉：前一天DIF>DEA，当天DIF<DEA（转换点）
-                if check_prev_dif > check_prev_dea and check_dif < check_dea:
-                    death_cross_found = True
-                    death_cross_date = f"索引{check_index}"
-                    logger.debug(f"[趋势向下+未放量跌破支撑+MACD死叉] 在索引{check_index}发现死叉转换点")
-                    break
-            
-            if not death_cross_found:
+            death_cross_ok = False
+            death_cross_detail = None
+
+            # 当天已处于死叉状态（DIF < DEA）
+            curr_dif = dif_list[current_index]
+            curr_dea = dea_list[current_index]
+            if None not in [curr_dif, curr_dea] and curr_dif < curr_dea:
+                death_cross_ok = True
+                death_cross_detail = f"当日MACD死叉状态(DIF{curr_dif:.4f}<DEA{curr_dea:.4f})"
+            else:
+                # 检查前三交易日内是否出现死叉转换点
+                start_check_index = max(1, current_index - 3)
+                for check_index in range(start_check_index, current_index + 1):
+                    if check_index <= 0:
+                        continue
+
+                    check_dif = dif_list[check_index]
+                    check_dea = dea_list[check_index]
+                    check_prev_dif = dif_list[check_index - 1]
+                    check_prev_dea = dea_list[check_index - 1]
+
+                    if None in [check_dif, check_dea, check_prev_dif, check_prev_dea]:
+                        continue
+
+                    if check_prev_dif > check_prev_dea and check_dif < check_dea:
+                        death_cross_ok = True
+                        death_cross_detail = f"前三日内死叉转换(索引{check_index})"
+                        logger.debug(f"[趋势向下+未放量跌破支撑+MACD死叉] 在索引{check_index}发现死叉转换点")
+                        break
+
+            if not death_cross_ok:
                 return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
             
             # === 全部条件满足，触发R点 ===
-            reason = (f"股价{current_price:.2f}<MA60({ma60_current:.2f}), "
+            break_support_detail = break_support_recent_detail if break_support_recent_found else break_low_c_support_detail
+            reason = (f"上个C({low_c_date_str})为低位C(收盘{float(low_c_close):.2f}<MA60{float(ma60_low_c):.2f}), "
                      f"{break_support_detail}, "
-                     f"MACD死叉({death_cross_date})")
+                     f"{death_cross_detail}")
             
             logger.info(f"[趋势向下+未放量跌破支撑+MACD死叉触发] {stock_code} {date_str}: {reason}")
             return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", True, reason)

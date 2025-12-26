@@ -171,12 +171,12 @@ class CRStrategyService:
         logger.debug("  🧬 [Strategy1] 股性: %s", resolved_nature)
         
         # === 基础层计算 ===
-        # 赔率分（数据库满分40 -> 业务满分60，等比例放大1.5倍）
+        # 赔率分（数据库/业务满分均为40分，不再放大）
         raw_win_ratio_score = total_win_rate_score if total_win_rate_score is not None else 0
-        win_ratio_score = raw_win_ratio_score * 1.5
-        if win_ratio_score > 60:
-            win_ratio_score = 60  # 赔率分封顶60分
-        logger.debug("  💰 [Strategy1-BaseScore] 赔率分(放大1.5x,封顶60): %s (raw=%s)", win_ratio_score, raw_win_ratio_score)
+        win_ratio_score = raw_win_ratio_score
+        if win_ratio_score > 40:
+            win_ratio_score = 40  # 赔率分封顶40分
+        logger.debug("  💰 [Strategy1-BaseScore] 赔率分(封顶40): %s (raw=%s)", win_ratio_score, raw_win_ratio_score)
         
         # 计算胜率分
         win_rate_score = self._calculate_win_rate_score(volume_type)

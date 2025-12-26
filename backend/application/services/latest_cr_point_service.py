@@ -301,10 +301,18 @@ class LatestCRPointService:
             total_win_ratio_score = 0
             
             has_historical_data = False
+            def _cap_win_ratio(val: float) -> float:
+                """赔率分封顶40，空值按0处理"""
+                try:
+                    num = float(val or 0)
+                except Exception:
+                    return 0
+                return 40.0 if num > 40.0 else num
+
             if previous_daily_chance:
-                day_win_ratio_score = previous_daily_chance.day_win_ratio_score or 0
-                week_win_ratio_score = previous_daily_chance.week_win_ratio_score or 0
-                total_win_ratio_score = previous_daily_chance.total_win_ratio_score or 0
+                day_win_ratio_score = _cap_win_ratio(previous_daily_chance.day_win_ratio_score)
+                week_win_ratio_score = _cap_win_ratio(previous_daily_chance.week_win_ratio_score)
+                total_win_ratio_score = _cap_win_ratio(previous_daily_chance.total_win_ratio_score)
                 has_historical_data = True
             else:
                 logger.warning(f"  ⚠️ 未找到前一天的历史评分数据，建议先执行历史CR点分析")
