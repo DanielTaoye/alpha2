@@ -83,8 +83,8 @@ def create_app() -> Flask:
 
 if __name__ == "__main__":
     app = create_app()
-    host = os.getenv("DIAG_HOST", "127.0.0.1")
-    port = int(os.getenv("DIAG_PORT", "7000"))
+    host = os.getenv("DIAG_HOST", "0.0.0.0")
+    port = int(os.getenv("DIAG_PORT", "8000"))
     app.run(host=host, port=port, debug=False)
 
 
