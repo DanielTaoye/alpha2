@@ -328,6 +328,8 @@ async function startBatchBacktest() {
                 stockNature: nature,
                 period: 'day',
                 concurrency,
+                // 批量默认只要 summary（不带 trades），避免结果过大导致轮询/渲染超时
+                resultMode: 'summary',
                 backtestConfig
             })
         }, 60000, 0);
@@ -344,7 +346,8 @@ async function startBatchBacktest() {
         let results = [];
         while (true) {
             await sleep(800);
-            const stResp = await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/status/${jobId}`, {}, 20000);
+            // 轮询只拿“轻量进度”，不带 results（否则返回体会随任务进行越来越大，触发20s超时）
+            const stResp = await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/status/${jobId}?includeResults=0`, {}, 20000);
             const stJson = await stResp.json();
             if (!stJson || stJson.code !== 200) {
                 continue;
@@ -359,15 +362,6 @@ async function startBatchBacktest() {
                 : `后端任务处理中：已完成 ${finished}/${total}（并发=${concurrency}）`;
             updateProgress(progress, stMessage);
 
-            if (Array.isArray(st.results)) {
-                // 后端 results 里会有 null 占位；极端情况下也可能出现空对象占位（历史版本）
-                results = st.results.filter(r => {
-                    if (!r) return false;
-                    if (typeof r !== 'object') return true;
-                    return Object.keys(r).length > 0;
-                });
-            }
-
             // 前端发起了打断：一旦后端标记 done/cancelled，就退出轮询并展示已完成数据
             if (st.done) {
                 successCount = st.success || 0;
@@ -375,6 +369,18 @@ async function startBatchBacktest() {
                 skippedCount = st.skipped || 0;
                 break;
             }
+        }
+
+        // 任务结束后再拉一次完整 results（只拉一次，避免轮询期间超大payload）
+        try {
+            const finalResp = await fetchWithTimeout(`${API_BASE_URL}/batch_backtest/status/${jobId}?includeResults=1`, {}, 60000);
+            const finalJson = await finalResp.json();
+            const stFinal = (finalJson && finalJson.code === 200) ? (finalJson.data || {}) : {};
+            if (Array.isArray(stFinal.results)) {
+                results = stFinal.results;
+            }
+        } catch (e) {
+            console.warn('获取最终结果失败，将尝试用空结果展示：', e);
         }
 
         // 隐藏进度条

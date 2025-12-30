@@ -18,8 +18,8 @@ import os
 import csv
 import json
 import argparse
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from datetime import datetime, timedelta, date
+from typing import List, Dict, Optional, Set, Tuple
 import logging
 import time
 
@@ -33,6 +33,8 @@ sys.path.insert(0, project_root)
 
 import pymysql
 import pymysql.cursors
+import requests
+import re
 
 # ============ 数据库配置 ============
 # 生产主库（用于更新 b_daily_chance 表）
@@ -59,6 +61,13 @@ READONLY_DB_CONFIG = {
 STOCK_LIST_FILE = os.path.join(project_root, 'stock_list.csv')
 STOCK_CONFIG_FILE = os.path.join(backend_dir, 'infrastructure', 'config', 'stock_config.json')
 
+# 每日机会接口
+API_BASE_URL = "http://121.5.174.81:8005"
+API_PATH = "/stock/getDailyChanceWithBeauty"
+
+# 默认需要检查/补齐的历史范围
+DEFAULT_HISTORY_START = "2024-01-01"
+
 # 设置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -74,6 +83,234 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ 无法导入 KLinePatternService: {e}")
     KLINE_SERVICE_AVAILABLE = False
+
+
+def parse_win_ratios(desc: str) -> Tuple[float, float, float]:
+    """解析日/周/总赔率得分，缺失则为0"""
+    day_score = week_score = total_score = 0.0
+    if not desc:
+        return day_score, week_score, total_score
+    try:
+        m = re.search(r"日线赔率得分[：:]\s*([\d.]+)", desc)
+        if m:
+            day_score = float(m.group(1))
+        m = re.search(r"周线赔率得分[：:]\s*([\d.]+)", desc)
+        if m:
+            week_score = float(m.group(1))
+        m = re.search(r"赔率总分[：:]\s*([\d.]+)", desc)
+        if m:
+            total_score = float(m.group(1))
+    except Exception:
+        pass
+    return day_score, week_score, total_score
+
+
+def fetch_daily_chance_from_api(stock_code: str, timeout: int = 30) -> List[Dict]:
+    """
+    调用 getDailyChanceWithBeauty 接口，返回 list[dict]（通常包含多天）
+    注意：接口要求 POST，body 直接传股票代码字符串。
+    """
+    url = f"{API_BASE_URL}{API_PATH}"
+    try:
+        resp = requests.post(
+            url,
+            data=stock_code,
+            headers={"Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"每日机会API请求失败: 股票={stock_code}, status={resp.status_code}")
+            return []
+        data = resp.json()
+        return data if isinstance(data, list) else []
+    except requests.Timeout:
+        logger.warning(f"每日机会API超时: 股票={stock_code}")
+        return []
+    except Exception as e:
+        logger.warning(f"每日机会API异常: 股票={stock_code}, 错误={e}")
+        return []
+
+
+def get_stock_nature_from_all_stock(conn, stock_code: str) -> str:
+    """从 all_stock 表尝试补齐 nature（股性）。找不到则返回空字符串。"""
+    try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT nature FROM all_stock WHERE code = %s LIMIT 1", (stock_code,))
+        row = cursor.fetchone()
+        return (row.get("nature") or "") if row else ""
+    except Exception:
+        return ""
+
+
+def get_trading_dates_from_basic_data(conn, table_name: str, start_date: str, end_date: str) -> List[str]:
+    """
+    从日K表抽取交易日清单（以只读库为准）。
+    """
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    sql = f"""
+        SELECT DISTINCT DATE(shi_jian) AS d
+        FROM {table_name}
+        WHERE peroid_type = '1day'
+          AND DATE(shi_jian) >= %s
+          AND DATE(shi_jian) <= %s
+        ORDER BY d ASC
+    """
+    cursor.execute(sql, (start_date, end_date))
+    rows = cursor.fetchall()
+    dates: List[str] = []
+    for r in rows:
+        d = r.get("d")
+        if not d:
+            continue
+        if isinstance(d, datetime):
+            dates.append(d.strftime("%Y-%m-%d"))
+        elif isinstance(d, date):
+            dates.append(d.strftime("%Y-%m-%d"))
+        else:
+            dates.append(str(d))
+    return dates
+
+
+def get_existing_dates_in_b_daily_chance(conn, stock_code: str, start_date: str, end_date: str) -> Set[str]:
+    """查询 b_daily_chance 在区间内已存在的日期集合。"""
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    sql = """
+        SELECT DISTINCT DATE(date) AS d
+        FROM b_daily_chance
+        WHERE stock_code = %s
+          AND DATE(date) >= %s
+          AND DATE(date) <= %s
+    """
+    cursor.execute(sql, (stock_code, start_date, end_date))
+    rows = cursor.fetchall()
+    s: Set[str] = set()
+    for r in rows:
+        d = r.get("d")
+        if not d:
+            continue
+        if isinstance(d, datetime):
+            s.add(d.strftime("%Y-%m-%d"))
+        elif isinstance(d, date):
+            s.add(d.strftime("%Y-%m-%d"))
+        else:
+            s.add(str(d))
+    return s
+
+
+def insert_placeholders_if_missing(
+    conn,
+    stock_code: str,
+    stock_name: str,
+    stock_nature: str,
+    missing_dates: List[str],
+    batch_size: int = 500,
+) -> int:
+    """
+    为缺失日期插入占位记录（仅插入缺失，不覆盖已有）。
+    注意：占位记录会把赔率/支撑/压力/量型/形态置为默认值（0/NULL/空串）。
+    """
+    if not missing_dates:
+        return 0
+    cursor = conn.cursor()
+    sql = """
+        INSERT IGNORE INTO b_daily_chance
+        (stock_code, stock_name, stock_nature, date,
+         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
+         support_price, pressure_price, volume_type, bullish_pattern, bearish_pattern, updated_at)
+        VALUES (%s, %s, %s, %s, 0, 0, 0, NULL, NULL, '', '', '', NOW())
+    """
+    inserted = 0
+    params: List[Tuple] = []
+    for d in missing_dates:
+        params.append((stock_code, stock_name, stock_nature, d))
+        if len(params) >= batch_size:
+            cursor.executemany(sql, params)
+            conn.commit()
+            inserted += cursor.rowcount
+            params = []
+    if params:
+        cursor.executemany(sql, params)
+        conn.commit()
+        inserted += cursor.rowcount
+    return inserted
+
+
+def upsert_scores_support_pressure_from_api(
+    conn,
+    stock_code: str,
+    stock_name: str,
+    stock_nature: str,
+    start_date: str,
+    end_date: str,
+) -> int:
+    """
+    从接口拉取数据并 upsert 到 b_daily_chance：
+    - 插入缺失行
+    - 若已存在则更新“赔率/支撑/压力/名称/股性”
+    - 不覆盖 volume_type / bullish_pattern / bearish_pattern（避免把你后续刷出来的结果清空）
+    """
+    data_list = fetch_daily_chance_from_api(stock_code)
+    if not data_list:
+        return 0
+
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    rows: List[Tuple] = []
+    for item in data_list:
+        day_str = (item.get("day") or "").split(" ")[0]
+        if not day_str:
+            continue
+        try:
+            d = datetime.strptime(day_str, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if d < start_dt or d > end_dt:
+            continue
+
+        desc = item.get("winRatioDescription", "") or ""
+        day_score, week_score, total_score = parse_win_ratios(desc)
+
+        support_price = item.get("supportPrice")
+        pressure_price = item.get("pressurePrice")
+        try:
+            support_price = float(support_price) if support_price not in (None, "") else None
+        except Exception:
+            support_price = None
+        try:
+            pressure_price = float(pressure_price) if pressure_price not in (None, "") else None
+        except Exception:
+            pressure_price = None
+
+        rows.append((
+            stock_code, stock_name, stock_nature, day_str,
+            day_score, week_score, total_score,
+            support_price, pressure_price
+        ))
+
+    if not rows:
+        return 0
+
+    cursor = conn.cursor()
+    sql = """
+        INSERT INTO b_daily_chance
+        (stock_code, stock_name, stock_nature, date,
+         day_win_ratio_score, week_win_ratio_score, total_win_ratio_score,
+         support_price, pressure_price, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON DUPLICATE KEY UPDATE
+            stock_name = VALUES(stock_name),
+            stock_nature = VALUES(stock_nature),
+            day_win_ratio_score = VALUES(day_win_ratio_score),
+            week_win_ratio_score = VALUES(week_win_ratio_score),
+            total_win_ratio_score = VALUES(total_win_ratio_score),
+            support_price = VALUES(support_price),
+            pressure_price = VALUES(pressure_price),
+            updated_at = NOW()
+    """
+    cursor.executemany(sql, rows)
+    conn.commit()
+    return len(rows)
 
 
 def load_stock_list_from_csv() -> List[Dict]:
@@ -1099,15 +1336,16 @@ def batch_update_records(conn, updates: List[Dict]) -> int:
     return success_count
 
 
-def process_single_stock(master_conn, readonly_conn, stock: Dict) -> Dict:
+def process_single_stock(master_conn, readonly_conn, stock: Dict, args) -> Dict:
     """处理单只股票的所有日期
     
     Args:
         master_conn: 生产主库连接（用于更新b_daily_chance）
         readonly_conn: 只读库连接（用于读取K线数据）
         stock: 股票信息
+        args: 命令行参数
     """
-    stock_code = stock['code']
+    stock_code = (stock['code'] or '').upper()
     stock_name = stock['name']
     table_name = stock['table_name']
     
@@ -1134,13 +1372,68 @@ def process_single_stock(master_conn, readonly_conn, stock: Dict) -> Dict:
     except Exception as e:
         logger.error(f"  ❌ 检查表失败: {e}")
         return result
-    
-    # 获取该股票的所有日期（从主库的b_daily_chance表）
-    dates = get_all_dates_for_stock(master_conn, stock_code)
-    result['total_dates'] = len(dates)
-    
+
+    # ---------- 历史补齐（可选） ----------
+    # 默认开启历史补齐；可用 --no-ensure-history 显式关闭
+    ensure_history = bool(getattr(args, "ensure_history", True))
+    history_start = getattr(args, "history_start", DEFAULT_HISTORY_START) or DEFAULT_HISTORY_START
+    history_end = getattr(args, "history_end", "") or datetime.now().strftime("%Y-%m-%d")
+    fill_placeholders = bool(getattr(args, "fill_placeholders", False))
+
+    dates: List[str] = []
+    if ensure_history:
+        # 用只读库日K表作为“交易日清单”
+        try:
+            trading_dates = get_trading_dates_from_basic_data(readonly_conn, table_name, history_start, history_end)
+        except Exception as e:
+            logger.warning(f"  ⚠️ 获取交易日失败: {e}")
+            trading_dates = []
+
+        if not trading_dates:
+            logger.info(f"  ℹ️ {stock_code} 在K线表中无交易日数据（{history_start}~{history_end}）")
+            return result
+
+        # 先对比 b_daily_chance 是否齐全，不齐则先拉接口回填
+        existing_dates = get_existing_dates_in_b_daily_chance(master_conn, stock_code, history_start, history_end)
+        missing_dates = [d for d in trading_dates if d not in existing_dates]
+        result["required_dates"] = len(trading_dates)
+        result["missing_before"] = len(missing_dates)
+
+        if missing_dates:
+            logger.info(f"  缺失历史记录: {len(missing_dates)} 天，将调用接口回填（{history_start}~{history_end}）")
+            stock_nature = get_stock_nature_from_all_stock(master_conn, stock_code)
+            try:
+                upserted = upsert_scores_support_pressure_from_api(
+                    master_conn, stock_code, stock_name, stock_nature, history_start, history_end
+                )
+            except Exception as e:
+                logger.warning(f"  ⚠️ 接口回填失败: {e}")
+                upserted = 0
+
+            result["api_upsert_rows"] = upserted
+
+            # 复查缺失
+            existing_dates = get_existing_dates_in_b_daily_chance(master_conn, stock_code, history_start, history_end)
+            missing_after = [d for d in trading_dates if d not in existing_dates]
+            result["missing_after_api"] = len(missing_after)
+
+            if missing_after and fill_placeholders:
+                inserted = insert_placeholders_if_missing(
+                    master_conn, stock_code, stock_name, stock_nature, missing_after
+                )
+                result["placeholders_inserted"] = inserted
+                existing_dates = get_existing_dates_in_b_daily_chance(master_conn, stock_code, history_start, history_end)
+
+        # 最终用于更新量型/形态的日期：交易日 ∩ b_daily_chance 已存在日期
+        dates = [d for d in trading_dates if d in existing_dates]
+        result['total_dates'] = len(dates)
+    else:
+        # 不启用补齐：沿用老逻辑（仅处理 b_daily_chance 已有日期）
+        dates = get_all_dates_for_stock(master_conn, stock_code)
+        result['total_dates'] = len(dates)
+
     if not dates:
-        logger.info(f"  ℹ️ {stock_code} 在 b_daily_chance 表中无数据")
+        logger.info(f"  ℹ️ {stock_code} 无可处理日期（ensure_history={ensure_history}）")
         return result
     
     logger.info(f"  📅 需要处理 {len(dates)} 个交易日")
@@ -1250,7 +1543,32 @@ def main():
                         help='限制处理的股票数量（默认5个，用于测试）')
     parser.add_argument('--from-json', action='store_true',
                         help='从 stock_config.json 读取股票列表（而不是 stock_list.csv）')
+    ensure_history_group = parser.add_mutually_exclusive_group()
+    ensure_history_group.add_argument('--ensure-history', action='store_true', default=True,
+                                      help='检查并补齐 b_daily_chance 历史记录（默认开启）')
+    ensure_history_group.add_argument('--no-ensure-history', action='store_false', dest='ensure_history',
+                                      help='关闭历史补齐（仅处理 b_daily_chance 已有日期，不调用接口）')
+    parser.add_argument('--history-start', type=str, default=DEFAULT_HISTORY_START,
+                        help=f'历史开始日期 YYYY-MM-DD（默认 {DEFAULT_HISTORY_START}）')
+    parser.add_argument('--history-end', type=str, default='',
+                        help='历史结束日期 YYYY-MM-DD（默认今天）')
+    parser.add_argument('--fill-placeholders', action='store_true',
+                        help='若接口回填后仍有缺失交易日，则插入占位记录补齐日期（谨慎使用）')
     args = parser.parse_args()
+
+    # 参数校验
+    if args.ensure_history:
+        try:
+            datetime.strptime(args.history_start, "%Y-%m-%d")
+        except Exception:
+            logger.error(f"❌ history-start 日期格式错误: {args.history_start}（应为 YYYY-MM-DD）")
+            return
+        if args.history_end:
+            try:
+                datetime.strptime(args.history_end, "%Y-%m-%d")
+            except Exception:
+                logger.error(f"❌ history-end 日期格式错误: {args.history_end}（应为 YYYY-MM-DD）")
+                return
     
     # 检查服务是否可用
     if not KLINE_SERVICE_AVAILABLE:
@@ -1322,7 +1640,7 @@ def main():
             logger.info(f"\n[{i}/{len(stocks)}] 处理 {stock['code']} ({stock['name']})...")
             
             try:
-                result = process_single_stock(master_conn, readonly_conn, stock)
+                result = process_single_stock(master_conn, readonly_conn, stock, args)
                 
                 total_results['total_dates'] += result['total_dates']
                 total_results['total_success'] += result['success_count']

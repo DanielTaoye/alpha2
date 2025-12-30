@@ -57,6 +57,7 @@ class BatchBacktestService:
         backtest_config: Dict[str, Any],
         period: str = "day",
         concurrency: int = 50,
+        result_mode: str = "summary",
     ) -> str:
         job_id = uuid4().hex
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -81,7 +82,7 @@ class BatchBacktestService:
 
         t = Thread(
             target=cls._run_job,
-            args=(job_id, stocks, stock_nature, backtest_config, period, concurrency),
+            args=(job_id, stocks, stock_nature, backtest_config, period, concurrency, result_mode),
             daemon=True,
         )
         t.start()
@@ -96,12 +97,35 @@ class BatchBacktestService:
             return True
 
     @classmethod
-    def get_status(cls, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_status(
+        cls,
+        job_id: str,
+        include_results: bool = False,
+        last_n: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
         with cls._lock:
             st = cls._jobs.get(job_id)
             if not st:
                 return None
-            return asdict(st)
+            payload = asdict(st)
+
+            # 默认不返回 results：轮询时返回体会越来越大，导致浏览器/反代/后端超时
+            if not include_results:
+                payload["results"] = []
+                return payload
+
+            # include_results=true：只返回已完成的结果（过滤 None 占位）
+            results = payload.get("results") or []
+            completed = [r for r in results if r]
+            if last_n is not None:
+                try:
+                    n = int(last_n)
+                    if n > 0:
+                        completed = completed[-n:]
+                except Exception:
+                    pass
+            payload["results"] = completed
+            return payload
 
     @classmethod
     def _set_status(cls, job_id: str, **kwargs):
@@ -127,6 +151,7 @@ class BatchBacktestService:
         backtest_config: Dict[str, Any],
         period: str,
         concurrency: int,
+        result_mode: str,
     ):
         try:
             conc = max(1, min(int(concurrency or 1), 50))
@@ -142,7 +167,7 @@ class BatchBacktestService:
                         "message": "已取消(未执行)",
                     }
                 try:
-                    return idx, cls._run_single(stock, stock_nature, backtest_config, period)
+                    return idx, cls._run_single(stock, stock_nature, backtest_config, period, result_mode=result_mode)
                 except Exception as e:
                     logger.error(f"[batch_backtest] job={job_id} single crashed: {e}", exc_info=True)
                     return idx, {"stock": stock, "success": False, "message": f"异常: {e}"}
@@ -285,6 +310,7 @@ class BatchBacktestService:
         stock_nature: str,
         backtest_config: Dict[str, Any],
         period: str,
+        result_mode: str = "summary",
     ) -> Dict[str, Any]:
         # 兼容多种输入：
         # - {"code": "...", "table_name": "..."}（前端完整传参）
@@ -406,6 +432,19 @@ class BatchBacktestService:
         if not trades:
             return {"stock": stock, "success": True, "skipped": True, "message": "无CR配对(已跳过)"}
 
-        return {"stock": stock, "success": True, "skipped": False, "data": bt}
+        mode = (result_mode or "summary").strip().lower()
+        if mode == "full":
+            # 兼容旧逻辑：返回完整 trades + summary（数据量很大，建议仅用于少量股票）
+            return {"stock": stock, "success": True, "skipped": False, "data": bt}
+
+        # 默认：只返回 summary，避免 batch 结果/轮询 payload 过大导致超时
+        return {
+            "stock": stock,
+            "success": True,
+            "skipped": False,
+            "data": {
+                "summary": bt.get("summary") or {},
+            },
+        }
 
 

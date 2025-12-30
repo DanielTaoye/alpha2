@@ -18,6 +18,7 @@ class BatchBacktestController:
             backtest_config = data.get("backtestConfig") or data.get("config") or {}
             period = data.get("period") or "day"
             concurrency = data.get("concurrency") or 2
+            result_mode = data.get("resultMode") or data.get("result_mode") or "summary"
 
             if not isinstance(stocks, list) or not stocks:
                 return jsonify(ResponseBuilder.error("stocks不能为空", code=400)), 400
@@ -28,6 +29,7 @@ class BatchBacktestController:
                 backtest_config=backtest_config,
                 period=period,
                 concurrency=concurrency,
+                result_mode=result_mode,
             )
             return jsonify(ResponseBuilder.success({"jobId": job_id}, "batch_backtest_started")), 200
         except Exception as e:
@@ -36,7 +38,10 @@ class BatchBacktestController:
 
     def status(self, job_id: str):
         try:
-            st = BatchBacktestService.get_status(job_id)
+            include_results = str(request.args.get("includeResults") or request.args.get("include_results") or "0").strip()
+            include_results_bool = include_results in ("1", "true", "True", "yes", "Y")
+            last_n = request.args.get("lastN") or request.args.get("last_n")
+            st = BatchBacktestService.get_status(job_id, include_results=include_results_bool, last_n=last_n)
             if not st:
                 return jsonify(ResponseBuilder.error("job不存在", code=404)), 404
             return jsonify(ResponseBuilder.success(st, "ok")), 200
