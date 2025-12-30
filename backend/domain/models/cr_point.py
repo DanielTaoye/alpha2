@@ -47,26 +47,32 @@ class CRPoint:
     
     def to_dict(self) -> dict:
         """转换为字典"""
+        def _r2(v):
+            try:
+                return round(float(v), 2)
+            except Exception:
+                return v
+
         return {
             'id': self.id,
             'stockCode': self.stock_code,
             'stockName': self.stock_name,
             'pointType': self.point_type,
             'triggerDate': self.trigger_date.strftime('%Y-%m-%d') if self.trigger_date else None,
-            'triggerPrice': self.trigger_price,
-            'openPrice': self.open_price,
-            'highPrice': self.high_price,
-            'lowPrice': self.low_price,
-            'closePrice': self.close_price,
+            'triggerPrice': _r2(self.trigger_price),
+            'openPrice': _r2(self.open_price),
+            'highPrice': _r2(self.high_price),
+            'lowPrice': _r2(self.low_price),
+            'closePrice': _r2(self.close_price),
             'volume': self.volume,
-            'aValue': self.a_value,
-            'bValue': self.b_value,
-            'cValue': self.c_value,
-            'score': self.score,
+            'aValue': _r2(self.a_value),
+            'bValue': _r2(self.b_value),
+            'cValue': _r2(self.c_value),
+            'score': _r2(self.score),
             'strategyName': self.strategy_name,
             'plugins': self.plugins,  # 插件信息
-            'strategy1Score': self.strategy1_score,  # 策略一得分
-            'strategy2Score': self.strategy2_score,  # 策略二得分
+            'strategy1Score': _r2(self.strategy1_score),  # 策略一得分
+            'strategy2Score': _r2(self.strategy2_score),  # 策略二得分
             'isGolden': self.is_golden,  # 是否为金色C点
             'createdAt': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
         }

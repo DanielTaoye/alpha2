@@ -610,7 +610,9 @@ class BacktestService:
 
             conn = DatabaseConnection.get_connection()
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            query = f"""
+
+            # 1) 优先：严格匹配“次个交易日当天”的 1day 开盘价
+            query_exact = f"""
                 SELECT kai_pan_jia, shi_jian
                 FROM {table_name}
                 WHERE peroid_type = '1day'
@@ -618,10 +620,30 @@ class BacktestService:
                 ORDER BY shi_jian ASC
                 LIMIT 1
             """
-            cursor.execute(query, (day_str,))
+            cursor.execute(query_exact, (day_str,))
             result = cursor.fetchone()
             if result and result.get('kai_pan_jia') is not None and result.get('shi_jian') is not None:
                 return float(result['kai_pan_jia']), str(result['shi_jian'])
+
+            # 2) 容错：若数据库缺该交易日 1day（常见于长假/数据未补齐），则取“>= 次交易日”的第一条 1day
+            # 这样不会把整笔 C->R 交易直接丢掉；同时 buy_time/sell_time 会反映实际用到的执行日
+            start_ts = f"{day_str} 00:00:00"
+            query_fallback = f"""
+                SELECT kai_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian >= %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query_fallback, (start_ts,))
+            result2 = cursor.fetchone()
+            if result2 and result2.get('kai_pan_jia') is not None and result2.get('shi_jian') is not None:
+                logger.warning(
+                    f"⚠️ 次交易日{day_str}缺少1day数据，回退使用下一条可用1day: {result2.get('shi_jian')}"
+                )
+                return float(result2['kai_pan_jia']), str(result2['shi_jian'])
+
             return None
         except Exception as e:
             logger.error(f"获取次个交易日日K开盘价/时间失败: {e}", exc_info=True)
