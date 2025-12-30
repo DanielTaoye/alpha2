@@ -797,15 +797,23 @@ class CPointPluginService:
         """
         插件5: 急跌抢反弹
         
-        主要条件（满足其一）：
-        1）连续4日急跌且累计跌幅过大（主板20%，非主板25%）
-        2）连续5日连续阴线且累计跌幅过大（主板20%，非主板30%）
-        
-        叠加条件（满足其一即发C）：
-        A、今日成交量极度萎缩（相对第一日萎缩至20%）+ 振幅>5%的触底反弹十字星或阳线
-        B、昨日成交量极度萎缩（相对第一日萎缩至20%）且昨日为十字星，今日为阳线
-        
-        满足条件直接发C（返回999分标记）
+        （策略1：强制发C）
+
+        前置“急跌”条件（满足其一）：
+        1）连续4日累计跌幅过大：T-5 收盘价 -> T-1 收盘价跌幅 > 阈值（主板20%，非主板25%）
+        2）连续5日连续下跌：T-5..T-1 每日收盘价均低于前一日收盘价，且累计跌幅过大：
+           T-6 收盘价 -> T-1 收盘价跌幅 > 阈值（主板20%，非主板30%）
+
+        触发条件（在满足前置急跌的基础上，叠加满足其一即强制发C）：
+        A、今日成交量极度萎缩：最近5天(含今日)最大成交量 > 今日成交量 * 5，
+           且今日振幅 > 5%，并满足以下任一K线：
+           - 触底反弹十字星：C>=2A(A>0)，B/最低价<2%，且A>B
+           - 触底反弹阳线：收盘>开盘，且满足：
+             (C>=2A(A>0) 且 B/最低价>2% 且 C>B) 或 (A=0 且 B/最低价>1% 且 C>3B)
+        B、昨日成交量极度萎缩：最近5天(含昨日)最大成交量 > 昨日成交量 * 5，
+           且昨日为十字星（A/C=0.9~1.1，B/最低价<1%，A≠0 且 C≠0）
+           或 昨日为以下形态之一：冲高回落阳十字星/冲高回落阴十字星/高振幅阳十字星/高振幅阴十字星，
+           且今日为阳线（收盘>开盘）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -820,106 +828,152 @@ class CPointPluginService:
             if not current_data:
                 return CPointPluginResult("急跌抢反弹", False, 0, "")
             
-            # 获取前5个交易日数据
+            # 获取前6个交易日数据（用于5连跌判定需要T-6）
             prev_dates = self._get_previous_trading_dates_from_cache(date_str)
-            if len(prev_dates) < 5:
+            if len(prev_dates) < 6:
                 return CPointPluginResult("急跌抢反弹", False, 0, "")
             
             # 获取历史数据
             prev_data_list = []
-            for prev_date in prev_dates[:5]:
+            for prev_date in prev_dates[:6]:
                 data = self._daily_cache.get(prev_date)
                 if not data:
                     data = self.daily_repo.find_by_date(stock_code, prev_date)
                 if data:
                     prev_data_list.append(data)
             
-            if len(prev_data_list) < 4:
+            if len(prev_data_list) < 6:
                 return CPointPluginResult("急跌抢反弹", False, 0, "")
-            
-            # 计算涨跌幅列表：使用当前收盘价相对前一日收盘价（不依赖数据库涨跌幅字段）
-            # 注意：prev_data_list[0]是最近的一天
-            change_pcts = []
-            prev_close = None
-            for data in prev_data_list:
-                if prev_close is not None and prev_close > 0:
-                    pct = (data.close - prev_close) / prev_close * 100
-                    change_pcts.append(pct)
-                else:
-                    # 第一天或前一日收盘价无效，设为0
-                    change_pcts.append(0)
-                prev_close = data.close
-            
-            # === 检查主要条件 ===
-            main_condition_met = False
-            main_reason = ""
-            first_day_volume = 0  # 第一个下跌日的成交量
-            
-            # 条件1: 连续4日急跌且累计跌幅过大
-            if len(change_pcts) >= 4:
-                cum_4days = sum(change_pcts[:4])
-                threshold_4days = -20 if is_main_board else -25
-                if cum_4days < threshold_4days:
-                    main_condition_met = True
-                    main_reason = f"连续4日急跌(累计跌幅:{cum_4days:.2f}%)"
-                    first_day_volume = prev_data_list[3].volume  # 第4天前（最早的一天）
-            
-            # 条件2: 连续5日连续阴线且累计跌幅过大
-            if not main_condition_met and len(change_pcts) >= 5:
-                all_bearish = all(prev_data_list[i].close < prev_data_list[i].open for i in range(5))
-                cum_5days = sum(change_pcts[:5])
-                threshold_5days = -20 if is_main_board else -30
-                if all_bearish and cum_5days < threshold_5days:
-                    main_condition_met = True
-                    main_reason = f"连续5日阴线(累计跌幅:{cum_5days:.2f}%)"
-                    first_day_volume = prev_data_list[4].volume  # 第5天前
-            
-            if not main_condition_met or first_day_volume == 0:
+
+            # prev_data_list[0] = T-1, [1]=T-2, [2]=T-3, [3]=T-4, [4]=T-5, [5]=T-6
+            t1, t2, t3, t4, t5, t6 = prev_data_list[0], prev_data_list[1], prev_data_list[2], prev_data_list[3], prev_data_list[4], prev_data_list[5]
+
+            def _drop_pct(start_close: float, end_close: float) -> float:
+                """从start->end的涨跌幅百分比（负数表示下跌）"""
+                if not start_close or start_close <= 0:
+                    return 0.0
+                return (end_close - start_close) / start_close * 100.0
+
+            # === 前置急跌条件 ===
+            sharp_drop_met = False
+            sharp_drop_reason = ""
+
+            # 1) 4日累计跌幅：T-5 close -> T-1 close
+            drop_4 = _drop_pct(t5.close, t1.close)
+            th_4 = -20.0 if is_main_board else -25.0
+            if drop_4 <= th_4:
+                sharp_drop_met = True
+                sharp_drop_reason = f"前置1: T-5→T-1累计跌幅{drop_4:.2f}%"
+
+            # 2) 5日连续下跌 + 累计跌幅：T-6 close -> T-1 close
+            if not sharp_drop_met:
+                is_down_5 = (
+                    (t5.close < t6.close) and
+                    (t4.close < t5.close) and
+                    (t3.close < t4.close) and
+                    (t2.close < t3.close) and
+                    (t1.close < t2.close)
+                )
+                drop_5 = _drop_pct(t6.close, t1.close)
+                th_5 = -20.0 if is_main_board else -30.0
+                if is_down_5 and drop_5 <= th_5:
+                    sharp_drop_met = True
+                    sharp_drop_reason = f"前置2: 5连跌(T-5..T-1)且T-6→T-1累计跌幅{drop_5:.2f}%"
+
+            if not sharp_drop_met:
                 return CPointPluginResult("急跌抢反弹", False, 0, "")
-            
-            # === 检查叠加条件 ===
-            
-            # 计算当日振幅
-            current_amplitude = ((current_data.high - current_data.low) / current_data.pre_close * 100) if current_data.pre_close else 0
-            
-            # 判断当日是否为阳线
-            is_current_bullish = current_data.close >= current_data.open
-            
-            # 判断当日是否为十字星（实体很小）
-            current_body = abs(current_data.close - current_data.open)
-            current_body_ratio = (current_body / current_data.close * 100) if current_data.close else 0
-            is_current_doji = current_body_ratio < 1  # 实体占比<1%视为十字星
-            
-            # 条件A: 今日成交量极度萎缩 + 振幅>5%的触底反弹十字星或阳线
-            current_volume_shrink = (current_data.volume / first_day_volume) if first_day_volume else 1
-            if current_volume_shrink <= 0.2 and current_amplitude > 5:
-                if is_current_doji or is_current_bullish:
-                    pattern_type = "十字星" if is_current_doji else "阳线"
-                    return CPointPluginResult(
-                        "急跌抢反弹",
-                        True,
-                        0,  # 不调整分数，通过 force_c_point 标志直接发C
-                        f"{main_reason}, 今日量缩至{current_volume_shrink*100:.1f}%, 振幅{current_amplitude:.2f}%, {pattern_type}反弹"
-                    )
-            
-            # 条件B: 昨日成交量极度萎缩且昨日为十字星，今日为阳线
-            if len(prev_data_list) >= 1:
-                yesterday_data = prev_data_list[0]
-                yesterday_volume_shrink = (yesterday_data.volume / first_day_volume) if first_day_volume else 1
-                
-                # 判断昨日是否为十字星
-                yesterday_body = abs(yesterday_data.close - yesterday_data.open)
-                yesterday_body_ratio = (yesterday_body / yesterday_data.close * 100) if yesterday_data.close else 0
-                is_yesterday_doji = yesterday_body_ratio < 1
-                
-                if yesterday_volume_shrink <= 0.2 and is_yesterday_doji and is_current_bullish:
-                    return CPointPluginResult(
-                        "急跌抢反弹",
-                        True,
-                        0,  # 不调整分数，通过 force_c_point 标志直接发C
-                        f"{main_reason}, 昨日量缩至{yesterday_volume_shrink*100:.1f}%且为十字星, 今日阳线反弹"
-                    )
-            
+
+            # === 触发条件A/B ===
+            # 今日振幅
+            today_amp = ((current_data.high - current_data.low) / current_data.pre_close * 100) if getattr(current_data, "pre_close", 0) else 0
+            today_is_bullish = current_data.close > current_data.open
+            today_abc = KLinePatternService.calculate_abc(current_data.open, current_data.close, current_data.high, current_data.low)
+
+            # B(实体)相对最低价的百分比（与其他形态口径一致）
+            today_b_pct_low = (today_abc.b / current_data.low * 100) if current_data.low else 0.0
+
+            # 今日成交量极度萎缩：最近5天(含今日)最大成交量 > 今日成交量 * 5
+            vols_today_window = [getattr(current_data, "volume", 0) or 0] + [getattr(d, "volume", 0) or 0 for d in [t1, t2, t3, t4]]
+            max_vol_5d_today = max(vols_today_window) if vols_today_window else 0
+            today_vol = getattr(current_data, "volume", 0) or 0
+            today_vol_extreme_shrink = (today_vol > 0 and max_vol_5d_today > today_vol * 5)
+
+            # A-1 触底反弹十字星（按ABC约束）
+            a1_doji = (
+                today_vol_extreme_shrink and
+                today_amp > 5 and
+                (today_abc.a > 0) and
+                (today_abc.c >= 2 * today_abc.a) and
+                (today_b_pct_low < 2.0) and
+                (today_abc.a > today_abc.b)
+            )
+
+            # A-2 触底反弹阳线（两套约束）
+            a2_bullish_case1 = (
+                today_is_bullish and
+                (today_abc.a > 0) and
+                (today_abc.c >= 2 * today_abc.a) and
+                (today_b_pct_low > 2.0) and
+                (today_abc.c > today_abc.b)
+            )
+            a2_bullish_case2 = (
+                today_is_bullish and
+                (today_abc.a == 0) and
+                (today_b_pct_low > 1.0) and
+                (today_abc.c > 3 * today_abc.b)
+            )
+            a2_bullish = today_vol_extreme_shrink and today_amp > 5 and (a2_bullish_case1 or a2_bullish_case2)
+
+            if a1_doji or a2_bullish:
+                sub = "A-触底反弹十字星" if a1_doji else ("A-触底反弹阳线(规则1)" if a2_bullish_case1 else "A-触底反弹阳线(规则2)")
+                ratio = (max_vol_5d_today / today_vol) if today_vol else 0
+                return CPointPluginResult(
+                    "急跌抢反弹",
+                    True,
+                    0,
+                    f"{sharp_drop_reason}; 触发{sub}; 今日量缩(5日最大/今日={ratio:.1f}倍), 振幅{today_amp:.2f}%, A/B/C={today_abc.a:.3f}/{today_abc.b:.3f}/{today_abc.c:.3f}"
+                )
+
+            # B) 昨日成交量极度萎缩 + 昨日形态（十字星或指定形态）+ 今日阳线
+            yesterday = t1
+            y_abc = KLinePatternService.calculate_abc(yesterday.open, yesterday.close, yesterday.high, yesterday.low)
+            y_b_pct_low = (y_abc.b / yesterday.low * 100) if yesterday.low else 0.0
+
+            # 最近5天(含昨日)最大成交量 > 昨日成交量 * 5：窗口为[T-1..T-5]
+            vols_y_window = [getattr(d, "volume", 0) or 0 for d in [t1, t2, t3, t4, t5]]
+            max_vol_5d_y = max(vols_y_window) if vols_y_window else 0
+            y_vol = getattr(yesterday, "volume", 0) or 0
+            y_vol_extreme_shrink = (y_vol > 0 and max_vol_5d_y > y_vol * 5)
+
+            # 昨日十字星（按指定公式）
+            y_is_doji_by_formula = False
+            if y_abc.a != 0 and y_abc.c != 0:
+                a_c_ratio = y_abc.a / y_abc.c
+                y_is_doji_by_formula = (0.9 <= a_c_ratio <= 1.1) and (y_b_pct_low < 1.0)
+
+            # 昨日为指定形态之一（用KLinePatternService统一识别）
+            y_prev_close = getattr(yesterday, "pre_close", None)
+            y_pattern = KLinePatternService.identify_pattern(
+                stock_code,
+                yesterday.open,
+                yesterday.close,
+                yesterday.high,
+                yesterday.low,
+                y_prev_close
+            )
+            y_allowed_patterns = {"冲高回落阳十字星", "冲高回落阴十字星", "高振幅阳十字星", "高振幅阴十字星"}
+            y_is_allowed_pattern = y_pattern in y_allowed_patterns
+
+            if y_vol_extreme_shrink and today_is_bullish and (y_is_doji_by_formula or y_is_allowed_pattern):
+                ratio_y = (max_vol_5d_y / y_vol) if y_vol else 0
+                y_shape = "昨日十字星(公式)" if y_is_doji_by_formula else f"昨日形态:{y_pattern}"
+                return CPointPluginResult(
+                    "急跌抢反弹",
+                    True,
+                    0,
+                    f"{sharp_drop_reason}; 触发B; {y_shape}; 昨日量缩(5日最大/昨日={ratio_y:.1f}倍), 今日阳线"
+                )
+
             return CPointPluginResult("急跌抢反弹", False, 0, "")
             
         except Exception as e:

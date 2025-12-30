@@ -2,7 +2,7 @@
   "strategy1": {
     "c_point_threshold": 60.0,
     "nature_thresholds": {
-      "短线": 70.0,
+      "短线": 60.0,
       "波段": 60.0,
       "中长线": 60.0
     },
@@ -11,7 +11,7 @@
   "strategy2": {
     "c_point_threshold": 80.0,
     "nature_thresholds": {
-      "短线": 70.0,
+      "短线": 60.0,
       "波段": 80.0,
       "中长线": 70.0
     },
@@ -33,7 +33,7 @@
   },
   "market_type": "bull",
   "market_type_description": "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市",
-  "last_updated": "2025-12-26 13:54:54",
+  "last_updated": "2025-12-30 13:22:16",
   "market_type_rule": {
     "mode": "date_rule",
     "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",
