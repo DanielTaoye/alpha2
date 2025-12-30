@@ -49,6 +49,7 @@ if ps -p $(cat ../app.pid) > /dev/null; then
     echo "✓ 服务启动成功！"
     echo "进程ID: $(cat ../app.pid)"
     echo "访问地址: http://124.222.103.102:5000"
+    echo "R点诊断: http://124.222.103.102:5000/r_diagnose/"
     echo "日志文件: logs/app.log"
 else
     echo "✗ 服务启动失败，请查看日志"

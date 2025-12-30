@@ -25,6 +25,7 @@ from interfaces.controllers.cache_controller import CacheController
 from interfaces.controllers.high_score_controller import HighScoreController
 from infrastructure.config.app_config import SERVER_CONFIG
 from schedulers.high_score_scheduler import get_high_score_scheduler
+from diagnose_web.blueprint import create_r_diagnose_blueprint
 
 # 初始化日志
 logger = get_app_logger()
@@ -45,6 +46,10 @@ batch_backtest_controller = BatchBacktestController()
 latest_cr_point_controller = LatestCRPointController()
 cache_controller = CacheController()
 high_score_controller = HighScoreController()
+
+# ============ R点诊断（挂载到主服务 5000） ============
+# 访问入口：/r_diagnose/
+app.register_blueprint(create_r_diagnose_blueprint(), url_prefix="/r_diagnose")
 
 
 # ============ 路由定义 ============
