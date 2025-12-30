@@ -23,7 +23,11 @@ class HighScoreController:
             # 策略3：从本地DB补齐（不依赖Redis写入）
             stocks = result.get("stocks") or []
             code_list = [s.get("stock_code") for s in stocks if isinstance(s, dict)]
-            s3_map = self.strategy3_db.get_probs_by_codes(date_str or "", code_list)
+            try:
+                s3_map = self.strategy3_db.get_probs_by_codes(date_str or "", code_list)
+            except Exception as e:
+                logger.warning(f"策略3概率补齐失败（已忽略，不影响高分返回）: {e}", exc_info=True)
+                s3_map = {}
             for s in stocks:
                 if not isinstance(s, dict):
                     continue
@@ -67,7 +71,11 @@ class HighScoreController:
                 if isinstance(arr, list):
                     all_items.extend([x for x in arr if isinstance(x, dict)])
             code_list = [s.get("stock_code") for s in all_items]
-            s3_map = self.strategy3_db.get_probs_by_codes(date_str or "", code_list)
+            try:
+                s3_map = self.strategy3_db.get_probs_by_codes(date_str or "", code_list)
+            except Exception as e:
+                logger.warning(f"策略3概率补齐失败（已忽略，不影响高分返回）: {e}", exc_info=True)
+                s3_map = {}
             for s in all_items:
                 extra = s3_map.get(str(s.get("stock_code")))
                 if extra:

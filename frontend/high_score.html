@@ -243,6 +243,18 @@
             font-weight: bold;
         }
 
+        .change-cell {
+            font-weight: bold;
+        }
+
+        .change-cell.change-up {
+            color: #d32f2f;
+        }
+
+        .change-cell.change-down {
+            color: #2e7d32;
+        }
+
         .badge {
             display: inline-block;
             padding: 4px 10px;
@@ -696,12 +708,25 @@
 
                 const normalizedNature = normalizeNature(item.nature);
                 const natureClass = normalizedNature;
+
+                // 当日涨跌幅（%）：盘中实时=最新价(1分钟聚合close)相对昨收
+                const changePct = (item.today_change_pct === null || item.today_change_pct === undefined)
+                    ? null
+                    : Number(item.today_change_pct);
+                const changeText = (changePct === null || Number.isNaN(changePct))
+                    ? '-'
+                    : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+                const changeClass = (changePct === null || Number.isNaN(changePct))
+                    ? ''
+                    : (changePct >= 0 ? 'change-up' : 'change-down');
+
                 return `
                     <tr>
                         <td class="rank-cell ${rankClass}">${rankIcon}</td>
                         <td class="stock-code-cell">${item.stock_code}</td>
                         <td class="stock-name-cell">${item.stock_name}</td>
                         <td class="score-cell score-total">${item.total_score.toFixed(1)}%</td>
+                        <td class="change-cell ${changeClass}">${changeText}</td>
                         <td class="score-cell score-strategy1">
                             ${item.strategy1_score.toFixed(1)}
                             ${item.strategy1_triggered ? '<span class="badge badge-triggered">✓</span>' : ''}
@@ -727,6 +752,7 @@
                                 <th style="width: 120px;">股票代码</th>
                                 <th style="width: 120px;">股票名称</th>
                                 <th style="width: 100px;">总评分</th>
+                                <th style="width: 110px;">当日涨跌幅</th>
                                 <th style="width: 100px;">策略1</th>
                                 <th style="width: 100px;">策略2</th>
                                 <th style="width: 100px;">成交量类型</th>

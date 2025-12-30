@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, Optional
 
+import pymysql
+
 from infrastructure.logging.logger import get_logger
 from infrastructure.persistence.database import DatabaseConnection
 
@@ -46,10 +48,17 @@ class Strategy3ProbabilityDbService:
         placeholders = ",".join(["%s"] * len(codes))
 
         def _query(sql: str, params: list):
-            with DatabaseConnection.get_connection_context() as conn:
-                cur = conn.cursor()
-                cur.execute(sql, params)
-                return cur.fetchall()
+            try:
+                with DatabaseConnection.get_connection_context() as conn:
+                    cur = conn.cursor()
+                    cur.execute(sql, params)
+                    return cur.fetchall()
+            except (pymysql.err.ProgrammingError, pymysql.err.OperationalError) as e:
+                # (1146, "Table 'xxx.strategy3_probabilities' doesn't exist")
+                if getattr(e, "args", None) and len(e.args) >= 1 and str(e.args[0]) == "1146":
+                    logger.warning(f"策略3概率表不存在({self.TABLE})，跳过补齐策略3字段：{e}")
+                    return []
+                raise
 
         rows = []
         # 先按 date 查

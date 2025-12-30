@@ -20,7 +20,8 @@ Step3: 从 X日 向前至多找5日 (X-5..X-1)，找到这5日内“收盘价最
 Step4: 从 Y日 向前至多找5日 (Y-5..Y-1)，找到这5日内“最高价最高”的日子为 Z日。
        - Z日收盘价 > Y日收盘价，且涨幅 > 5%
 
-Step5: Z日最高价 > X日最高价
+Step5: Z日最高价 > X日最高价，且两者价差不超过 5%
+       价差计算： (Z.high - X.high) / Z.high < 5%
 Step6: Z日成交量 > X日成交量
 
 用法示例：
@@ -40,6 +41,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import argparse
 import csv
 import logging
+import re
 
 # 控制台输出强制使用UTF-8
 try:
@@ -274,8 +276,13 @@ def find_m_top_signals(series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not (z_close > y_close and _pct_up(z_close, y_close) > 5.0):
             continue
 
-        # Step5: Z.high > X.high
+        # Step5: Z.high > X.high 且 (Z-X)/Z < 5%
+        if z_high <= 0:
+            continue
         if not (z_high > x_high):
+            continue
+        top_diff_ratio = (z_high - x_high) / z_high
+        if not (top_diff_ratio < 0.05):
             continue
 
         # Step6: Z.volume > X.volume
@@ -307,6 +314,40 @@ def find_m_top_signals(series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _parse_stock_list(args: argparse.Namespace) -> List[str]:
     out: List[str] = []
 
+    def _open_with_fallback(p: str, mode: str = "r"):
+        """
+        Windows 上经常遇到股票列表文件是 GBK/GB18030 编码。
+        注意：open() 本身不会触发解码，真实的 UnicodeDecodeError 往往发生在读取时。
+        这里会对每种编码先读一小段做“解码探针”，失败则换下一种编码。
+        """
+        encodings = ["utf-8-sig", "utf-8", "gb18030", "gbk"]
+        last_err: Optional[Exception] = None
+        for enc in encodings:
+            f = None
+            try:
+                f = open(p, mode, encoding=enc, newline="")
+                # 解码探针：读取少量内容触发潜在的 UnicodeDecodeError，然后回到文件开头
+                try:
+                    f.read(4096)
+                    f.seek(0)
+                except UnicodeDecodeError as e:
+                    last_err = e
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                    continue
+                return f
+            except Exception as e:
+                last_err = e
+                try:
+                    if f is not None:
+                        f.close()
+                except Exception:
+                    pass
+                continue
+        raise last_err or RuntimeError(f"无法打开文件: {p}")
+
     if args.stocks:
         for s in args.stocks:
             if not s:
@@ -320,15 +361,31 @@ def _parse_stock_list(args: argparse.Namespace) -> List[str]:
     if args.stocks_file:
         path = args.stocks_file
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    parts = [p.strip() for p in line.replace("，", ",").split(",")]
-                    for p in parts:
-                        if p:
-                            out.append(p.upper())
+            if str(path).lower().endswith(".csv"):
+                # 兼容类似 stock_list.csv: code,name,nature（只取第一列 code，跳过表头）
+                with _open_with_fallback(path, "r") as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if not row:
+                            continue
+                        first = (row[0] or "").strip()
+                        if not first:
+                            continue
+                        if first.lower() == "code":
+                            continue
+                        first_u = first.upper()
+                        if re.match(r"^(SZ|SH)\d{6}$", first_u):
+                            out.append(first_u)
+            else:
+                with _open_with_fallback(path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = [p.strip() for p in line.replace("，", ",").split(",")]
+                        for p in parts:
+                            if p:
+                                out.append(p.upper())
         except Exception as e:
             print(f"[ERROR] 读取股票列表文件失败: {path} | {e}")
 
@@ -343,6 +400,17 @@ def _parse_stock_list(args: argparse.Namespace) -> List[str]:
             continue
         seen.add(s)
         uniq.append(s)
+
+    limit = getattr(args, "limit", None)
+    try:
+        limit_int = int(limit) if limit is not None else None
+    except Exception:
+        limit_int = None
+
+    # limit: 仅取前N支（N<=0 或 None 表示不限制）
+    if limit_int is not None and limit_int > 0:
+        uniq = uniq[:limit_int]
+
     return uniq
 
 
@@ -380,6 +448,12 @@ def main() -> None:
         default=None,
     )
     parser.add_argument("--stocks-file", help="从文件读取股票列表(每行一个或逗号分隔)", default=None)
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="可选：限制扫描股票数量(仅取前N支；默认不限制)",
+    )
     parser.add_argument("--start", help="起始日期(YYYY-MM-DD)，默认 2024-01-01", default="2024-01-01")
     parser.add_argument(
         "--end",

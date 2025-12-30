@@ -130,6 +130,25 @@ class LatestCRPointService:
                 }
             
             kline_data = kline_data_result.get('kline_data', [])  # 🔥 修复：字段名是 kline_data 不是 klines
+
+            # --- 计算昨收(前一交易日收盘价) & 当日涨跌幅 ---
+            # 盘中：最新价(1分钟聚合close) vs 昨收
+            # 盘后到次交易日前：最新交易日收盘价 vs 上一交易日收盘价（也应能算出，不显示“-”）
+            def _date_only(v) -> str:
+                if v is None:
+                    return ""
+                return str(v).replace("T", " ").split(" ")[0]
+
+            def _safe_float(v):
+                try:
+                    return float(v)
+                except Exception:
+                    return None
+
+            latest_date_only = _date_only(latest_kline.get("time"))
+            latest_price = _safe_float(latest_kline.get("close"))
+            pre_close = None
+            today_change_pct = None
             
             # 🔥 【新增】获取历史CR点数据（用于插件判断）
             logger.info(f"  🔥 开始获取历史CR点数据...")
@@ -487,6 +506,61 @@ class LatestCRPointService:
             # 13. 组装返回结果
             volume_type_source = "predicted" if predicted_volume else "historical"
 
+            # --- 兜底计算昨收/涨跌幅（在 append latest day 后的 kline_data 上再算一遍，避免盘后缺失） ---
+            def _calc_pre_close_and_change_from_kline_list(day_list: List[Dict], target_date: str):
+                if not isinstance(day_list, list) or not day_list:
+                    return (None, None)
+
+                # 找到“目标日期”的最后一条有效收盘价
+                target_idx = None
+                target_close = None
+                for i in range(len(day_list) - 1, -1, -1):
+                    if _date_only(day_list[i].get("time")) != target_date:
+                        continue
+                    c = _safe_float(day_list[i].get("close"))
+                    if c is None:
+                        continue
+                    target_idx = i
+                    target_close = c
+                    break
+
+                # 若目标日期没找到（极端情况），使用最后一条有效收盘价作为“最新”
+                if target_idx is None:
+                    for i in range(len(day_list) - 1, -1, -1):
+                        c = _safe_float(day_list[i].get("close"))
+                        if c is not None:
+                            target_idx = i
+                            target_close = c
+                            break
+                if target_idx is None:
+                    return (None, None)
+
+                # 向前找一条有效收盘价作为昨收
+                prev_close = None
+                for j in range(target_idx - 1, -1, -1):
+                    pc = _safe_float(day_list[j].get("close"))
+                    if pc is not None:
+                        prev_close = pc
+                        break
+
+                if prev_close is None or prev_close <= 0:
+                    return (None, None)
+
+                change = (target_close - prev_close) / prev_close * 100.0
+                return (prev_close, change)
+
+            if today_change_pct is None:
+                # 优先用日K序列推导（盘后/盘前也能算）
+                pc, chg = _calc_pre_close_and_change_from_kline_list(kline_data, latest_date_only)
+                if pc is not None:
+                    pre_close = pc
+                if chg is not None:
+                    today_change_pct = chg
+
+            # 若日K推导失败，再退化使用“聚合最新价 vs 推导昨收”
+            if today_change_pct is None and pre_close and pre_close > 0 and latest_price is not None:
+                today_change_pct = (latest_price - pre_close) / pre_close * 100.0
+
             result = {
                 'success': True,
                 'date': current_kline['date'],
@@ -497,8 +571,12 @@ class LatestCRPointService:
                     'close': current_kline['close'],
                     'high': current_kline['high'],
                     'low': current_kline['low'],
-                    'volume': current_kline['volume']
+                    'volume': current_kline['volume'],
+                    'pre_close': pre_close,
+                    'today_change_pct': today_change_pct,
+                    'latest_price': latest_price
                 },
+                'today_change_pct': today_change_pct,
                 'predicted_volume': predicted_volume,
                 'volume_type': volume_type,
                 'realtime_volume_type': volume_type,  # 兼容前端展示实时成交量类型

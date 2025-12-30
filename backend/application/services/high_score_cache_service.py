@@ -48,6 +48,8 @@ class HighScoreCacheService:
         )
 
         self._last_stats = {}
+        # 高分最低分门槛（策略1/策略2都需达到），固定为 50
+        self.min_strategy_score_for_high = float(os.getenv("HIGH_SCORE_MIN_STRATEGY_SCORE", "50"))
 
     # --------- key 辅助 ---------
     @classmethod
@@ -184,6 +186,16 @@ class HighScoreCacheService:
                 data = json.loads(raw)
             except Exception:
                 continue
+
+            # 过滤：策略1/策略2任意一个 < 50，不属于高分
+            try:
+                s1 = float(data.get("strategy1_score") or 0)
+                s2 = float(data.get("strategy2_score") or 0)
+            except Exception:
+                s1, s2 = 0.0, 0.0
+            if s1 < self.min_strategy_score_for_high or s2 < self.min_strategy_score_for_high:
+                continue
+
             data["total_score"] = round(score, 2)
             # 补充驼峰命名，兼容前端
             if "volume_type" in data and "volumeType" not in data:
@@ -230,6 +242,15 @@ class HighScoreCacheService:
             try:
                 data = json.loads(raw)
             except Exception:
+                continue
+
+            # 过滤：策略1/策略2任意一个 < 50，不属于高分
+            try:
+                s1 = float(data.get("strategy1_score") or 0)
+                s2 = float(data.get("strategy2_score") or 0)
+            except Exception:
+                s1, s2 = 0.0, 0.0
+            if s1 < self.min_strategy_score_for_high or s2 < self.min_strategy_score_for_high:
                 continue
 
             data["total_score"] = round(score, 2)
@@ -288,6 +309,21 @@ class HighScoreCacheService:
             volume_type = (result or {}).get("volume_type") or (result or {}).get("realtime_volume_type")
             volume_type_source = (result or {}).get("volume_type_source")
 
+            # 当日涨跌幅（盘中=最新价 vs 昨收；收盘后=收盘价 vs 昨收）
+            change_pct = (result or {}).get("today_change_pct")
+            try:
+                change_pct = float(change_pct) if change_pct is not None else None
+            except Exception:
+                change_pct = None
+
+            # 高分判定：策略1/策略2都 >= 50
+            try:
+                s1_num = float(s1_score or 0)
+                s2_num = float(s2_score or 0)
+            except Exception:
+                s1_num, s2_num = 0.0, 0.0
+            is_high = 1 if (s1_num >= self.min_strategy_score_for_high and s2_num >= self.min_strategy_score_for_high) else 0
+
             # 忽略阈值，统一标记 is_high_score=1 表示已写入
             return {
                 "stock_code": stock["code"],
@@ -296,12 +332,13 @@ class HighScoreCacheService:
                 "strategy1_score": round(s1_score or 0, 2),
                 "strategy2_score": round(s2_score or 0, 2),
                 "total_score": round(total_score, 2),
+                "today_change_pct": round(change_pct, 2) if change_pct is not None else None,
                 # 策略3：从DB补齐（见 HighScoreController），这里不做重计算，避免刷新阻塞/超时
                 "strategy3_prob": None,
                 "strategy3_raw": None,
                 "strategy3_date": None,
                 "strategy3_used_factors": 0,
-                "is_high_score": 1,
+                "is_high_score": is_high,
                 "date": date_str,
                 "volume_type": volume_type,
                 "volume_type_source": volume_type_source,
@@ -322,7 +359,7 @@ class HighScoreCacheService:
                 "strategy3_raw": None,
                 "strategy3_date": None,
                 "strategy3_used_factors": 0,
-                "is_high_score": 1,  # 占位也写入，便于排查
+                "is_high_score": 0,  # 失败占位不属于高分
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "error": str(e),
                 "volume_type": None,
@@ -339,16 +376,20 @@ class HighScoreCacheService:
         payload_stats = stats.copy()
         payload_stats.setdefault("date_key", keys["date_key"])
 
-        # 增量更新：逐个股票更新zset与hash，避免整榜删除
-        for item in high_scores:
-            member = json.dumps(item, ensure_ascii=False)
-            stock_code = item.get("stock_code")
-            if stock_code:
-                old_member = self.redis_client.hget(hash_key, stock_code)
-                if old_member:
-                    self.redis_client.zrem(zset_key, old_member)
-                self.redis_client.hset(hash_key, stock_code, member)
-            self.redis_client.zadd(zset_key, {member: item.get("total_score", 0)})
+        # 重建当日榜单（避免旧成员残留导致“已不满足高分条件”的股票继续显示）
+        # 说明：刷新前已经全量计算过所有股票，因此这里以“当轮高分列表”为准即可。
+        self.redis_client.delete(zset_key)
+        self.redis_client.delete(hash_key)
+
+        if high_scores:
+            pipe = self.redis_client.pipeline()
+            for item in high_scores:
+                member = json.dumps(item, ensure_ascii=False)
+                stock_code = item.get("stock_code")
+                if stock_code:
+                    pipe.hset(hash_key, stock_code, member)
+                pipe.zadd(zset_key, {member: item.get("total_score", 0)})
+            pipe.execute()
 
         # 写入元信息并刷新TTL
         pipe = self.redis_client.pipeline()
