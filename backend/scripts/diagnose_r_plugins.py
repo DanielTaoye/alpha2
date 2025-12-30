@@ -401,27 +401,148 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
     prev_day_data = get_daily_data(stock_code, prev_date_str) if prev_date_str else None
     prev_day_chance = get_daily_chance(stock_code, prev_date_str) if prev_date_str else None
 
-    # 插件1（简化版逐条检查：输出核心门槛；该插件内部子条件较多）
-    checks_p1: List[Dict[str, Any]] = []
-    vol = (current_chance.get("volume_type") or "").strip()
-    vols = [v.strip() for v in vol.split(",") if v.strip()]
-    has_xyh = any(v in {"X", "Y", "H"} for v in vols)
-    has_xyzh = any(v in {"X", "Y", "Z", "H"} for v in vols)
-    checks_p1.append({"label": "当日放量(X/Y/H)（用于条件1-4）", "ok": has_xyh, "detail": f"volume_type={vol or '无'}"})
-    checks_p1.append({"label": "当日放量(X/Y/Z/H)（用于条件5-6）", "ok": has_xyzh, "detail": f"volume_type={vol or '无'}"})
-    bp = (current_chance.get("bearish_pattern") or "").strip()
-    checks_p1.append({"label": "当日存在空头组合", "ok": bool(bp), "detail": bp or "无"})
-    hist = get_historical_daily_data(stock_code, date_str, 25)
-    if hist and len(hist) >= 6:
-        close_today = _safe_float(current_data.get("close"))
-        c3 = _safe_float(hist[-4].get("close")) if len(hist) >= 4 else 0
-        c5 = _safe_float(hist[-6].get("close")) if len(hist) >= 6 else 0
-        g3 = (close_today - c3) / c3 * 100 if c3 > 0 else 0
-        g5 = (close_today - c5) / c5 * 100 if c5 > 0 else 0
-        checks_p1.append({"label": "前3日累计涨幅过大(示意输出)", "ok": False, "detail": f"涨幅={g3:.2f}%（是否过大由插件内部阈值判定）"})
-        checks_p1.append({"label": "前5日累计涨幅过大(示意输出)", "ok": False, "detail": f"涨幅={g5:.2f}%（是否过大由插件内部阈值判定）"})
-    else:
-        checks_p1.append({"label": "历史数据(用于涨幅类子条件)", "ok": False, "detail": f"历史条数={len(hist) if hist else 0}"})
+    # 插件1：乖离率偏离（按插件实现逐条展开 1-7 子条件）
+    def _build_checks_p1_deviation() -> List[Dict[str, Any]]:
+        checks: List[Dict[str, Any]] = []
+
+        # 主/非主板阈值
+        is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
+        limit_threshold = 9.9 if is_main_board else 19.8
+        amp_threshold = 6 if is_main_board else 8
+        decline_threshold = 3 if is_main_board else 5
+        th3 = 15 if is_main_board else 20
+        th5 = 20 if is_main_board else 25
+
+        vol = (current_chance.get("volume_type") or "").strip()
+        vols = [v.strip() for v in vol.split(",") if v.strip()]
+        is_volume_xyh = any(v in {"X", "Y", "H"} for v in vols)
+        is_volume_xyzh = any(v in {"X", "Y", "Z", "H"} for v in vols)
+        bearish_combo = (current_chance.get("bearish_pattern") or "").strip()
+        has_bearish_combo = bool(bearish_combo)
+
+        checks.append({"label": "当日放量(X/Y/H)", "ok": is_volume_xyh, "detail": f"volume_type={vol or '无'}"})
+        checks.append({"label": "当日放量(X/Y/Z/H)", "ok": is_volume_xyzh, "detail": f"volume_type={vol or '无'}"})
+        checks.append({"label": "当日存在空头组合(daily_chance.bearish_pattern)", "ok": has_bearish_combo, "detail": bearish_combo or "无"})
+
+        # 当日K线“空头分歧K线/阴线大跌”判定（与插件一致：pattern + 振幅阈值 或 阴线跌幅阈值）
+        O = _safe_float(current_data.get("open"))
+        Cc = _safe_float(current_data.get("close"))
+        H = _safe_float(current_data.get("high"))
+        L = _safe_float(current_data.get("low"))
+        pre_close = _safe_float(current_data.get("pre_close")) or _safe_float(current_data.get("open"))
+        pattern_today = KLinePatternService.identify_pattern(stock_code, O, Cc, H, L, pre_close) if pre_close > 0 else None
+        amplitude = ((H - L) / pre_close) * 100 if pre_close > 0 else 0.0
+        decline = ((Cc - O) / O) * 100 if O > 0 else 0.0
+        risky_set = {"冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", "冲高回落阴十字星", "高开低走"}
+        is_bearish_kline_with_amplitude = bool(pattern_today in risky_set and amplitude > amp_threshold)
+        is_bearish_3pct_line = bool(Cc < O and decline <= -decline_threshold)
+        checks.append({"label": "当日空头分歧K线(振幅阈值)", "ok": is_bearish_kline_with_amplitude, "detail": f"pattern={pattern_today or '无'}, amplitude={amplitude:.2f}%, 阈值>{amp_threshold}%"})
+        checks.append({"label": "当日阴线跌幅超阈值", "ok": is_bearish_3pct_line, "detail": f"decline={decline:.2f}%, 阈值<={-decline_threshold}%"})
+
+        # 历史数据：为了把 1-6 条件都逐一打印
+        hist = get_historical_daily_data(stock_code, date_str, 30) or []  # 最近在前
+        if len(hist) < 21:
+            checks.append({"label": "历史数据条数(用于条件1-6)", "ok": False, "detail": f"len={len(hist)}，需要>=21"})
+            # 即使不足，也继续把“可算的”部分尽量算出来
+
+        # 条件1：连续涨停>=2（基于历史日K中每条自带 pre_close 计算）
+        consecutive_limits = 0
+        for it in hist[:5]:
+            pc = _safe_float(it.get("pre_close"))
+            cl = _safe_float(it.get("close"))
+            pct = (cl - pc) / pc * 100 if pc > 0 else 0.0
+            if pct >= limit_threshold:
+                consecutive_limits += 1
+            else:
+                break
+        cond1_core = consecutive_limits >= 2
+        cond1_gate = is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line)
+        checks.append({"label": "条件1-核心: 连续涨停>=2", "ok": cond1_core, "detail": f"连续涨停天数={consecutive_limits}, 涨停阈值={limit_threshold}%"})
+        checks.append({"label": "条件1-门槛: 放量XYH 且(空头分歧K线 或 阴线大跌)", "ok": cond1_gate, "detail": ""})
+        checks.append({"label": "条件1-是否触发", "ok": (cond1_core and cond1_gate), "detail": ""})
+
+        # 条件2：前3日累计涨幅过大（窗口需4日）
+        gain_3 = None
+        if len(hist) >= 4:
+            c0 = _safe_float(hist[0].get("close"))
+            c3 = _safe_float(hist[3].get("close"))
+            gain_3 = (c0 - c3) / c3 * 100 if c3 > 0 else None
+        cond2_core = (gain_3 is not None and gain_3 > th3)
+        cond2_gate = is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line)
+        checks.append({"label": "条件2-核心: 前3日涨幅>阈值", "ok": cond2_core, "detail": f"涨幅={gain_3:.2f}% 阈值>{th3}%" if gain_3 is not None else "历史数据不足(需要>=4)"})
+        checks.append({"label": "条件2-门槛: 放量XYH 且(空头分歧K线 或 阴线大跌)", "ok": cond2_gate, "detail": ""})
+        checks.append({"label": "条件2-是否触发", "ok": (cond2_core and cond2_gate), "detail": ""})
+
+        # 条件3：前5日累计涨幅过大（窗口需6日）
+        gain_5 = None
+        if len(hist) >= 6:
+            c0 = _safe_float(hist[0].get("close"))
+            c5 = _safe_float(hist[5].get("close"))
+            gain_5 = (c0 - c5) / c5 * 100 if c5 > 0 else None
+        cond3_core = (gain_5 is not None and gain_5 > th5)
+        cond3_gate = is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line)
+        checks.append({"label": "条件3-核心: 前5日涨幅>阈值", "ok": cond3_core, "detail": f"涨幅={gain_5:.2f}% 阈值>{th5}%" if gain_5 is not None else "历史数据不足(需要>=6)"})
+        checks.append({"label": "条件3-门槛: 放量XYH 且(空头分歧K线 或 阴线大跌)", "ok": cond3_gate, "detail": ""})
+        checks.append({"label": "条件3-是否触发", "ok": (cond3_core and cond3_gate), "detail": ""})
+
+        # 条件4：连续5连阳 + 阶段涨幅过大（窗口需6日）
+        all_bullish_5 = None
+        gain_5_yang = None
+        if len(hist) >= 6:
+            last5 = hist[:5]
+            all_bullish_5 = all(_safe_float(x.get("close")) >= _safe_float(x.get("open")) for x in last5)
+            c0 = _safe_float(hist[0].get("close"))
+            c5 = _safe_float(hist[5].get("close"))
+            gain_5_yang = (c0 - c5) / c5 * 100 if c5 > 0 else None
+        cond4_core = bool(all_bullish_5 and (gain_5_yang is not None and gain_5_yang > th5))
+        cond4_gate = is_volume_xyh and (is_bearish_kline_with_amplitude or is_bearish_3pct_line)
+        checks.append({"label": "条件4-核心: 5连阳 且 前5日涨幅>阈值", "ok": cond4_core, "detail": f"5连阳={all_bullish_5}, 涨幅={gain_5_yang:.2f}% 阈值>{th5}%" if (gain_5_yang is not None and all_bullish_5 is not None) else "历史数据不足(需要>=6)"})
+        checks.append({"label": "条件4-门槛: 放量XYH 且(空头分歧K线 或 阴线大跌)", "ok": cond4_gate, "detail": ""})
+        checks.append({"label": "条件4-是否触发", "ok": (cond4_core and cond4_gate), "detail": ""})
+
+        # 条件5：前15日涨幅>50% + 放量XYZH +（空头分歧K线 或 空头组合）
+        gain_15 = None
+        if len(hist) >= 16:
+            c0 = _safe_float(hist[0].get("close"))
+            c15 = _safe_float(hist[15].get("close"))
+            gain_15 = (c0 - c15) / c15 * 100 if c15 > 0 else None
+        cond5_core = (gain_15 is not None and gain_15 > 50)
+        cond5_gate = is_volume_xyzh and (is_bearish_kline_with_amplitude or has_bearish_combo)
+        checks.append({"label": "条件5-核心: 前15日涨幅>50%", "ok": cond5_core, "detail": f"涨幅={gain_15:.2f}%" if gain_15 is not None else "历史数据不足(需要>=16)"})
+        checks.append({"label": "条件5-门槛: 放量XYZH 且(空头分歧K线 或 空头组合)", "ok": cond5_gate, "detail": ""})
+        checks.append({"label": "条件5-是否触发", "ok": (cond5_core and cond5_gate), "detail": ""})
+
+        # 条件6：前20日涨幅>50% + 放量XYZH +（空头分歧K线 或 空头组合）
+        gain_20 = None
+        if len(hist) >= 21:
+            c0 = _safe_float(hist[0].get("close"))
+            c20 = _safe_float(hist[20].get("close"))
+            gain_20 = (c0 - c20) / c20 * 100 if c20 > 0 else None
+        cond6_core = (gain_20 is not None and gain_20 > 50)
+        cond6_gate = is_volume_xyzh and (is_bearish_kline_with_amplitude or has_bearish_combo)
+        checks.append({"label": "条件6-核心: 前20日涨幅>50%", "ok": cond6_core, "detail": f"涨幅={gain_20:.2f}%" if gain_20 is not None else "历史数据不足(需要>=21)"})
+        checks.append({"label": "条件6-门槛: 放量XYZH 且(空头分歧K线 或 空头组合)", "ok": cond6_gate, "detail": ""})
+        checks.append({"label": "条件6-是否触发", "ok": (cond6_core and cond6_gate), "detail": ""})
+
+        # 条件7：收盘偏离MA10>15% + 放量XYH + 空头分歧K线（仅振幅类）
+        deviation = None
+        ma10_list = ma_data.get("ma10") if ma_data else None
+        if ma10_list is not None and target_index is not None and target_index < len(ma10_list):
+            ma10_today = ma10_list[target_index]
+            if ma10_today:
+                deviation = (Cc - float(ma10_today)) / float(ma10_today)
+        cond7_core = (deviation is not None and deviation > 0.15)
+        cond7_gate = is_volume_xyh and is_bearish_kline_with_amplitude
+        checks.append({"label": "条件7-核心: 收盘偏离MA10>15%", "ok": cond7_core, "detail": f"deviation={deviation*100:.2f}%" if deviation is not None else "缺少MA10或target_index"})
+        checks.append({"label": "条件7-门槛: 放量XYH 且 空头分歧K线(振幅类)", "ok": cond7_gate, "detail": ""})
+        checks.append({"label": "条件7-是否触发", "ok": (cond7_core and cond7_gate), "detail": ""})
+
+        # 汇总：任一条件触发即可（与插件描述一致；真正“是否触发”以插件返回 reason 为准）
+        any_trigger = any(c.get("label", "").endswith("是否触发") and bool(c.get("ok")) for c in checks)
+        checks.append({"label": "汇总: 子条件(1-7)任一触发", "ok": any_trigger, "detail": ""})
+        return checks
+
+    checks_p1: List[Dict[str, Any]] = _build_checks_p1_deviation()
 
     _run_plugin(
         "插件1: 乖离率偏离",
@@ -1059,49 +1180,198 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         requires=["macd_index"],
         checks=checks_p10,
     )
-    # 插件2：临近压力位滞涨（逐条列公共前置+四种情形核心门槛）
-    checks_p2: List[Dict[str, Any]] = []
-    checks_p2.append({"label": "存在最近C点", "ok": (last_c_dt is not None), "detail": f"last_c={last_c_str or '无'}"})
-    checks_p2.append({"label": "上一有效点类型为C", "ok": (last_valid_type == "C"), "detail": f"last_valid_type={last_valid_type or '无'}"})
-    # 前一日赔率
-    if prev_day_chance:
+    # 插件2：临近压力位滞涨（按插件实现逐条展开：公共前置 + 情形1/2/3/4）
+    def _build_checks_p2_pressure_stagnation() -> List[Dict[str, Any]]:
+        checks: List[Dict[str, Any]] = []
+
+        # 阈值（与插件一致：距离阈值默认 8，可配置）
+        is_main_board = KLinePatternService.is_main_board(stock_code) if stock_code else True
+        amp_threshold = 6 if is_main_board else 8
+        decline_threshold = 3 if is_main_board else 5
+        try:
+            distance_threshold = float(getattr(rp, "config_service", None).get_pressure_stagnation_distance_threshold() or 8.0)
+        except Exception:
+            distance_threshold = 8.0
+
+        checks.append({"label": "公共前置-存在最近C点", "ok": (last_c_dt is not None), "detail": f"last_c={last_c_str or '无'}"})
+        checks.append({"label": "公共前置-上一有效点类型为C", "ok": (last_valid_type == "C"), "detail": f"last_valid_type={last_valid_type or '无'}"})
+
+        # 需要前一日 daily_chance（赔率/压力线）
+        if not prev_day_chance:
+            checks.append({"label": "公共前置-存在前一日daily_chance(赔率/压力线)", "ok": False, "detail": ""})
+            return checks
+
         day_wr = _safe_float(prev_day_chance.get("day_win_ratio_score"))
-        checks_p2.append({"label": "前一日赔率>0", "ok": (day_wr > 0), "detail": f"day_win_ratio_score={day_wr:.2f}"})
-    else:
-        checks_p2.append({"label": "存在前一日daily_chance(赔率/压力位)", "ok": False, "detail": ""})
-    # 距压
-    if prev_day_chance:
-        pp_raw = _safe_float(prev_day_chance.get("pressure_price"))
-        if pp_raw > 0:
-            pressure = pp_raw / 100.0
+        checks.append({"label": "公共前置-前一日赔率>0", "ok": (day_wr > 0), "detail": f"day_win_ratio_score={day_wr:.2f}"})
+
+        prev_pressure_raw = _safe_float(prev_day_chance.get("pressure_price"))
+        has_prev_pressure = prev_pressure_raw > 0
+        prev_pressure = prev_pressure_raw / 100.0 if has_prev_pressure else None
+        checks.append({"label": "公共前置-前一日存在压力位", "ok": has_prev_pressure, "detail": f"pressure_price={prev_day_chance.get('pressure_price')}"})
+
+        # 发C日压力线 vs 今日前一日压力线
+        c_pressure = 0.0
+        c_prev_close = None
+        if last_c_str:
+            c_chance = get_daily_chance(stock_code, last_c_str) or {}
+            c_pressure_raw = _safe_float(c_chance.get("pressure_price"))
+            c_pressure = c_pressure_raw / 100.0 if c_pressure_raw > 0 else 0.0
+            # 发C日前一日收盘
+            c_prev_dates = []
+            try:
+                c_prev_dates = rp._get_previous_trading_dates_from_cache(last_c_str, stock_code)
+            except Exception:
+                c_prev_dates = []
+            if c_prev_dates:
+                c_prev_data = get_daily_data(stock_code, c_prev_dates[0]) or {}
+                c_prev_close = _safe_float(c_prev_data.get("close")) if c_prev_data else None
+
+        if has_prev_pressure:
+            ok_c_pressure_le_prev = (c_pressure <= float(prev_pressure))
+            checks.append({"label": "公共前置-C日压力位 <= 前一日压力位", "ok": ok_c_pressure_le_prev, "detail": f"c_pressure={c_pressure or 0:.2f}, prev_pressure={prev_pressure:.2f}"})
+
+            if c_pressure == 0:
+                # 若C日压力位为空/0：用“C日前一日收盘”到“今日收盘”涨幅 > 15%
+                close_today = _safe_float(current_data.get("close"))
+                gain_from_c = (close_today - c_prev_close) / c_prev_close * 100 if (c_prev_close and c_prev_close > 0) else None
+                ok_gain = (gain_from_c is not None and gain_from_c > 15)
+                checks.append({"label": "公共前置-C日无压力位时: 从C日前收至今日涨幅>15%", "ok": ok_gain, "detail": f"gain={gain_from_c:.2f}%" if gain_from_c is not None else "缺少C日前收盘"})
+
+            # 距离压力位 0 < dist < distance_threshold
             close_today = _safe_float(current_data.get("close"))
-            dist = (pressure - close_today) / close_today * 100 if close_today > 0 else 0
-            checks_p2.append({"label": "距离压力位 0<距离<10%", "ok": (0 < dist < 10), "detail": f"distance={dist:.2f}%, pressure={pressure:.2f}"})
+            dist = (prev_pressure - close_today) / close_today * 100 if (close_today and close_today > 0) else 0.0
+            checks.append({"label": f"公共前置-距离压力位 0<距离<{distance_threshold:.1f}%", "ok": (0 < dist < distance_threshold), "detail": f"distance={dist:.2f}%"})
+
+        # 情形1：当日放量(XYZH) + 风险K线
+        vol_today = (current_chance.get("volume_type") or "").strip()
+        vols_today = [v.strip() for v in vol_today.split(",") if v.strip()]
+        is_volume_xyzh_today = any(v in {"X", "Y", "Z", "H"} for v in vols_today)
+        O = _safe_float(current_data.get("open"))
+        Cc = _safe_float(current_data.get("close"))
+        H = _safe_float(current_data.get("high"))
+        L = _safe_float(current_data.get("low"))
+        pre_close = _safe_float(current_data.get("pre_close")) or _safe_float(current_data.get("open"))
+        pattern_today = KLinePatternService.identify_pattern(stock_code, O, Cc, H, L, pre_close) if pre_close > 0 else None
+        amplitude = ((H - L) / pre_close) * 100 if pre_close > 0 else 0.0
+        decline = ((Cc - O) / O) * 100 if O > 0 else 0.0
+        risky_set = {"冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", "冲高回落阴十字星", "高开低走"}
+        is_risk_kline = bool((pattern_today in risky_set and amplitude > amp_threshold) or (Cc < O and decline <= -decline_threshold))
+        checks.append({"label": "情形1-当日放量(XYZH)", "ok": is_volume_xyzh_today, "detail": f"volume_type={vol_today or '无'}"})
+        checks.append({"label": "情形1-当日风险K线", "ok": is_risk_kline, "detail": f"pattern={pattern_today or '无'}, amplitude={amplitude:.2f}% (>{amp_threshold}%), decline={decline:.2f}% (<= {-decline_threshold}%)"})
+        checks.append({"label": "情形1-是否触发", "ok": (is_volume_xyzh_today and is_risk_kline), "detail": ""})
+
+        # 情形2：当日未放量 + 前两日任一天放量 + 前两日距离也在阈值内 + 当日风险K线(含乌云盖顶)
+        prev2 = []
+        try:
+            prev2 = rp._get_previous_trading_dates_from_cache(date_str, stock_code)[:2]
+        except Exception:
+            prev2 = []
+
+        day1_date = prev2[0] if len(prev2) >= 1 else None
+        day2_date = prev2[1] if len(prev2) >= 2 else None
+
+        def _dist_ok(day_date: Optional[str]) -> Optional[bool]:
+            if not day_date:
+                return None
+            dc = get_daily_chance(stock_code, day_date) or {}
+            dd = get_daily_data(stock_code, day_date) or {}
+            p_raw = _safe_float(dc.get("pressure_price"))
+            if p_raw <= 0:
+                return None
+            p = p_raw / 100.0
+            cl = _safe_float(dd.get("close"))
+            if cl <= 0:
+                return None
+            d = (p - cl) / cl * 100
+            return bool(0 < d < distance_threshold)
+
+        def _is_volume_xyzh(day_date: Optional[str]) -> Optional[bool]:
+            if not day_date:
+                return None
+            dc = get_daily_chance(stock_code, day_date) or {}
+            vt = (dc.get("volume_type") or "").strip()
+            vs = [v.strip() for v in vt.split(",") if v.strip()]
+            return any(v in {"X", "Y", "Z", "H"} for v in vs)
+
+        day1_dist_ok = _dist_ok(day1_date)
+        day2_dist_ok = _dist_ok(day2_date)
+        day1_vol_ok = _is_volume_xyzh(day1_date)
+        day2_vol_ok = _is_volume_xyzh(day2_date)
+        has_volume_prev2 = bool(day1_vol_ok or day2_vol_ok)
+
+        risk2_set = {"冲高回落阴线", "冲高回落阳线", "高开低走"}
+        has_cloud = "乌云盖顶" in ((current_chance.get("bearish_pattern") or "") or "")
+        is_risk2 = bool((pattern_today in risk2_set and amplitude > amp_threshold) or has_cloud)
+        ok_prev2_dist = bool(day1_dist_ok and day2_dist_ok) if (day1_dist_ok is not None and day2_dist_ok is not None) else False
+        cond2_trigger = (not is_volume_xyzh_today) and ok_prev2_dist and has_volume_prev2 and is_risk2
+
+        checks.append({"label": "情形2-当日未放量(XYZH)", "ok": (not is_volume_xyzh_today), "detail": ""})
+        checks.append({"label": f"情形2-前一日距压在阈值内(<{distance_threshold:.1f}%)", "ok": bool(day1_dist_ok), "detail": f"date={day1_date or '无'}"})
+        checks.append({"label": f"情形2-前二日距压在阈值内(<{distance_threshold:.1f}%)", "ok": bool(day2_dist_ok), "detail": f"date={day2_date or '无'}"})
+        checks.append({"label": "情形2-前两日任一天放量(XYZH)", "ok": has_volume_prev2, "detail": f"day1={day1_vol_ok}, day2={day2_vol_ok}"})
+        checks.append({"label": "情形2-当日风险K线(情形2集)或乌云盖顶", "ok": is_risk2, "detail": f"pattern={pattern_today or '无'}, amplitude={amplitude:.2f}%, 乌云盖顶={has_cloud}"})
+        checks.append({"label": "情形2-是否触发", "ok": cond2_trigger, "detail": ""})
+
+        # 情形3：熊市 + 近3个交易日无AXYZ放量 + 当日空头组合（不看当日放量）
+        market_type = None
+        try:
+            market_type = getattr(rp, "config_service", None).get_market_type(datetime.strptime(date_str, "%Y-%m-%d"))
+        except Exception:
+            market_type = None
+        prev3 = []
+        try:
+            prev3 = rp._get_previous_trading_dates_from_cache(date_str, stock_code)[:3]
+        except Exception:
+            prev3 = []
+        prev3_chances = [get_daily_chance(stock_code, d) or {} for d in prev3] if prev3 else []
+        def _has_ax_yz(dc: Dict[str, Any]) -> bool:
+            vt = (dc.get("volume_type") or "").strip()
+            vs = [v.strip() for v in vt.split(",") if v.strip()]
+            return any(v in {"A", "X", "Y", "Z"} for v in vs)
+        no_ax_yz_prev3 = bool(prev3_chances) and all(not _has_ax_yz(dc) for dc in prev3_chances)
+        has_bearish_today = bool((current_chance.get("bearish_pattern") or "").strip())
+        cond3_trigger = (market_type == "bear") and (len(prev3) >= 3) and no_ax_yz_prev3 and has_bearish_today
+        checks.append({"label": "情形3-熊市", "ok": (market_type == "bear"), "detail": f"market_type={market_type or 'unknown'}"})
+        checks.append({"label": "情形3-近3个交易日无AXYZ放量", "ok": no_ax_yz_prev3, "detail": f"dates={','.join(prev3) if prev3 else '无'}"})
+        checks.append({"label": "情形3-当日空头组合", "ok": has_bearish_today, "detail": (current_chance.get("bearish_pattern") or "无")})
+        checks.append({"label": "情形3-是否触发", "ok": cond3_trigger, "detail": ""})
+
+        # 情形4：当日空头组合 + 近5日MACD死叉（当日DIF<DEA且MACD<0）
+        ok_today = False
+        ok_cross = False
+        cross_idx = None
+        if macd_data and target_index is not None:
+            dif_list = macd_data.get("dif") or []
+            dea_list = macd_data.get("dea") or []
+            macd_list = macd_data.get("macd") or []
+            if target_index < len(dif_list) and target_index < len(dea_list) and target_index < len(macd_list):
+                td = dif_list[target_index]; te = dea_list[target_index]; tm = macd_list[target_index]
+                ok_today = (td is not None and te is not None and tm is not None and td < te and tm < 0)
+                if ok_today:
+                    start_i = max(1, target_index - 4)
+                    for i in range(start_i, target_index + 1):
+                        if None in (macd_list[i-1], dif_list[i-1], dea_list[i-1], macd_list[i], dif_list[i], dea_list[i]):
+                            continue
+                        if macd_list[i-1] > 0 and dif_list[i-1] > dea_list[i-1] and macd_list[i] < 0 and dif_list[i] < dea_list[i]:
+                            ok_cross = True
+                            cross_idx = i
+                            break
+                checks.append({"label": "情形4-当日DIF<DEA且MACD<0", "ok": ok_today, "detail": f"DIF={td}, DEA={te}, MACD={tm}"})
+                checks.append({"label": "情形4-近5日出现死叉转换", "ok": ok_cross, "detail": f"cross_index={cross_idx}" if cross_idx is not None else ""})
+            else:
+                checks.append({"label": "情形4-MACD数据齐全", "ok": False, "detail": ""})
         else:
-            checks_p2.append({"label": "存在压力位", "ok": False, "detail": f"pressure_price={prev_day_chance.get('pressure_price')}"})
-    # 情形4 MACD死叉
-    if macd_data and target_index is not None:
-        dif_list = macd_data.get("dif") or []
-        dea_list = macd_data.get("dea") or []
-        macd_list = macd_data.get("macd") or []
-        if target_index < len(dif_list) and target_index < len(dea_list) and target_index < len(macd_list):
-            td = dif_list[target_index]; te = dea_list[target_index]; tm = macd_list[target_index]
-            ok_today = (td is not None and te is not None and tm is not None and td < te and tm < 0)
-            ok_cross = False
-            if ok_today:
-                start_i = max(1, target_index - 4)
-                for i in range(start_i, target_index + 1):
-                    if None in (macd_list[i-1], dif_list[i-1], dea_list[i-1], macd_list[i], dif_list[i], dea_list[i]):
-                        continue
-                    if macd_list[i-1] > 0 and dif_list[i-1] > dea_list[i-1] and macd_list[i] < 0 and dif_list[i] < dea_list[i]:
-                        ok_cross = True
-                        break
-            checks_p2.append({"label": "情形4-当日DIF<DEA且MACD<0", "ok": ok_today, "detail": f"DIF={td}, DEA={te}, MACD={tm}"})
-            checks_p2.append({"label": "情形4-近5日出现死叉转换", "ok": ok_cross, "detail": ""})
-        else:
-            checks_p2.append({"label": "情形4-MACD数据齐全", "ok": False, "detail": ""})
-    else:
-        checks_p2.append({"label": "情形4-需要MACD与target_index", "ok": False, "detail": ""})
+            checks.append({"label": "情形4-需要MACD与target_index", "ok": False, "detail": ""})
+
+        checks.append({"label": "情形4-当日空头组合", "ok": has_bearish_today, "detail": (current_chance.get("bearish_pattern") or "无")})
+        checks.append({"label": "情形4-是否触发", "ok": (has_bearish_today and ok_today and ok_cross), "detail": ""})
+
+        # 汇总：任一情形触发即可
+        any_case = any(c.get("label", "").endswith("是否触发") and bool(c.get("ok")) for c in checks if c.get("label", "").startswith("情形"))
+        checks.append({"label": "汇总: 情形1/2/3/4 任一触发", "ok": any_case, "detail": ""})
+        return checks
+
+    checks_p2: List[Dict[str, Any]] = _build_checks_p2_pressure_stagnation()
 
     _run_plugin(
         "插件2: 临近压力位滞涨(最后检查)",
