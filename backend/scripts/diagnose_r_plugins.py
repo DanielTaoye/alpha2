@@ -261,7 +261,16 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
 
     lines.append("")
     lines.append("基础数据:")
-    lines.append(f"- 当日K线: O={_safe_float(current_data.get('open')):.2f} H={_safe_float(current_data.get('high')):.2f} L={_safe_float(current_data.get('low')):.2f} C={_safe_float(current_data.get('close')):.2f}")
+    o = _safe_float(current_data.get("open"))
+    h = _safe_float(current_data.get("high"))
+    l = _safe_float(current_data.get("low"))
+    c = _safe_float(current_data.get("close"))
+    lines.append(f"- 当日K线: O={o:.2f} H={h:.2f} L={l:.2f} C={c:.2f}")
+    # ABC：上影线(A)=H-max(O,C)，实体(B)=|C-O|，下影线(C)=min(O,C)-L
+    a_shadow = h - max(o, c)
+    b_body = abs(c - o)
+    c_shadow = min(o, c) - l
+    lines.append(f"- 当日K线 ABC: A(上影线)={a_shadow:.4f}, B(实体)={b_body:.4f}, C(下影线)={c_shadow:.4f}")
     lines.append(f"- 当日成交量: {current_data.get('volume')}")
     lines.append(f"- 当日成交量类型: {current_chance.get('volume_type') or '无'}")
     lines.append(f"- 当日空头组合: {current_chance.get('bearish_pattern') or '无'}")
