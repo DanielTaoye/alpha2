@@ -189,10 +189,10 @@ async function handleFileChange(ev) {
 async function init() {
     try {
         updateStatus(false, '正在连接服务器...');
-        
+
         const response = await fetch(`${API_BASE_URL}/stock_groups`);
         const result = await response.json();
-        
+
         if (result.code === 200) {
             allStockGroups = result.data;
             updateStatus(true, `系统就绪 - 已加载 ${getTotalStockCount()} 支股票`);
@@ -224,7 +224,7 @@ function getTotalStockCount() {
 function updateStatus(online, text) {
     const indicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
-    
+
     if (indicator && statusText) {
         indicator.className = online ? 'status-indicator online' : 'status-indicator offline';
         statusText.textContent = text;
@@ -236,7 +236,7 @@ function showError(message) {
     const errorDiv = document.getElementById('errorMessage');
     errorDiv.textContent = message;
     errorDiv.style.display = 'block';
-    
+
     setTimeout(() => {
         errorDiv.style.display = 'none';
     }, 5000);
@@ -295,13 +295,13 @@ async function startBatchBacktest() {
     isRunning = true;
     interruptRequested = false;
     currentJobId = null;
-    
+
     // 显示进度条
     const progressContainer = document.getElementById('progressContainer');
     const resultsContainer = document.getElementById('resultsContainer');
     progressContainer.style.display = 'block';
     resultsContainer.style.display = 'none';
-    
+
     // 禁用按钮
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -312,7 +312,7 @@ async function startBatchBacktest() {
         stopBtn.disabled = false;
         stopBtn.textContent = '打断';
     }
-    
+
     // 执行批量回测（推荐：由后端统一调度，前端只轮询进度，避免前端高并发/大量HTTP请求）
     let successCount = 0;
     let failCount = 0;
@@ -451,7 +451,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
         // 批量场景：接口计算时间可能明显 > 20s（尤其是排队/单线程后端）
         // 这里统一把单请求超时拉长，减少误判
         const requestTimeoutMs = 60000;
-        
+
         // 首先获取CR点数据
         const requestBody = {
             stockCode: stock.code,
@@ -463,9 +463,9 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
             startDate: backtestConfig?.startDate || null,
             endDate: backtestConfig?.endDate || null
         };
-        
+
         console.log('CR分析请求参数:', requestBody);
-        
+
         const crResponse = await fetchJsonWithRetry(`${API_BASE_URL}/cr_analysis`, {
             method: 'POST',
             headers: {
@@ -473,34 +473,34 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
             },
             body: JSON.stringify(requestBody)
         }, requestTimeoutMs, 1);
-        
+
         console.log('CR分析响应状态:', crResponse.status, crResponse.statusText);
-        
+
         // 检查响应是否是JSON
         const contentType = crResponse.headers.get('content-type');
         console.log('CR分析响应Content-Type:', contentType);
-        
+
         if (!contentType || !contentType.includes('application/json')) {
             const text = await crResponse.text();
             console.error('API返回非JSON响应:', text.substring(0, 500));
             throw new Error(`API返回格式错误 (状态码: ${crResponse.status})`);
         }
-        
+
         const crResult = await crResponse.json();
         console.log('CR分析结果:', crResult);
-        
+
         if (crResult.code !== 200) {
             console.error('CR分析失败:', crResult.message);
             throw new Error(crResult.message || 'CR分析失败');
         }
-        
+
         const cPoints = crResult.data.c_points || [];
         const cPointsS2 = crResult.data.strategy2_c_points || [];
         const mergedCPoints = [...cPoints, ...cPointsS2];
         const rPoints = crResult.data.r_points || [];
-        
+
         console.log(`找到C点${mergedCPoints.length}个(策略1:${cPoints.length} / 策略2:${cPointsS2.length}), R点${rPoints.length}个`);
-        
+
         if (mergedCPoints.length === 0) {
             console.warn('没有C点数据，跳过回测');
             return {
@@ -509,7 +509,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
                 message: '没有C点数据(已跳过)'
             };
         }
-        
+
         // 执行回测
         const backtestResponse = await fetchJsonWithRetry(`${API_BASE_URL}/backtest`, {
             method: 'POST',
@@ -524,7 +524,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
                 backtestConfig
             })
         }, requestTimeoutMs, 1);
-        
+
         // 检查响应是否是JSON
         const contentType2 = backtestResponse.headers.get('content-type');
         if (!contentType2 || !contentType2.includes('application/json')) {
@@ -532,9 +532,9 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
             console.error('回测API返回非JSON响应:', text.substring(0, 200));
             throw new Error('回测API返回格式错误');
         }
-        
+
         const backtestResult = await backtestResponse.json();
-        
+
         if (backtestResult.code === 200) {
             const tradesArr = backtestResult.data && Array.isArray(backtestResult.data.trades) ? backtestResult.data.trades : [];
             if (!tradesArr.length) {
@@ -555,7 +555,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
                 message: backtestResult.message || '回测失败'
             };
         }
-        
+
     } catch (error) {
         console.error('回测失败:', stock.code, error);
         if (error.name === 'AbortError') {
@@ -575,7 +575,7 @@ async function backtestSingleStock(stock, stockNature, backtestConfig) {
 function updateProgress(percent, text) {
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
-    
+
     progressFill.style.width = percent + '%';
     progressFill.textContent = percent + '%';
     progressText.textContent = text;
@@ -585,7 +585,7 @@ function updateProgress(percent, text) {
 function displayResults(results, successCount, failCount, skippedCount = 0) {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'block';
-    
+
     // 兜底：没有任何可展示的结果时，给出提示
     if (!Array.isArray(results) || results.length === 0) {
         document.getElementById('totalStocks').textContent = 0;
@@ -605,132 +605,229 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
         return;
     }
 
-    // --- 新增：处理每日收益曲线 ---
-    try {
-        // 1. 收集所有交易的 (日期, 收益率)
-        const dateYieldMap = {}; // "2024-01-01": 5.2
-        let minDate = null;
-        let maxDate = null;
+    // --- 新增：处理每日收益曲线 (双曲线：策略 vs 基准) ---
+    // 定义一个异步立刻执行函数，或者使用 Promise 链，因为我们需要 fetch 数据
+    // 由于 displayResults 本身不是 async，我们用 .then 处理
 
-        results.forEach(r => {
-            if (r.success && r.data && r.data.summary && Array.isArray(r.data.summary.trade_yields)) {
-                r.data.summary.trade_yields.forEach(item => {
-                    const d = item.date;
-                    const val = parseFloat(item.value || 0);
-                    if (!d) return;
-                    
-                    if (!minDate || d < minDate) minDate = d;
-                    if (!maxDate || d > maxDate) maxDate = d;
+    // 1. 准备策略数据
+    const dateYieldMap = {};
+    let minDate = null;
+    let maxDate = null;
 
-                    if (!dateYieldMap[d]) dateYieldMap[d] = 0;
-                    dateYieldMap[d] += val;
-                });
+    // 统计回测成功且有交易数据的股票数量
+    let successStockCount = 0;
+
+    // 2. 收集所有交易的 (日期, 收益率)
+    // 注意：这里只是收集数据，不画图
+    results.forEach(r => {
+        if (r.success && r.data && r.data.summary && Array.isArray(r.data.summary.trade_yields)) {
+            // 只有有 trade_yields 的才算"成功回测"
+            if (r.data.summary.trade_yields.length > 0) {
+                successStockCount++;
             }
+            r.data.summary.trade_yields.forEach(item => {
+                const d = item.date;
+                const val = parseFloat(item.value || 0);
+                if (!d) return;
+
+                if (!minDate || d < minDate) minDate = d;
+                if (!maxDate || d > maxDate) maxDate = d;
+
+                if (!dateYieldMap[d]) dateYieldMap[d] = 0;
+                dateYieldMap[d] += val;
+            });
+        }
+    });
+
+    // 如果没有成功的股票，避免除以0
+    if (successStockCount === 0) successStockCount = 1;
+    console.log(`策略收益曲线：共 ${successStockCount} 只成功回测的股票`);
+
+    // 设定时间轴范围
+    const startDateStr = "2024-01-01";
+    const todayStr = new Date().toISOString().split('T')[0];
+    let cursorDateStr = (minDate && minDate < startDateStr) ? minDate : startDateStr;
+
+    // 构造策略的收益序列 (红色) - 平均收益率
+    const xData = [];
+    const strategyYData = [];
+    let cumSum = 0;
+
+    let cursor = new Date(cursorDateStr);
+    const end = new Date(todayStr); // end is today
+
+    while (cursor <= end) {
+        const dStr = cursor.toISOString().split('T')[0];
+        const dayYield = dateYieldMap[dStr] || 0;
+        cumSum += dayYield;
+
+        xData.push(dStr);
+        // 除以股票数量，得到平均收益率
+        strategyYData.push(parseFloat((cumSum / successStockCount).toFixed(2)));
+
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    // 3. fetch 基准数据 (上证指数)
+    fetch('/api/batch_backtest/market_index')
+        .then(res => res.json())
+        .then(res => {
+            let benchmarkData = [];
+            // API 返回格式: { code: 200, data: [...], message: 'ok' }
+            if (res.code === 200 && Array.isArray(res.data)) {
+                benchmarkData = res.data; // [{date: '2024-01-02', close: 2974.9}, ...]
+            }
+
+            console.log("Benchmark data received:", benchmarkData.length, "records");
+            if (benchmarkData.length > 0) {
+                console.log("First record:", benchmarkData[0]);
+            }
+
+            // 找到基准价 (Base Price): 2024-01-01 (或数据的第一个点)
+            // 因为API返回的是 >= 2024-01-01 的数据，按日期升序
+            // 所以 benchmarkData[0] 就是 2024年开盘第一天的数据，作为基准
+            let baseClose = null;
+            if (benchmarkData.length > 0) {
+                baseClose = benchmarkData[0].close;
+            }
+
+            const benchMap = {};
+            benchmarkData.forEach(item => {
+                benchMap[item.date] = item.close;
+            });
+
+            // 生成 Benchmark Y Data (与 xData 对齐)
+            const benchmarkYData = [];
+
+            // 为了处理假期空缺，我们需要一个 "最近有效收盘价"
+            // 初始值设为 baseClose，这样在第一个有效数据前的日期（如1月1日假期）会显示 0%
+            let lastValidClose = baseClose;
+
+            xData.forEach(date => {
+                // 如果当天有数据，更新 lastValidClose
+                if (benchMap[date] !== undefined) {
+                    lastValidClose = benchMap[date];
+                }
+
+                if (baseClose && lastValidClose) {
+                    // 计算涨跌幅: (Current - Base) / Base * 100
+                    const yieldVal = ((lastValidClose - baseClose) / baseClose) * 100;
+                    benchmarkYData.push(parseFloat(yieldVal.toFixed(2)));
+                } else {
+                    benchmarkYData.push(0);
+                }
+            });
+
+            // 4. 渲染图表
+            const chartDom = document.getElementById('yieldCurveChart');
+            if (chartDom && typeof echarts !== 'undefined') {
+                const myChart = echarts.init(chartDom);
+                const option = {
+                    title: {
+                        text: '📈 策略 vs 上证指数 累计收益率对比',
+                        left: 'center'
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        formatter: function (params) {
+                            let result = `${params[0].name}<br/>`;
+                            params.forEach(p => {
+                                let marker = p.marker;
+                                let val = p.value;
+                                let seriesName = p.seriesName;
+                                // 颜色微调
+                                result += `${marker} ${seriesName}: <b>${val}%</b><br/>`;
+                            });
+                            return result;
+                        }
+                    },
+                    legend: {
+                        data: ['策略收益 (回测)', '上证指数 (基准)'],
+                        bottom: 10
+                    },
+                    grid: {
+                        left: '3%',
+                        right: '4%',
+                        bottom: '10%',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        boundaryGap: false,
+                        data: xData
+                    },
+                    yAxis: {
+                        type: 'value',
+                        name: '收益率(%)',
+                        axisLabel: {
+                            formatter: '{value} %'
+                        }
+                    },
+                    series: [
+                        {
+                            name: '策略收益 (回测)',
+                            type: 'line',
+                            data: strategyYData,
+                            smooth: true,
+                            showSymbol: false,
+                            itemStyle: { color: '#ff4d4f' }, // 红色
+                            lineStyle: { width: 3 },
+                            z: 2
+                        },
+                        {
+                            name: '上证指数 (基准)',
+                            type: 'line',
+                            data: benchmarkYData,
+                            smooth: true,
+                            showSymbol: false,
+                            itemStyle: { color: '#1890ff' }, // 蓝色
+                            lineStyle: { width: 2, type: 'solid' },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(24, 144, 255, 0.2)' },
+                                    { offset: 1, color: 'rgba(24, 144, 255, 0.05)' }
+                                ])
+                            },
+                            z: 1
+                        }
+                    ]
+                };
+                myChart.setOption(option);
+                window.addEventListener('resize', () => myChart.resize());
+            }
+
+        })
+        .catch(err => {
+            console.error("Fetch market index failed", err);
+            // Fallback: 仅画策略曲线
+            renderSingleLineChart(xData, strategyYData);
         });
 
-        // 2. 补全日期序列（从 2024-01-01 或 minDate 到今天）
-        // 题目要求：x轴从2024年1月1日到今天
-        const startDateStr = "2024-01-01"; 
-        const todayStr = new Date().toISOString().split('T')[0];
-        // 如果数据里的 minDate 比 2024-01-01 还早，就用更早的；否则用 2024-01-01
-        let cursorDateStr = (minDate && minDate < startDateStr) ? minDate : startDateStr;
-        const endDateStr = todayStr;
-
-        const xData = [];
-        const yData = [];
-        let cumSum = 0;
-        
-        let cursor = new Date(cursorDateStr);
-        const end = new Date(endDateStr);
-
-        // 循环生成每一天
-        while (cursor <= end) {
-            const dStr = cursor.toISOString().split('T')[0];
-            const dayYield = dateYieldMap[dStr] || 0;
-            cumSum += dayYield;
-            
-            xData.push(dStr);
-            yData.push(parseFloat(cumSum.toFixed(2))); // 保留2位小数
-
-            cursor.setDate(cursor.getDate() + 1);
-        }
-
-        // 3. 渲染图表
+    function renderSingleLineChart(x, y) {
         const chartDom = document.getElementById('yieldCurveChart');
         if (chartDom && typeof echarts !== 'undefined') {
             const myChart = echarts.init(chartDom);
-            const option = {
-                title: {
-                    text: '📅 累计收益率曲线 (2024.1.1 至今)',
-                    left: 'center'
-                },
-                tooltip: {
-                    trigger: 'axis',
-                    formatter: function (params) {
-                        const p = params[0];
-                        return `${p.name}<br/>累计收益: <b>${p.value}%</b>`;
-                    }
-                },
-                grid: {
-                    left: '3%',
-                    right: '4%',
-                    bottom: '3%',
-                    containLabel: true
-                },
-                xAxis: {
-                    type: 'category',
-                    boundaryGap: false,
-                    data: xData
-                },
-                yAxis: {
-                    type: 'value',
-                    axisLabel: {
-                        formatter: '{value} %'
-                    }
-                },
-                series: [
-                    {
-                        name: '累计收益率',
-                        type: 'line',
-                        data: yData,
-                        smooth: true,
-                        showSymbol: false,
-                        areaStyle: {
-                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                { offset: 0, color: 'rgba(102, 126, 234, 0.5)' },
-                                { offset: 1, color: 'rgba(118, 75, 162, 0.1)' }
-                            ])
-                        },
-                        itemStyle: {
-                            color: '#667eea'
-                        },
-                        lineStyle: {
-                            width: 3
-                        }
-                    }
-                ]
-            };
-            myChart.setOption(option);
-            
-            // 下方表格渲染前自适应一次
-            window.addEventListener('resize', () => myChart.resize());
+            myChart.clear();
+            myChart.setOption({
+                title: { text: '策略累计收益率 (基准数据加载失败)' },
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: x },
+                yAxis: { type: 'value', axisLabel: { formatter: '{value} %' } },
+                series: [{ name: '策略收益', type: 'line', data: y, itemStyle: { color: '#ff4d4f' }, smooth: true }]
+            });
         }
-    } catch (e) {
-        console.error("渲染收益曲线失败:", e);
     }
-
     // 计算汇总数据
     // 注意：统计/平均值只基于“真正跑出回测数据”的股票：
     // - success=true 且 skipped=false 且 data.summary 存在（后端保证此时 trades 非空）
     const successResults = results.filter(r => r && r.success && !r.skipped);
     const statResults = successResults.filter(r => r.data && r.data.summary);
-    
+
     let totalTrades = 0;
     let totalReturnSum = 0;
     let avgReturnSum = 0;
     let winRateSum = 0;
     let holdingDaysSum = 0;
-    
+
     statResults.forEach(r => {
         if (r.data && r.data.summary) {
             totalTrades += r.data.summary.total_trades || 0;
@@ -740,12 +837,12 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
             holdingDaysSum += r.data.summary.avg_holding_days || 0;
         }
     });
-    
+
     const denom = statResults.length;
     const avgReturn = denom > 0 ? (avgReturnSum / denom).toFixed(2) : 0;
     const avgWinRate = denom > 0 ? (winRateSum / denom).toFixed(2) : 0;
     const avgHoldingDaysStocks = denom > 0 ? (holdingDaysSum / denom).toFixed(2) : 0;
-    
+
     // 更新汇总卡片
     document.getElementById('totalStocks').textContent = results.length;
     document.getElementById('avgReturn').textContent = avgReturn + '%';
@@ -762,11 +859,11 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
         failEl.textContent = `${failCount}（跳过${skippedCount}）`;
     }
     document.getElementById('avgHoldingDaysStocks').textContent = `${avgHoldingDaysStocks}天`;
-    
+
     // 填充表格
     const tableBody = document.getElementById('resultsTableBody');
     tableBody.innerHTML = '';
-    
+
     results.forEach((result, index) => {
         const row = document.createElement('tr');
 
@@ -775,7 +872,7 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
         const stockCode = (stockObj && typeof stockObj === 'object')
             ? (stockObj.code || stockObj.stockCode || stockObj.stock_code || '未知')
             : (stockObj ? String(stockObj) : '未知');
-        
+
         if (result.success && result.skipped) {
             const cells = [
                 index + 1,
@@ -793,7 +890,7 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
             const maxReturn = summary.max_return || 0;
             const minReturn = summary.min_return || 0;
             const avgHoldingDays = summary.avg_holding_days || 0;
-            
+
             const cells = [
                 index + 1,
                 stockCode,
@@ -806,23 +903,23 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
                 `${avgHoldingDays.toFixed(2)}天`,
                 '<span style="color: #27ae60; font-weight: bold;">✓ 成功</span>'
             ];
-            
+
             row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('');
         } else {
             const cells = [
                 index + 1,
                 stockCode
             ];
-            
-            row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('') + 
+
+            row.innerHTML = cells.map(cell => `<td>${cell}</td>`).join('') +
                 `<td colspan="8" style="color: #999;">
                     <span style="color: #e74c3c; font-weight: bold;">✗ 失败</span> - ${result.error || result.message || '未知错误'}
                 </td>`;
         }
-        
+
         tableBody.appendChild(row);
     });
-    
+
     // 滚动到结果区域
     resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

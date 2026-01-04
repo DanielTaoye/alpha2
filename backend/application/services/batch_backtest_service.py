@@ -447,4 +447,29 @@ class BatchBacktestService:
             },
         }
 
-
+    @classmethod
+    def get_market_index(cls, index_name: str = '上证指数', start_date: str = '2024-01-01') -> List[Dict[str, Any]]:
+        """获取大盘指数数据"""
+        try:
+            from infrastructure.persistence.database import DatabaseConnection
+            conn = DatabaseConnection.get_connection()
+            try:
+                cursor = conn.cursor()
+                # 简单查询：按日期升序
+                sql = "SELECT trade_date, close_price FROM market_index_daily WHERE index_name = %s AND trade_date >= %s ORDER BY trade_date ASC"
+                cursor.execute(sql, (index_name, start_date))
+                rows = cursor.fetchall()
+                # rows list of (date, decimal)
+                result = []
+                for r in rows:
+                    if not r[0] or not r[1]: continue
+                    result.append({
+                        'date': str(r[0]),
+                        'close': float(r[1])
+                    })
+                return result
+            finally:
+                conn.close()
+        except Exception as e:
+            print(f"Error getting market index: {e}")
+            return []

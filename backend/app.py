@@ -289,6 +289,12 @@ def batch_backtest_cancel(job_id: str):
     return batch_backtest_controller.cancel(job_id)
 
 
+@app.route('/api/batch_backtest/market_index', methods=['GET'])
+def batch_backtest_market_index():
+    """获取大盘指数数据用于图表对比"""
+    return batch_backtest_controller.market_index()
+
+
 if __name__ == '__main__':
     logger.info("=" * 50)
     logger.info("阿尔法策略2.0系统启动")

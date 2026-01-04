@@ -59,4 +59,11 @@ class BatchBacktestController:
             logger.error(f"取消批量回测失败: {e}", exc_info=True)
             return jsonify(ResponseBuilder.error(f"取消批量回测失败: {e}")), 500
 
-
+    def market_index(self):
+        """获取大盘指数数据用于图表对比"""
+        try:
+            data = BatchBacktestService.get_market_index(index_name='上证指数', start_date='2024-01-01')
+            return jsonify(ResponseBuilder.success(data, "ok")), 200
+        except Exception as e:
+            logger.error(f"获取大盘指数失败: {e}", exc_info=True)
+            return jsonify(ResponseBuilder.error(f"获取大盘指数失败: {e}")), 500
