@@ -1014,6 +1014,20 @@ class BacktestService:
         # 计算持仓收益
         holding_return = sum([t['return_rate'] for t in holding_trades if t['return_rate'] is not None])
         
+        # 提取每笔已完成交易的“卖出日期”和“收益率”，用于前端绘制每日收益曲线
+        # List of { 'date': 'YYYY-MM-DD', 'value': 12.34 }
+        trade_yields = []
+        for t in completed_trades:
+            # 优先用 sell_time (实际成交时间)，如果没有则用 exit_trigger_date (触发卖出日)
+            d_str = t.get('sell_time') or t.get('exit_trigger_date')
+            if d_str and t.get('return_rate') is not None:
+                # 截取 YYYY-MM-DD
+                date_only = str(d_str)[:10]
+                trade_yields.append({
+                    'date': date_only,
+                    'value': float(t['return_rate'])
+                })
+
         return {
             'total_trades': len(trades),
             'completed_trades': len(completed_trades),
@@ -1026,6 +1040,7 @@ class BacktestService:
             'avg_holding_days': round(sum(days_list) / len(days_list), 1) if days_list else 0,
             'win_count': len(win_trades),
             'loss_count': len(trades_with_return) - len(win_trades),
-            'holding_return': round(holding_return, 2)  # 持仓总收益
+            'holding_return': round(holding_return, 2),  # 持仓总收益
+            'trade_yields': trade_yields  # 每日收益明细
         }
 

@@ -1,11 +1,93 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>批量回测 - 阿尔法策略2.0系统</title>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="css/styles.css?v=20251118020">
+    <!-- ECharts 多CDN备份加载方案 -->
+    <script>
+        // ECharts CDN列表（按可靠性排序：最可靠的CDN优先）
+        const echartsUrls = [
+            'https://unpkg.com/echarts@5.4.3/dist/echarts.min.js',            // 国际：unpkg（最可靠）
+            'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js', // 国际：jsdelivr（备用）
+            'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js', // 国际：cloudflare（备用）
+            'https://lib.baomitu.com/echarts/5.4.3/echarts.min.js',           // 国内：360前端静态资源库
+            'https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js'  // 国内：BootCDN
+        ];
+
+        let currentCdnIndex = 0;
+        let loadStartTime = Date.now();
+        const TIMEOUT_PER_CDN = 8000; // 每个CDN尝试超时时间（毫秒）
+        window.echartsLoadStatus = 'loading'; // 全局加载状态
+
+        function isValidECharts() {
+            try {
+                return typeof echarts !== 'undefined'
+                    && typeof echarts.init === 'function'
+                    && typeof echarts.version === 'string';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function loadECharts() {
+            if (currentCdnIndex >= echartsUrls.length) {
+                console.error('❌ 所有ECharts CDN都加载失败');
+                window.echartsLoadStatus = 'failed';
+                return;
+            }
+
+            console.log(`🔄 尝试加载 ECharts [${currentCdnIndex + 1}/${echartsUrls.length}]: ${echartsUrls[currentCdnIndex]}`);
+
+            const script = document.createElement('script');
+            script.src = echartsUrls[currentCdnIndex];
+            let hasTimeout = false;
+
+            const timeoutId = setTimeout(() => {
+                if (window.echartsLoadStatus === 'loading') {
+                    hasTimeout = true;
+                    console.warn(`⏱️ ECharts加载超时 (${TIMEOUT_PER_CDN}ms): ${echartsUrls[currentCdnIndex]}`);
+                    script.onerror = null;
+                    script.onload = null;
+                    try { if (script.parentNode) script.parentNode.removeChild(script); } catch (e) { }
+                    currentCdnIndex++;
+                    loadECharts();
+                }
+            }, TIMEOUT_PER_CDN);
+
+            script.onload = function () {
+                if (hasTimeout) return;
+                clearTimeout(timeoutId);
+                setTimeout(() => {
+                    if (isValidECharts()) {
+                        console.log(`✅ ECharts加载并验证成功: ${echartsUrls[currentCdnIndex]}`);
+                        window.echartsLoadStatus = 'success';
+                    } else {
+                        console.warn(`⚠️ ECharts脚本加载 but invalid`);
+                        try { if (script.parentNode) script.parentNode.removeChild(script); } catch (e) { }
+                        window.echarts = undefined;
+                        currentCdnIndex++;
+                        loadECharts();
+                    }
+                }, 100);
+            };
+
+            script.onerror = function (e) {
+                if (hasTimeout) return;
+                clearTimeout(timeoutId);
+                console.warn(`❌ ECharts加载失败: ${echartsUrls[currentCdnIndex]}`);
+                try { if (script.parentNode) script.parentNode.removeChild(script); } catch (e) { }
+                currentCdnIndex++;
+                loadECharts();
+            };
+
+            document.head.appendChild(script);
+        }
+        loadECharts();
+    </script>
     <style>
         .batch-container {
             max-width: 1400px;
@@ -17,7 +99,7 @@
             background: white;
             padding: 25px;
             border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
         }
 
@@ -101,7 +183,7 @@
             background: white;
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
             display: none;
         }
@@ -138,7 +220,7 @@
             background: white;
             padding: 25px;
             border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             display: none;
         }
 
@@ -191,7 +273,8 @@
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #e0e0e0;
-            color: #333;  /* 确保文字是深色 */
+            color: #333;
+            /* 确保文字是深色 */
         }
 
         .results-table th {
@@ -216,14 +299,16 @@
             display: inline-block;
             width: 20px;
             height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
+            border: 3px solid rgba(255, 255, 255, .3);
             border-radius: 50%;
             border-top-color: #fff;
             animation: spin 1s ease-in-out infinite;
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .back-btn {
@@ -267,6 +352,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="header">
         <div class="header-left">
@@ -285,7 +371,7 @@
         <!-- 控制面板 -->
         <div class="control-panel">
             <h2 style="margin-bottom: 20px; color: #333;">回测参数设置</h2>
-            
+
             <div class="control-row">
                 <label class="control-label">导入股票文件:</label>
                 <input type="file" id="csvFile" accept=".csv,.xlsx,.xls" style="margin-left: 10px;">
@@ -370,7 +456,12 @@
         <!-- 结果显示 -->
         <div class="results-container" id="resultsContainer">
             <h2 style="margin-bottom: 20px; color: #333;">回测结果</h2>
-            
+
+            <!-- 收益曲线图 -->
+            <div id="yieldCurveChart"
+                style="width: 100%; height: 400px; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 25px;">
+            </div>
+
             <!-- 汇总卡片 -->
             <div class="summary-card">
                 <div class="summary-title">📈 批量回测汇总</div>
@@ -441,5 +532,5 @@
     <script src="js/lib/xlsx.full.min.js?v=0.18.5"></script>
     <script src="js/batch_backtest.js?v=20251224-1"></script>
 </body>
-</html>
 
+</html>

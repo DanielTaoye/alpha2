@@ -599,7 +599,124 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
         const tableBody = document.getElementById('resultsTableBody');
         tableBody.innerHTML = `<tr><td colspan="10" style="color:#999;">暂无可展示结果（可能全部超时/失败，或后端任务异常）</td></tr>`;
         resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // 清空图表
+        const chartDom = document.getElementById('yieldCurveChart');
+        if (chartDom) echarts.init(chartDom).clear();
         return;
+    }
+
+    // --- 新增：处理每日收益曲线 ---
+    try {
+        // 1. 收集所有交易的 (日期, 收益率)
+        const dateYieldMap = {}; // "2024-01-01": 5.2
+        let minDate = null;
+        let maxDate = null;
+
+        results.forEach(r => {
+            if (r.success && r.data && r.data.summary && Array.isArray(r.data.summary.trade_yields)) {
+                r.data.summary.trade_yields.forEach(item => {
+                    const d = item.date;
+                    const val = parseFloat(item.value || 0);
+                    if (!d) return;
+                    
+                    if (!minDate || d < minDate) minDate = d;
+                    if (!maxDate || d > maxDate) maxDate = d;
+
+                    if (!dateYieldMap[d]) dateYieldMap[d] = 0;
+                    dateYieldMap[d] += val;
+                });
+            }
+        });
+
+        // 2. 补全日期序列（从 2024-01-01 或 minDate 到今天）
+        // 题目要求：x轴从2024年1月1日到今天
+        const startDateStr = "2024-01-01"; 
+        const todayStr = new Date().toISOString().split('T')[0];
+        // 如果数据里的 minDate 比 2024-01-01 还早，就用更早的；否则用 2024-01-01
+        let cursorDateStr = (minDate && minDate < startDateStr) ? minDate : startDateStr;
+        const endDateStr = todayStr;
+
+        const xData = [];
+        const yData = [];
+        let cumSum = 0;
+        
+        let cursor = new Date(cursorDateStr);
+        const end = new Date(endDateStr);
+
+        // 循环生成每一天
+        while (cursor <= end) {
+            const dStr = cursor.toISOString().split('T')[0];
+            const dayYield = dateYieldMap[dStr] || 0;
+            cumSum += dayYield;
+            
+            xData.push(dStr);
+            yData.push(parseFloat(cumSum.toFixed(2))); // 保留2位小数
+
+            cursor.setDate(cursor.getDate() + 1);
+        }
+
+        // 3. 渲染图表
+        const chartDom = document.getElementById('yieldCurveChart');
+        if (chartDom && typeof echarts !== 'undefined') {
+            const myChart = echarts.init(chartDom);
+            const option = {
+                title: {
+                    text: '📅 累计收益率曲线 (2024.1.1 至今)',
+                    left: 'center'
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function (params) {
+                        const p = params[0];
+                        return `${p.name}<br/>累计收益: <b>${p.value}%</b>`;
+                    }
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '3%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: xData
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: {
+                        formatter: '{value} %'
+                    }
+                },
+                series: [
+                    {
+                        name: '累计收益率',
+                        type: 'line',
+                        data: yData,
+                        smooth: true,
+                        showSymbol: false,
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(102, 126, 234, 0.5)' },
+                                { offset: 1, color: 'rgba(118, 75, 162, 0.1)' }
+                            ])
+                        },
+                        itemStyle: {
+                            color: '#667eea'
+                        },
+                        lineStyle: {
+                            width: 3
+                        }
+                    }
+                ]
+            };
+            myChart.setOption(option);
+            
+            // 下方表格渲染前自适应一次
+            window.addEventListener('resize', () => myChart.resize());
+        }
+    } catch (e) {
+        console.error("渲染收益曲线失败:", e);
     }
 
     // 计算汇总数据
