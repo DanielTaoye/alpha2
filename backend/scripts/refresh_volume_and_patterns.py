@@ -325,17 +325,35 @@ def load_stock_list_from_csv() -> List[Dict]:
         return stocks
     
     try:
-        with open(STOCK_LIST_FILE, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                code = row.get('code', '').strip()
-                name = row.get('name', '').strip()
-                if code:
-                    stocks.append({
-                        'code': code,
-                        'name': name,
-                        'table_name': f"basic_data_{code.lower()}"
-                    })
+        # Windows/国内常见：csv 可能是 gbk/gb2312/gb18030；这里做容错
+        tried = []
+        last_err = None
+        for enc in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+            try:
+                tried.append(enc)
+                with open(STOCK_LIST_FILE, "r", encoding=enc, newline="") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        code = (row.get("code") or "").strip()
+                        name = (row.get("name") or "").strip()
+                        if code:
+                            stocks.append({
+                                "code": code,
+                                "name": name,
+                                "table_name": f"basic_data_{code.lower()}",
+                            })
+                if stocks:
+                    logger.info(f"📄 stock_list.csv 读取成功，编码={enc}")
+                else:
+                    logger.warning(f"⚠️ stock_list.csv 读取成功但为空（编码={enc}，请检查表头是否为 code/name）")
+                last_err = None
+                break
+            except UnicodeDecodeError as e:
+                stocks = []
+                last_err = e
+                continue
+        if last_err is not None:
+            raise last_err
     except Exception as e:
         logger.error(f"❌ 读取CSV文件失败: {e}")
     
