@@ -72,9 +72,23 @@ class BacktestService:
             engine = (backtest_config.get('engine') or 'legacy').strip().lower()
             quiet = bool(backtest_config.get("quiet", False))
             skip_1day_check = bool(backtest_config.get("skip1dayCheck", False))
-            # 批量回测专用开关：按“触发当日开盘”定价（C日开盘买入，R日开盘卖出）
-            # 默认 False，保持现有口径（C次交易日开盘买入，R次交易日开盘卖出）
+            # 批量回测：买卖价口径（可自由组合）
+            # - TRIGGER_OPEN: 当日开盘
+            # - TRIGGER_CLOSE: 当日收盘
+            # - NEXT_OPEN: 次交易日开盘（默认，兼容旧逻辑）
+            # - NEXT_CLOSE: 次交易日收盘
+            buy_price_mode = (backtest_config.get("buyPriceMode") or backtest_config.get("buy_price_mode") or "").strip().upper() or None
+            sell_price_mode = (backtest_config.get("sellPriceMode") or backtest_config.get("sell_price_mode") or "").strip().upper() or None
+            # 兼容旧开关：useTriggerDayOpen=true 等价于 buy/sell 都用 TRIGGER_OPEN
             use_trigger_day_open = bool(backtest_config.get("useTriggerDayOpen", False))
+            if use_trigger_day_open:
+                buy_price_mode = buy_price_mode or "TRIGGER_OPEN"
+                sell_price_mode = sell_price_mode or "TRIGGER_OPEN"
+            buy_price_mode = buy_price_mode or "NEXT_OPEN"
+            sell_price_mode = sell_price_mode or "NEXT_OPEN"
+            # 批量回测专用开关：若最后持仓未遇到R，则按截止日/最新日“强制平仓”，把浮盈浮亏计入结果
+            # 默认 False（个股回测保持“持仓中”展示习惯），batch 会显式传 True
+            close_open_positions_at_end = bool(backtest_config.get("closeOpenPositionsAtEnd", False))
 
             def _log_info(msg: str, *args, **kwargs):
                 if not quiet:
@@ -152,6 +166,7 @@ class BacktestService:
             # - R模式：买入=next_trading_day(C触发日)开盘；卖出=next_trading_day(R触发日)开盘
             # - X天模式：买入同上；卖出=buy执行日 + X交易日 的当日开盘
             prefetched_open_map: Dict[str, tuple[float, str]] = {}
+            prefetched_close_map: Dict[str, tuple[float, str]] = {}
             try:
                 need_dates = set()
                 calendar = TradingCalendarService()
@@ -160,19 +175,11 @@ class BacktestService:
                         if point['type'] == 'C':
                             c_date = point.get('date')
                             if c_date:
-                                if use_trigger_day_open:
-                                    need_dates.add(c_date)
-                                else:
-                                    dt = datetime.strptime(c_date, '%Y-%m-%d').date()
-                                    need_dates.add(calendar.get_next_trading_day(dt).strftime('%Y-%m-%d'))
+                                need_dates.add(self._resolve_exec_day(c_date, buy_price_mode))
                         elif point['type'] == 'R':
                             r_date = point.get('date')
                             if r_date:
-                                if use_trigger_day_open:
-                                    need_dates.add(r_date)
-                                else:
-                                    dt = datetime.strptime(r_date, '%Y-%m-%d').date()
-                                    need_dates.add(calendar.get_next_trading_day(dt).strftime('%Y-%m-%d'))
+                                need_dates.add(self._resolve_exec_day(r_date, sell_price_mode))
                 else:
                     for point in cr_sequence:
                         if point['type'] != 'C':
@@ -187,10 +194,11 @@ class BacktestService:
                         need_dates.add(sell_exec.strftime('%Y-%m-%d'))
 
                 if need_dates:
-                    prefetched_open_map = self._prefetch_1day_open_map(table_name, sorted(list(need_dates)))
+                    prefetched_open_map, prefetched_close_map = self._prefetch_1day_price_maps(table_name, sorted(list(need_dates)))
             except Exception as e:
                 logger.warning(f"预取日K开盘价失败，回退为逐笔查询: {e}")
                 prefetched_open_map = {}
+                prefetched_close_map = {}
             
             # 回测出口模式：默认按R点卖；如配置 exitAfterDays 则按“C后X交易日”卖
             if exit_after_days_int is None:
@@ -211,21 +219,26 @@ class BacktestService:
                         r_date = point['date']
                         _log_info(f"找到配对: C{c_date} -> R{r_date}")
 
-                        # 买入/卖出价口径：
-                        # - 默认：C次交易日开盘买入，R次交易日开盘卖出（现有逻辑）
-                        # - 勾选：C当日开盘买入，R当日开盘卖出（批量回测新增）
-                        if use_trigger_day_open:
-                            buy = self._get_1day_open_on_or_after_date(table_name, c_date, prefetched_open_map)
-                        else:
-                            buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date, prefetched_open_map)
+                        # 买入价：按 C 的 price_mode 执行
+                        buy = self._get_1day_price_by_mode(
+                            table_name=table_name,
+                            trigger_date=c_date,
+                            mode=buy_price_mode,
+                            open_map=prefetched_open_map,
+                            close_map=prefetched_close_map,
+                        )
                         if buy is None:
                             _log_warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
                             current_c = None
                             continue
-                        if use_trigger_day_open:
-                            sell = self._get_1day_open_on_or_after_date(table_name, r_date, prefetched_open_map)
-                        else:
-                            sell = self._get_next_trading_day_1day_open_with_time(table_name, r_date, prefetched_open_map)
+                        # 卖出价：按 R 的 price_mode 执行
+                        sell = self._get_1day_price_by_mode(
+                            table_name=table_name,
+                            trigger_date=r_date,
+                            mode=sell_price_mode,
+                            open_map=prefetched_open_map,
+                            close_map=prefetched_close_map,
+                        )
                         if sell is None:
                             _log_warning(f"⚠️ 无法获取R点{r_date}后的卖出价，跳过此交易")
                             current_c = None
@@ -250,7 +263,7 @@ class BacktestService:
                             return_rate=return_rate,
                             status='completed',
                             days=days,
-                            exit_reason='R点卖出' + ('(同日开盘)' if use_trigger_day_open else '')
+                            exit_reason=f"R点卖出({buy_price_mode}->{sell_price_mode})"
                         ))
 
                         _log_info(
@@ -318,39 +331,85 @@ class BacktestService:
             # 检查是否还有未卖出的C点（持仓中）
             if current_c is not None:
                 c_date = current_c['triggerDate']
-                buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date, prefetched_open_map)
+                # 决定“截止日”（用于强制平仓/浮盈浮亏）
+                # - 有 endDate：以 endDate 为准
+                # - 无 endDate：以表内最新1day日期为准；兜底用今天
+                exit_day_str = end_date or self._get_latest_1day_date(table_name) or datetime.now().strftime('%Y-%m-%d')
+
+                # 买入价：按 C 的 price_mode 执行（若取不到且强制平仓，则回退为 TRIGGER_OPEN，避免全跳过）
+                buy = self._get_1day_price_by_mode(
+                    table_name=table_name,
+                    trigger_date=c_date,
+                    mode=buy_price_mode,
+                    open_map=prefetched_open_map,
+                    close_map=prefetched_close_map,
+                )
+                if buy is None and close_open_positions_at_end:
+                    buy = self._get_1day_price_by_mode(
+                        table_name=table_name,
+                        trigger_date=c_date,
+                        mode="TRIGGER_OPEN",
+                        open_map=prefetched_open_map,
+                        close_map=prefetched_close_map,
+                    )
                 
                 if buy is not None:
                     buy_price, buy_time = buy
-                    # 获取最新价格（日K线的最新收盘价，或截止到endDate）
-                    current_price = self._get_latest_price(table_name) if end_date is None else self._get_latest_price_up_to(table_name, end_date)
-                    
-                    if current_price is not None:
-                        # 计算当前收益率
-                        return_rate = ((current_price - buy_price) / buy_price) * 100
-                        
-                        # 计算持仓天数
-                        c_datetime = datetime.strptime(c_date, '%Y-%m-%d')
-                        today = datetime.now()
-                        days = (today - c_datetime).days
-                        
-                        _log_info(f"持仓中: C{c_date}买{buy_price}，当前价{current_price}，浮动盈亏{return_rate:.2f}%，持仓{days}天")
-                        
-                        trades.append(self._build_trade_row(
-                            current_c=current_c,
-                            buy_price=buy_price,
-                            buy_time=buy_time,
-                            exit_point=None,
-                            exit_trigger_date='持仓中',
-                            sell_price=current_price,
-                            sell_time=None,
-                            return_rate=return_rate,
-                            status='holding',
-                            days=days,
-                            exit_reason='持仓中'
-                        ))
+                    # 卖出价：虚拟R，按 R 的 price_mode 执行（以 exit_day_str 作为“触发日”）
+                    sell = self._get_1day_price_by_mode(
+                        table_name=table_name,
+                        trigger_date=exit_day_str,
+                        mode=sell_price_mode,
+                        open_map=prefetched_open_map,
+                        close_map=prefetched_close_map,
+                    )
+                    sell_price = sell[0] if sell is not None else None
+                    sell_time = sell[1] if sell is not None else None
+
+                    if sell_price is not None:
+                        # 计算收益率
+                        return_rate = ((sell_price - buy_price) / buy_price) * 100
+
+                        # 计算持仓天数：以“触发C日 -> 截止日”粗略估计
+                        try:
+                            c_datetime = datetime.strptime(c_date, '%Y-%m-%d')
+                            end_dt = datetime.strptime(exit_day_str, '%Y-%m-%d')
+                            days = (end_dt - c_datetime).days
+                        except Exception:
+                            days = None
+
+                        if close_open_positions_at_end:
+                            # 批量回测：把截止日当作“虚拟R”强制平仓，计入 completed
+                            trades.append(self._build_trade_row(
+                                current_c=current_c,
+                                buy_price=buy_price,
+                                buy_time=buy_time,
+                                exit_point=None,
+                                exit_trigger_date=exit_day_str,
+                                sell_price=sell_price,
+                                sell_time=sell_time,
+                                return_rate=return_rate,
+                                status='completed',
+                                days=days,
+                                exit_reason=f"无R，按截止日{exit_day_str}强制卖出({buy_price_mode}->{sell_price_mode})"
+                            ))
+                        else:
+                            # 个股回测：保持原样“持仓中”，但仍输出浮盈浮亏
+                            trades.append(self._build_trade_row(
+                                current_c=current_c,
+                                buy_price=buy_price,
+                                buy_time=buy_time,
+                                exit_point=None,
+                                exit_trigger_date='持仓中',
+                                sell_price=sell_price,
+                                sell_time=sell_time,
+                                return_rate=return_rate,
+                                status='holding',
+                                days=days,
+                                exit_reason='持仓中'
+                            ))
                     else:
-                        _log_warning(f"无法获取最新价格，持仓{c_date}不计入统计")
+                        _log_warning(f"无法获取截止日/最新价格，持仓{c_date}不计入统计")
                         trades.append(self._build_trade_row(
                             current_c=current_c,
                             buy_price=buy_price,
@@ -360,9 +419,9 @@ class BacktestService:
                             sell_price=None,
                             sell_time=None,
                             return_rate=None,
-                            status='holding',
+                            status='holding' if not close_open_positions_at_end else 'completed',
                             days=None,
-                            exit_reason='持仓中(无最新价)'
+                            exit_reason='持仓中(无最新价)' if not close_open_positions_at_end else '无R强制卖出(无最新价)'
                         ))
             
             # 计算汇总统计
@@ -374,7 +433,10 @@ class BacktestService:
                 'endDate': end_date,
                 'onlyGoldenC': only_golden_c,
                 'exitAfterDays': exit_after_days_int,
-                'useTriggerDayOpen': use_trigger_day_open
+                'useTriggerDayOpen': use_trigger_day_open,
+                'buyPriceMode': buy_price_mode,
+                'sellPriceMode': sell_price_mode,
+                'closeOpenPositionsAtEnd': close_open_positions_at_end,
             }
 
             # 可选：使用 backtrader 引擎复算组合层面收益（不改变每笔交易定价规则）
@@ -820,6 +882,171 @@ class BacktestService:
                 if conn:
                     conn.close()
 
+    def _prefetch_1day_price_maps(
+        self,
+        table_name: str,
+        day_strs: List[str],
+    ) -> tuple[Dict[str, tuple[float, str]], Dict[str, tuple[float, str]]]:
+        """
+        一次性预取多个交易日的 1day 开盘/收盘价与时间戳，减少逐笔查询。
+        返回：(open_map, close_map)
+        - open_map: { 'YYYY-MM-DD': (open_price, 'YYYY-MM-DD HH:MM:SS') }
+        - close_map: { 'YYYY-MM-DD': (close_price, 'YYYY-MM-DD HH:MM:SS') }
+        """
+        if not day_strs:
+            return {}, {}
+        conn = None
+        cursor = None
+        try:
+            start_ts = f"{min(day_strs)} 00:00:00"
+            end_ts = f"{max(day_strs)} 23:59:59"
+
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT shi_jian, kai_pan_jia, shou_pan_jia
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian >= %s
+                  AND shi_jian <= %s
+                ORDER BY shi_jian ASC
+            """
+            cursor.execute(query, (start_ts, end_ts))
+            rows = cursor.fetchall() or []
+            need_set = set(day_strs)
+            open_map: Dict[str, tuple[float, str]] = {}
+            close_map: Dict[str, tuple[float, str]] = {}
+            for r in rows:
+                ts = r.get('shi_jian')
+                if ts is None:
+                    continue
+                day = str(ts)[:10]
+                if day not in need_set:
+                    continue
+                if day not in open_map and r.get("kai_pan_jia") is not None:
+                    try:
+                        open_map[day] = (float(r["kai_pan_jia"]), str(ts))
+                    except Exception:
+                        pass
+                if day not in close_map and r.get("shou_pan_jia") is not None:
+                    try:
+                        close_map[day] = (float(r["shou_pan_jia"]), str(ts))
+                    except Exception:
+                        pass
+            return open_map, close_map
+        finally:
+            try:
+                if cursor:
+                    cursor.close()
+            finally:
+                if conn:
+                    conn.close()
+
+    @staticmethod
+    def _resolve_exec_day(trigger_date: str, mode: str) -> str:
+        """
+        将“触发日 + mode”解析为执行日(YYYY-MM-DD)。
+        TRIGGER_*：执行日=触发日；NEXT_*：执行日=触发日的次交易日。
+        """
+        d = (trigger_date or "").strip()[:10]
+        m = (mode or "").strip().upper()
+        if not d:
+            return d
+        if m.startswith("NEXT_"):
+            try:
+                dt = datetime.strptime(d, "%Y-%m-%d").date()
+                nd = TradingCalendarService.get_next_trading_day(dt).strftime("%Y-%m-%d")
+                return nd
+            except Exception:
+                return d
+        return d
+
+    def _get_1day_price_by_mode(
+        self,
+        table_name: str,
+        trigger_date: str,
+        mode: str,
+        open_map: Optional[Dict[str, tuple[float, str]]] = None,
+        close_map: Optional[Dict[str, tuple[float, str]]] = None,
+    ) -> Optional[tuple[float, str]]:
+        """
+        按 mode 获取执行日的 1day 开盘/收盘价（带时间戳）。
+        mode: TRIGGER_OPEN/TRIGGER_CLOSE/NEXT_OPEN/NEXT_CLOSE
+        """
+        exec_day = self._resolve_exec_day(trigger_date, mode)
+        m = (mode or "").strip().upper()
+        if not exec_day:
+            return None
+        if m.endswith("_OPEN"):
+            return self._get_1day_open_on_or_after_date(table_name, exec_day, open_map)
+        if m.endswith("_CLOSE"):
+            return self._get_1day_close_on_or_after_date(table_name, exec_day, close_map)
+        # 兜底：未知 mode 当成 NEXT_OPEN
+        return self._get_next_trading_day_1day_open_with_time(table_name, trigger_date, open_map)
+
+    def _get_1day_close_on_or_after_date(
+        self,
+        table_name: str,
+        day_str: str,
+        close_map: Optional[Dict[str, tuple[float, str]]] = None
+    ) -> Optional[tuple[float, str]]:
+        """
+        获取 day_str 当日的 1day 收盘价；若当日缺数据，则回退取 >= 当日 00:00:00 的第一条 1day。
+        返回：(close_price, shi_jian)
+        """
+        if not day_str:
+            return None
+
+        if close_map is not None:
+            cached = close_map.get(day_str)
+            if cached is not None:
+                return cached
+
+        conn = None
+        cursor = None
+        try:
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            # 1) 严格当日
+            query_exact = f"""
+                SELECT shou_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND DATE(shi_jian) = %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query_exact, (day_str,))
+            row = cursor.fetchone()
+            if row and row.get("shou_pan_jia") is not None and row.get("shi_jian") is not None:
+                return float(row["shou_pan_jia"]), str(row["shi_jian"])
+
+            # 2) 回退：>= 当日 00:00:00 的第一条 1day
+            start_ts = f"{day_str} 00:00:00"
+            query_fb = f"""
+                SELECT shou_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian >= %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query_fb, (start_ts,))
+            row2 = cursor.fetchone()
+            if row2 and row2.get("shou_pan_jia") is not None and row2.get("shi_jian") is not None:
+                return float(row2["shou_pan_jia"]), str(row2["shi_jian"])
+            return None
+        except Exception as e:
+            logger.error(f"获取当日/后续日K收盘价失败: {e}", exc_info=True)
+            return None
+        finally:
+            try:
+                if cursor:
+                    cursor.close()
+            finally:
+                if conn:
+                    conn.close()
+
     def _get_latest_price_up_to(self, table_name: str, end_date: str) -> Optional[float]:
         """
         获取截止到 end_date（含）最近的日K收盘价
@@ -849,6 +1076,37 @@ class BacktestService:
             if conn:
                 cursor.close()
                 conn.close()
+
+    def _get_latest_1day_date(self, table_name: str) -> Optional[str]:
+        """
+        获取表内最新的 1day 日期（YYYY-MM-DD）。
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                ORDER BY shi_jian DESC
+                LIMIT 1
+            """
+            cursor.execute(query)
+            row = cursor.fetchone()
+            if row and row.get("shi_jian") is not None:
+                return str(row["shi_jian"])[:10]
+            return None
+        except Exception:
+            return None
+        finally:
+            try:
+                if cursor:
+                    cursor.close()
+            finally:
+                if conn:
+                    conn.close()
 
     def _load_1day_df(self, table_name: str, start_ts: str, end_ts: str) -> pd.DataFrame:
         """

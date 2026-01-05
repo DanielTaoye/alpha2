@@ -409,11 +409,20 @@
 
             <div class="control-row">
                 <label class="control-label">买卖价口径:</label>
-                <label style="display:flex; align-items:center; gap:8px; color:#333;">
-                    <input type="checkbox" id="btUseTriggerDayOpen">
-                    同日开盘买卖（C日开盘买入，R日开盘卖出）
-                </label>
-                <span style="color:#666; font-size:14px;">默认：C日下一交易日开盘 → R日下一交易日开盘</span>
+                <span style="color:#666; font-size:14px;">C执行价</span>
+                <select class="strategy-select" id="btBuyPriceMode" style="max-width: 260px;">
+                    <option value="NEXT_OPEN" selected>C日次日开盘</option>
+                    <option value="TRIGGER_OPEN">C日开盘</option>
+                    <option value="TRIGGER_CLOSE">C日收盘</option>
+                    <option value="NEXT_CLOSE">C日次日收盘</option>
+                </select>
+                <span style="color:#666; font-size:14px;">R执行价</span>
+                <select class="strategy-select" id="btSellPriceMode" style="max-width: 260px;">
+                    <option value="NEXT_OPEN" selected>R日次日开盘</option>
+                    <option value="TRIGGER_OPEN">R日开盘</option>
+                    <option value="TRIGGER_CLOSE">R日收盘</option>
+                    <option value="NEXT_CLOSE">R日次日收盘</option>
+                </select>
             </div>
 
             <div class="control-row">

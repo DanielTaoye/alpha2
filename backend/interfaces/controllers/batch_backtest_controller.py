@@ -19,6 +19,12 @@ class BatchBacktestController:
             period = data.get("period") or "day"
             concurrency = data.get("concurrency") or 2
             result_mode = data.get("resultMode") or data.get("result_mode") or "summary"
+            per_stock_timeout_sec = (
+                data.get("perStockTimeoutSec")
+                or data.get("per_stock_timeout_sec")
+                or (backtest_config.get("perStockTimeoutSec") if isinstance(backtest_config, dict) else None)
+                or (backtest_config.get("per_stock_timeout_sec") if isinstance(backtest_config, dict) else None)
+            )
 
             if not isinstance(stocks, list) or not stocks:
                 return jsonify(ResponseBuilder.error("stocks不能为空", code=400)), 400
@@ -30,6 +36,7 @@ class BatchBacktestController:
                 period=period,
                 concurrency=concurrency,
                 result_mode=result_mode,
+                per_stock_timeout_sec=per_stock_timeout_sec,
             )
             return jsonify(ResponseBuilder.success({"jobId": job_id}, "batch_backtest_started")), 200
         except Exception as e:

@@ -48,7 +48,8 @@ class BatchBacktestService:
     _lock = Lock()
     _jobs: Dict[str, BatchJobStatus] = {}
     _cancel_flags: Dict[str, bool] = {}
-    _per_stock_timeout_sec: int = 120
+    # 单股票超时（秒）：默认拉长，避免 1000 股批量时排队/慢股导致大量误判
+    _per_stock_timeout_sec: int = 480
     _tls = local()  # 线程内复用对象，避免每只股票重复初始化
 
     @classmethod
@@ -86,6 +87,7 @@ class BatchBacktestService:
         period: str = "day",
         concurrency: int = 50,
         result_mode: str = "summary",
+        per_stock_timeout_sec: Optional[int] = None,
     ) -> str:
         job_id = uuid4().hex
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -110,7 +112,7 @@ class BatchBacktestService:
 
         t = Thread(
             target=cls._run_job,
-            args=(job_id, stocks, stock_nature, backtest_config, period, concurrency, result_mode),
+            args=(job_id, stocks, stock_nature, backtest_config, period, concurrency, result_mode, per_stock_timeout_sec),
             daemon=True,
         )
         t.start()
@@ -180,10 +182,18 @@ class BatchBacktestService:
         period: str,
         concurrency: int,
         result_mode: str,
+        per_stock_timeout_sec: Optional[int] = None,
     ):
         try:
             conc = max(1, min(int(concurrency or 1), 50))
-            logger.info(f"[batch_backtest] job={job_id} start, total={len(stocks)}, concurrency={conc}")
+            timeout_sec = cls._per_stock_timeout_sec
+            try:
+                if per_stock_timeout_sec is not None:
+                    timeout_sec = max(30, int(per_stock_timeout_sec))
+            except Exception:
+                timeout_sec = cls._per_stock_timeout_sec
+
+            logger.info(f"[batch_backtest] job={job_id} start, total={len(stocks)}, concurrency={conc}, per_stock_timeout_sec={timeout_sec}")
 
             def worker(idx_stock):
                 idx, stock = idx_stock
@@ -206,17 +216,23 @@ class BatchBacktestService:
             skip = 0
             results = [None for _ in range(len(stocks))]
 
+            # 关键优化：不要一次性 submit 1000 个 future。
+            # 否则大量任务会在 executor 队列里排队，start_ts 从“提交时”算起会导致误判超时。
             ex = ThreadPoolExecutor(max_workers=conc)
-            futures = []
-            future_meta: Dict[Any, tuple[int, Any, float]] = {}
+            future_meta: Dict[Any, tuple[int, Any, float]] = {}  # fut -> (idx, stock, start_ts)
             try:
-                for i, s in enumerate(stocks):
-                    fut = ex.submit(worker, (i, s))
-                    futures.append(fut)
-                    future_meta[fut] = (i, s, time.monotonic())
+                next_i = 0
+                pending: set = set()
 
-                pending = set(futures)
-                # 用 wait + 超时扫描：单股票超过 30s 仍未返回，则记为超时并“自动下一个”
+                # 先填满 in-flight（最多 conc 个）
+                while next_i < len(stocks) and len(pending) < conc:
+                    s = stocks[next_i]
+                    fut = ex.submit(worker, (next_i, s))
+                    pending.add(fut)
+                    future_meta[fut] = (next_i, s, time.monotonic())
+                    next_i += 1
+
+                # 用 wait + 超时扫描：单股票超过 timeout_sec 仍未返回，则记为超时并“自动下一个”
                 while pending:
                     done_set, _ = wait(pending, timeout=0.4, return_when=FIRST_COMPLETED)
                     now = time.monotonic()
@@ -252,6 +268,14 @@ class BatchBacktestService:
                             message="running",
                         )
 
+                        # 补充提交下一个任务（保持 in-flight 规模稳定）
+                        if not cls._is_cancelled(job_id) and next_i < len(stocks):
+                            s = stocks[next_i]
+                            nfut = ex.submit(worker, (next_i, s))
+                            pending.add(nfut)
+                            future_meta[nfut] = (next_i, s, time.monotonic())
+                            next_i += 1
+
                     # 扫描超时（不杀线程，只是不再等待它；并把它计入 finished，让进度能继续走）
                     for fut in list(pending):
                         idx, stock, start_ts = future_meta.get(fut, (-1, None, now))
@@ -260,12 +284,12 @@ class BatchBacktestService:
                         if results[idx] is not None:
                             pending.discard(fut)
                             continue
-                        if now - start_ts >= float(cls._per_stock_timeout_sec):
+                        if now - start_ts >= float(timeout_sec):
                             results[idx] = {
                                 "stock": stock,
                                 "success": False,
                                 "timeout": True,
-                                "message": f"超时({cls._per_stock_timeout_sec}s)已跳过",
+                                "message": f"超时({timeout_sec}s)已跳过",
                             }
                             finished += 1
                             fail += 1
@@ -279,6 +303,13 @@ class BatchBacktestService:
                                 results=results,
                                 message="running",
                             )
+                            # 超时也继续补充下一个任务
+                            if not cls._is_cancelled(job_id) and next_i < len(stocks):
+                                s = stocks[next_i]
+                                nfut = ex.submit(worker, (next_i, s))
+                                pending.add(nfut)
+                                future_meta[nfut] = (next_i, s, time.monotonic())
+                                next_i += 1
 
                     # 打断：把仍未落盘的标记为“已取消(未执行)”并结束
                     if cls._is_cancelled(job_id):
@@ -297,6 +328,18 @@ class BatchBacktestService:
                             finished += 1
                             skip += 1
                         pending.clear()
+                        # 取消后：把队列里还没提交的也直接标记跳过
+                        while next_i < len(stocks):
+                            stock = stocks[next_i]
+                            results[next_i] = {
+                                "stock": stock,
+                                "success": True,
+                                "skipped": True,
+                                "message": "已取消(未执行)",
+                            }
+                            finished += 1
+                            skip += 1
+                            next_i += 1
                         cls._set_status(
                             job_id,
                             finished=finished,
@@ -309,8 +352,9 @@ class BatchBacktestService:
                         break
             finally:
                 cancelled = cls._is_cancelled(job_id)
-                # 取消时不等待线程池把所有计算跑完；超时的单股任务也不阻塞整个 job 结束
-                ex.shutdown(wait=not cancelled, cancel_futures=cancelled)
+                # 关键修复：无论是否取消，都不等待 executor 内“已超时但仍在跑”的任务，否则 job 会被拖死。
+                # cancel_futures 仅能取消尚未开始执行的任务。
+                ex.shutdown(wait=False, cancel_futures=cancelled)
 
             cancelled = cls._is_cancelled(job_id)
             cls._set_status(
@@ -451,6 +495,8 @@ class BatchBacktestService:
         bt_cfg = dict(backtest_config or {})
         bt_cfg.setdefault("quiet", True)
         bt_cfg.setdefault("skip1dayCheck", True)
+        # 批量回测：若最后只有C没有R，也要把浮盈浮亏计入结果（将截止日视为“虚拟R”强制平仓）
+        bt_cfg.setdefault("closeOpenPositionsAtEnd", True)
 
         bt = backtest_service.calculate_backtest(
             stock_code=stock_code,
