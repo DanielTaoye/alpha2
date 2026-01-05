@@ -408,6 +408,15 @@
             </div>
 
             <div class="control-row">
+                <label class="control-label">买卖价口径:</label>
+                <label style="display:flex; align-items:center; gap:8px; color:#333;">
+                    <input type="checkbox" id="btUseTriggerDayOpen">
+                    同日开盘买卖（C日开盘买入，R日开盘卖出）
+                </label>
+                <span style="color:#666; font-size:14px;">默认：C日下一交易日开盘 → R日下一交易日开盘</span>
+            </div>
+
+            <div class="control-row">
                 <label class="control-label">引擎:</label>
                 <select class="strategy-select" id="btEngine" style="max-width: 280px;">
                     <option value="legacy">legacy(现有逻辑)</option>

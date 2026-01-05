@@ -72,6 +72,9 @@ class BacktestService:
             engine = (backtest_config.get('engine') or 'legacy').strip().lower()
             quiet = bool(backtest_config.get("quiet", False))
             skip_1day_check = bool(backtest_config.get("skip1dayCheck", False))
+            # 批量回测专用开关：按“触发当日开盘”定价（C日开盘买入，R日开盘卖出）
+            # 默认 False，保持现有口径（C次交易日开盘买入，R次交易日开盘卖出）
+            use_trigger_day_open = bool(backtest_config.get("useTriggerDayOpen", False))
 
             def _log_info(msg: str, *args, **kwargs):
                 if not quiet:
@@ -157,13 +160,19 @@ class BacktestService:
                         if point['type'] == 'C':
                             c_date = point.get('date')
                             if c_date:
-                                dt = datetime.strptime(c_date, '%Y-%m-%d').date()
-                                need_dates.add(calendar.get_next_trading_day(dt).strftime('%Y-%m-%d'))
+                                if use_trigger_day_open:
+                                    need_dates.add(c_date)
+                                else:
+                                    dt = datetime.strptime(c_date, '%Y-%m-%d').date()
+                                    need_dates.add(calendar.get_next_trading_day(dt).strftime('%Y-%m-%d'))
                         elif point['type'] == 'R':
                             r_date = point.get('date')
                             if r_date:
-                                dt = datetime.strptime(r_date, '%Y-%m-%d').date()
-                                need_dates.add(calendar.get_next_trading_day(dt).strftime('%Y-%m-%d'))
+                                if use_trigger_day_open:
+                                    need_dates.add(r_date)
+                                else:
+                                    dt = datetime.strptime(r_date, '%Y-%m-%d').date()
+                                    need_dates.add(calendar.get_next_trading_day(dt).strftime('%Y-%m-%d'))
                 else:
                     for point in cr_sequence:
                         if point['type'] != 'C':
@@ -202,14 +211,21 @@ class BacktestService:
                         r_date = point['date']
                         _log_info(f"找到配对: C{c_date} -> R{r_date}")
 
-                        # 买入价：次个交易日的日K开盘价（peroid_type='1day'）
-                        buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date, prefetched_open_map)
+                        # 买入/卖出价口径：
+                        # - 默认：C次交易日开盘买入，R次交易日开盘卖出（现有逻辑）
+                        # - 勾选：C当日开盘买入，R当日开盘卖出（批量回测新增）
+                        if use_trigger_day_open:
+                            buy = self._get_1day_open_on_or_after_date(table_name, c_date, prefetched_open_map)
+                        else:
+                            buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date, prefetched_open_map)
                         if buy is None:
                             _log_warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
                             current_c = None
                             continue
-                        # 卖出价：次个交易日的日K开盘价（peroid_type='1day'）
-                        sell = self._get_next_trading_day_1day_open_with_time(table_name, r_date, prefetched_open_map)
+                        if use_trigger_day_open:
+                            sell = self._get_1day_open_on_or_after_date(table_name, r_date, prefetched_open_map)
+                        else:
+                            sell = self._get_next_trading_day_1day_open_with_time(table_name, r_date, prefetched_open_map)
                         if sell is None:
                             _log_warning(f"⚠️ 无法获取R点{r_date}后的卖出价，跳过此交易")
                             current_c = None
@@ -234,7 +250,7 @@ class BacktestService:
                             return_rate=return_rate,
                             status='completed',
                             days=days,
-                            exit_reason='R点卖出'
+                            exit_reason='R点卖出' + ('(同日开盘)' if use_trigger_day_open else '')
                         ))
 
                         _log_info(
@@ -357,7 +373,8 @@ class BacktestService:
                 'startDate': start_date,
                 'endDate': end_date,
                 'onlyGoldenC': only_golden_c,
-                'exitAfterDays': exit_after_days_int
+                'exitAfterDays': exit_after_days_int,
+                'useTriggerDayOpen': use_trigger_day_open
             }
 
             # 可选：使用 backtrader 引擎复算组合层面收益（不改变每笔交易定价规则）
@@ -702,6 +719,55 @@ class BacktestService:
             if conn:
                 cursor.close()
                 conn.close()
+
+    def _get_1day_open_on_or_after_date(
+        self,
+        table_name: str,
+        day_str: str,
+        open_map: Optional[Dict[str, tuple[float, str]]] = None
+    ) -> Optional[tuple[float, str]]:
+        """
+        获取 day_str 当日的 1day 开盘价；若当日缺数据，则回退取 >= 当日 00:00:00 的第一条 1day。
+        仅用于“同日开盘买卖”模式的容错，避免因为少量缺口导致整笔交易丢失。
+        """
+        if not day_str:
+            return None
+
+        # 1) 优先走 map / 严格当日
+        exact = self._get_1day_open_on_date(table_name, day_str, open_map=open_map)
+        if exact is not None:
+            return exact
+
+        # 2) 回退：>= 当日 00:00:00 的第一条 1day
+        conn = None
+        cursor = None
+        try:
+            start_ts = f"{day_str} 00:00:00"
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            query = f"""
+                SELECT kai_pan_jia, shi_jian
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian >= %s
+                ORDER BY shi_jian ASC
+                LIMIT 1
+            """
+            cursor.execute(query, (start_ts,))
+            result = cursor.fetchone()
+            if result and result.get('kai_pan_jia') is not None and result.get('shi_jian') is not None:
+                return float(result['kai_pan_jia']), str(result['shi_jian'])
+            return None
+        except Exception as e:
+            logger.error(f"获取当日/后续日K开盘价失败: {e}", exc_info=True)
+            return None
+        finally:
+            if conn:
+                try:
+                    if cursor:
+                        cursor.close()
+                finally:
+                    conn.close()
 
     def _prefetch_1day_open_map(self, table_name: str, day_strs: List[str]) -> Dict[str, tuple[float, str]]:
         """
