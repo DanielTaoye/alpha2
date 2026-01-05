@@ -55,6 +55,14 @@ class RPointPluginService:
         self._daily_chance_cache = {}  # {date_str: DailyChance}
         self._sorted_dates = []  # 🚀 性能优化：预排序日期列表，避免每次都 sorted()
         self._cr_history_cache = {}  # {(stock_code, cutoff_date): {'c': [...], 'r': [...]}}
+        # 🚀 性能优化：换手率缓存（优先来自已预加载的 daily_chance.huanshou）
+        # {date_str: huanshou_percent_float}
+        self._turnover_rate_cache = {}
+        # 懒加载只读库批量预取：仅在确实需要换手率且缓存缺失时触发一次
+        self._turnover_prefetch_attempted = False
+        self._turnover_prefetch_stock_code = None
+        self._turnover_prefetch_start_date = None
+        self._turnover_prefetch_end_date = None
     
     def init_cache(self, stock_code: str, start_date: str, end_date: str,
                    daily_list: Optional[list] = None,
@@ -84,9 +92,21 @@ class RPointPluginService:
         if daily_chance_list is None:
             daily_chance_list = self.daily_chance_repo.find_by_stock_code(stock_code, start_date, end_date)
         self._daily_chance_cache = {}
+        self._turnover_rate_cache = {}
+        self._turnover_prefetch_attempted = False
+        self._turnover_prefetch_stock_code = stock_code
+        self._turnover_prefetch_start_date = start_date
+        self._turnover_prefetch_end_date = end_date
         for dc in daily_chance_list:
             date_str = dc.date.strftime('%Y-%m-%d') if isinstance(dc.date, datetime) else str(dc.date)
             self._daily_chance_cache[date_str] = dc
+            try:
+                hs = getattr(dc, "huanshou", None)
+                if hs is not None:
+                    self._turnover_rate_cache[date_str] = float(hs)
+            except Exception:
+                # huanshou 不可解析时忽略
+                pass
         
         logger.info(f"R点插件缓存初始化完成: daily={len(self._daily_cache)}条, daily_chance={len(self._daily_chance_cache)}条")
     
@@ -95,6 +115,11 @@ class RPointPluginService:
         self._daily_cache = {}
         self._daily_chance_cache = {}
         self._sorted_dates = []
+        self._turnover_rate_cache = {}
+        self._turnover_prefetch_attempted = False
+        self._turnover_prefetch_stock_code = None
+        self._turnover_prefetch_start_date = None
+        self._turnover_prefetch_end_date = None
     
     def check_r_point(self, stock_code: str, date: datetime, c_point_date: Optional[datetime] = None,
                      ma_data: Optional[dict] = None, macd_data: Optional[dict] = None, 
@@ -2262,7 +2287,7 @@ class RPointPluginService:
     
     def _get_turnover_rate(self, stock_code: str, date_str: str) -> Optional[float]:
         """
-        从只读库查询换手率（huanshou）
+        获取换手率（huanshou）
         
         Args:
             stock_code: 股票代码
@@ -2274,6 +2299,42 @@ class RPointPluginService:
         Note:
             数据库中 huanshou 列存储的是小数形式，如 0.422 表示 0.422%
         """
+        # 1) 先走进程内缓存（init_cache 已批量填充）
+        try:
+            if date_str in self._turnover_rate_cache:
+                return self._turnover_rate_cache.get(date_str)
+        except Exception:
+            pass
+
+        # 2) 再从 daily_chance_cache 补齐（避免缓存没初始化或某天缺失）
+        try:
+            dc = self._daily_chance_cache.get(date_str)
+            if dc is not None:
+                hs = getattr(dc, "huanshou", None)
+                if hs is not None:
+                    val = float(hs)
+                    self._turnover_rate_cache[date_str] = val
+                    return val
+        except Exception:
+            pass
+
+        # 3) 懒加载兜底：只读库批量预取一次（只在确实缺失时触发，避免循环内N次建连/查询）
+        try:
+            if not self._turnover_prefetch_attempted:
+                self._turnover_prefetch_attempted = True
+                sc = self._turnover_prefetch_stock_code or stock_code
+                sd = self._turnover_prefetch_start_date
+                ed = self._turnover_prefetch_end_date
+                if sc and sd and ed:
+                    prefetched = self._prefetch_turnover_rates_from_readonly(sc, sd, ed)
+                    if prefetched:
+                        self._turnover_rate_cache.update(prefetched)
+                        if date_str in self._turnover_rate_cache:
+                            return self._turnover_rate_cache.get(date_str)
+        except Exception as e:
+            logger.debug(f"[换手率预取] {stock_code} {date_str} 懒加载失败: {e}")
+
+        # 4) 最后兜底：只读库单次查询（应极少触发）
         try:
             conn = pymysql.connect(**READONLY_DB_CONFIG)
             try:
@@ -2289,13 +2350,57 @@ class RPointPluginService:
                 if row and row.get('huanshou') is not None:
                     # 数据库存储的是小数形式，如 0.422 表示 0.422%
                     # 直接返回该值作为百分比
-                    return float(row['huanshou'])
+                    val = float(row['huanshou'])
+                    try:
+                        self._turnover_rate_cache[date_str] = val
+                    except Exception:
+                        pass
+                    return val
                 return None
             finally:
                 conn.close()
         except Exception as e:
             logger.debug(f"[换手率查询] {stock_code} {date_str} 查询失败: {e}")
             return None
+
+    def _prefetch_turnover_rates_from_readonly(self, stock_code: str, start_date: str, end_date: str) -> dict:
+        """
+        从只读库批量预取换手率，返回 {date_str: huanshou_float}。
+        仅作为兜底：当本地 b_daily_chance 未填充 huanshou 时使用，避免循环内多次建连。
+        """
+        result = {}
+        if not stock_code or not start_date or not end_date:
+            return result
+        conn = None
+        try:
+            conn = pymysql.connect(**READONLY_DB_CONFIG)
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            sql = """
+                SELECT DATE(date) AS d, huanshou
+                FROM b_daily_chance
+                WHERE stock_code = %s AND date >= %s AND date <= %s
+            """
+            cursor.execute(sql, (stock_code, start_date, end_date))
+            rows = cursor.fetchall() or []
+            for row in rows:
+                d = row.get("d")
+                hs = row.get("huanshou")
+                if d is None or hs is None:
+                    continue
+                try:
+                    date_key = str(d)
+                    result[date_key] = float(hs)
+                except Exception:
+                    continue
+            if result:
+                logger.info(f"[换手率预取] {stock_code} 命中 {len(result)} 条: {start_date}~{end_date}")
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+        return result
     
     def _check_short_term_stock_precondition(
         self, 
