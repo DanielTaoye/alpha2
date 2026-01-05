@@ -70,6 +70,16 @@ class BacktestService:
             only_golden_c = bool(backtest_config.get('onlyGoldenC', False))
             exit_after_days = backtest_config.get('exitAfterDays')
             engine = (backtest_config.get('engine') or 'legacy').strip().lower()
+            quiet = bool(backtest_config.get("quiet", False))
+            skip_1day_check = bool(backtest_config.get("skip1dayCheck", False))
+
+            def _log_info(msg: str, *args, **kwargs):
+                if not quiet:
+                    logger.info(msg, *args, **kwargs)
+
+            def _log_warning(msg: str, *args, **kwargs):
+                if not quiet:
+                    logger.warning(msg, *args, **kwargs)
 
             # exitAfterDays: None/"" -> None
             try:
@@ -82,15 +92,15 @@ class BacktestService:
             except Exception:
                 exit_after_days_int = None
 
-            logger.info(f"="*60)
-            logger.info(f"开始回测: 股票代码={stock_code}, 表名={table_name}")
-            logger.info(f"C点数量: {len(c_points)}, R点数量: {len(r_points)}")
-            logger.info(
+            _log_info(f"="*60)
+            _log_info(f"开始回测: 股票代码={stock_code}, 表名={table_name}")
+            _log_info(f"C点数量: {len(c_points)}, R点数量: {len(r_points)}")
+            _log_info(
                 f"回测配置: engine={engine}, startDate={start_date}, endDate={end_date}, onlyGoldenC={only_golden_c}, exitAfterDays={exit_after_days_int}"
             )
             
             if not c_points:
-                logger.warning("没有C点数据，无法回测")
+                _log_warning("没有C点数据，无法回测")
                 return {
                     'success': False,
                     'message': '没有C点数据',
@@ -98,16 +108,17 @@ class BacktestService:
                     'summary': {}
                 }
             
-            # 先检查表中是否有日K线数据（peroid_type='1day'）
-            has_1day_data = self._check_1day_data_cached(table_name)
-            if not has_1day_data:
-                logger.error(f"❌ 表{table_name}中没有日K线数据（peroid_type='1day'）")
-                return {
-                    'success': False,
-                    'message': '该股票数据库中没有日K线数据（1day），无法进行回测',
-                    'trades': [],
-                    'summary': {}
-                }
+            # 批量回测提速：允许跳过 1day COUNT 检查（每个表一次 COUNT，对于 1000 股是一笔不小的 DB 开销）
+            if not skip_1day_check:
+                has_1day_data = self._check_1day_data_cached(table_name)
+                if not has_1day_data:
+                    logger.error(f"❌ 表{table_name}中没有日K线数据（peroid_type='1day'）")
+                    return {
+                        'success': False,
+                        'message': '该股票数据库中没有日K线数据（1day），无法进行回测',
+                        'trades': [],
+                        'summary': {}
+                    }
             
             # 按日期排序C点和R点
             sorted_c_points = sorted(c_points, key=lambda x: x.get('triggerDate') or '')
@@ -128,7 +139,7 @@ class BacktestService:
             cr_sequence = [x for x in cr_sequence if x.get('date')]
             cr_sequence.sort(key=lambda x: x['date'])
             
-            logger.info(f"CR序列: {[x['type'] + x['date'] for x in cr_sequence]}")
+            _log_info(f"CR序列: {[x['type'] + x['date'] for x in cr_sequence]}")
             
             # 计算交易对：只看C-R配对，连续的C只取第一个
             trades = []
@@ -179,28 +190,28 @@ class BacktestService:
                         if current_c is None:
                             current_c = point['data']
                             c_date = point['date']
-                            logger.info(f"新C点: {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
+                            _log_info(f"新C点: {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
                         else:
-                            logger.info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c.get('triggerDate')}）")
+                            _log_info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c.get('triggerDate')}）")
                     elif point['type'] == 'R':
                         if current_c is None:
-                            logger.warning(f"忽略无效R点: {point['date']}（没有对应的C点）")
+                            _log_warning(f"忽略无效R点: {point['date']}（没有对应的C点）")
                             continue
 
                         c_date = current_c.get('triggerDate')
                         r_date = point['date']
-                        logger.info(f"找到配对: C{c_date} -> R{r_date}")
+                        _log_info(f"找到配对: C{c_date} -> R{r_date}")
 
                         # 买入价：次个交易日的日K开盘价（peroid_type='1day'）
                         buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date, prefetched_open_map)
                         if buy is None:
-                            logger.warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
+                            _log_warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
                             current_c = None
                             continue
                         # 卖出价：次个交易日的日K开盘价（peroid_type='1day'）
                         sell = self._get_next_trading_day_1day_open_with_time(table_name, r_date, prefetched_open_map)
                         if sell is None:
-                            logger.warning(f"⚠️ 无法获取R点{r_date}后的卖出价，跳过此交易")
+                            _log_warning(f"⚠️ 无法获取R点{r_date}后的卖出价，跳过此交易")
                             current_c = None
                             continue
 
@@ -226,7 +237,7 @@ class BacktestService:
                             exit_reason='R点卖出'
                         ))
 
-                        logger.info(
+                        _log_info(
                             f"✅ 交易完成: C{c_date}买{buy_price}({buy_time}) -> R{r_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%, {days}天"
                         )
                         current_c = None
@@ -237,16 +248,16 @@ class BacktestService:
                     if point['type'] != 'C':
                         continue
                     if current_c is not None:
-                        logger.info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c.get('triggerDate')}）")
+                        _log_info(f"忽略连续C点: {point['date']}（已有持仓C点{current_c.get('triggerDate')}）")
                         continue
 
                     current_c = point['data']
                     c_date = point['date']
-                    logger.info(f"新C点(按X天卖出模式): {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
+                    _log_info(f"新C点(按X天卖出模式): {c_date}, 策略: {current_c.get('strategyName', 'N/A')}")
 
                     buy = self._get_next_trading_day_1day_open_with_time(table_name, c_date, prefetched_open_map)
                     if buy is None:
-                        logger.warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
+                        _log_warning(f"⚠️ 无法获取C点{c_date}后的买入价，跳过此交易")
                         current_c = None
                         continue
                     
@@ -261,7 +272,7 @@ class BacktestService:
                     sell_trigger_date = sell_exec_date.strftime('%Y-%m-%d')
                     sell = self._get_1day_open_on_date(table_name, sell_trigger_date, prefetched_open_map)
                     if sell is None:
-                        logger.warning(f"⚠️ 无法获取卖出日{sell_trigger_date}的卖出价，跳过此交易")
+                        _log_warning(f"⚠️ 无法获取卖出日{sell_trigger_date}的卖出价，跳过此交易")
                         current_c = None
                         continue
                     
@@ -283,7 +294,7 @@ class BacktestService:
                         exit_reason=f'C点后{exit_after_days_int}个交易日卖出'
                     ))
                     
-                    logger.info(
+                    _log_info(
                         f"✅ 交易完成(按X天): C{c_date}买{buy_price}({buy_time}) -> {sell_trigger_date}卖{sell_price}({sell_time}), 收益率{return_rate:.2f}%"
                     )
                     current_c = None
@@ -307,7 +318,7 @@ class BacktestService:
                         today = datetime.now()
                         days = (today - c_datetime).days
                         
-                        logger.info(f"持仓中: C{c_date}买{buy_price}，当前价{current_price}，浮动盈亏{return_rate:.2f}%，持仓{days}天")
+                        _log_info(f"持仓中: C{c_date}买{buy_price}，当前价{current_price}，浮动盈亏{return_rate:.2f}%，持仓{days}天")
                         
                         trades.append(self._build_trade_row(
                             current_c=current_c,
@@ -323,7 +334,7 @@ class BacktestService:
                             exit_reason='持仓中'
                         ))
                     else:
-                        logger.warning(f"无法获取最新价格，持仓{c_date}不计入统计")
+                        _log_warning(f"无法获取最新价格，持仓{c_date}不计入统计")
                         trades.append(self._build_trade_row(
                             current_c=current_c,
                             buy_price=buy_price,

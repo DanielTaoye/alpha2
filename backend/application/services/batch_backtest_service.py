@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from threading import local
 
 from infrastructure.logging.logger import get_logger
 from application.services.kline_service import KLineApplicationService
@@ -48,6 +49,33 @@ class BatchBacktestService:
     _jobs: Dict[str, BatchJobStatus] = {}
     _cancel_flags: Dict[str, bool] = {}
     _per_stock_timeout_sec: int = 120
+    _tls = local()  # 线程内复用对象，避免每只股票重复初始化
+
+    @classmethod
+    def _get_thread_services(cls):
+        """
+        为线程池里的每个 worker 线程复用 service 实例，降低 1000 股场景下的初始化/配置加载开销。
+
+        注意：每个线程串行处理多个股票任务，所以复用是安全的；跨线程不共享。
+        """
+        svc = getattr(cls._tls, "svc", None)
+        if svc is None:
+            cls._tls.svc = {
+                "kline_service": KLineApplicationService(KLineRepositoryImpl()),
+                "cr_service": CRPointService(),
+                "backtest_service": BacktestService(),
+            }
+        return cls._tls.svc
+
+    @staticmethod
+    def _fast_parse_dt(ts: str) -> datetime:
+        """
+        更快的时间解析：优先 fromisoformat（兼容 'YYYY-MM-DD HH:MM:SS'），失败再回退 strptime。
+        """
+        try:
+            return datetime.fromisoformat(ts)
+        except Exception:
+            return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
 
     @classmethod
     def start_job(
@@ -333,10 +361,11 @@ class BatchBacktestService:
         if not table_name:
             table_name = f"basic_data_{stock_code.lower()}"
 
-        # 为了线程安全：每个任务都创建独立实例（CRPointService 内部有缓存）
-        kline_service = KLineApplicationService(KLineRepositoryImpl())
-        cr_service = CRPointService()
-        backtest_service = BacktestService()
+        # 线程池场景：线程内复用实例，避免 1000 股下的反复初始化开销
+        svc = cls._get_thread_services()
+        kline_service: KLineApplicationService = svc["kline_service"]
+        cr_service: CRPointService = svc["cr_service"]
+        backtest_service: BacktestService = svc["backtest_service"]
 
         start_date_str, end_date_str = cls._parse_date_range(backtest_config)
 
@@ -384,7 +413,7 @@ class BatchBacktestService:
             try:
                 kline_objects.append(
                     KLineData(
-                        time=datetime.strptime(k["time"], "%Y-%m-%d %H:%M:%S"),
+                        time=cls._fast_parse_dt(k["time"]),
                         open=k["open"],
                         high=k["high"],
                         low=k["low"],
@@ -418,12 +447,17 @@ class BatchBacktestService:
             return {"stock": stock, "success": True, "skipped": True, "message": "没有C点(已跳过)"}
 
         # 4) 回测
+        # 批量回测：默认静默日志 + 跳过“1day COUNT 检查”（我们已经成功读到K线，后续会自然失败/跳过）
+        bt_cfg = dict(backtest_config or {})
+        bt_cfg.setdefault("quiet", True)
+        bt_cfg.setdefault("skip1dayCheck", True)
+
         bt = backtest_service.calculate_backtest(
             stock_code=stock_code,
             table_name=table_name,
             c_points=merged_c,
             r_points=r_points,
-            backtest_config=backtest_config,
+            backtest_config=bt_cfg,
         )
         if not bt.get("success"):
             return {"stock": stock, "success": False, "message": bt.get("message") or "回测失败"}
