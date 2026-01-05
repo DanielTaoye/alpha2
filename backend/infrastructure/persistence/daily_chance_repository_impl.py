@@ -360,6 +360,7 @@ class DailyChanceRepositoryImpl(IDailyChanceRepository):
             volume_type=row.get('volume_type'),
             bullish_pattern=row.get('bullish_pattern'),
             bearish_pattern=row.get('bearish_pattern'),
+            huanshou=float(row['huanshou']) if row.get('huanshou') else None,
             created_at=row['created_at']
         )
 

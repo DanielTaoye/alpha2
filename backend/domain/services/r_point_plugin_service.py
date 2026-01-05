@@ -4,8 +4,24 @@ from datetime import datetime, timedelta, date
 from infrastructure.logging.logger import get_logger
 from domain.services.kline_pattern_service import KLinePatternService
 from domain.services.macd_service import MACDService
+import pymysql
+import pymysql.cursors
 
 logger = get_logger(__name__)
+
+# 只读库配置（用于查询换手率数据）
+READONLY_DB_CONFIG = {
+    'host': 'sh-cdbrg-8f14w39q.sql.tencentcdb.com',
+    'port': 25924,
+    'user': 'root',
+    'password': 'MrEPYZus7myr',
+    'database': 'stock',
+    'charset': 'utf8mb4',
+    'connect_timeout': 10,
+    'read_timeout': 10,
+}
+
+
 
 
 class RPointPluginResult:
@@ -249,6 +265,17 @@ class RPointPluginService:
             if not current_chance:
                 logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 无daily_chance数据，跳过检查")
                 return RPointPluginResult("乖离率偏离", False, "")
+            
+            # 短线股前置条件检查：阳线 + 换手率 > 前一日 × 1.5 + 换手率 >= 9%
+            stock_nature = current_chance.stock_nature or "波段"
+            if stock_nature == "短线":
+                precondition_passed, precondition_reason = self._check_short_term_stock_precondition(
+                    stock_code, date_str, current_data, stock_nature
+                )
+                if not precondition_passed:
+                    logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 短线股前置条件未满足: {precondition_reason}")
+                    return RPointPluginResult("乖离率偏离", False, "")
+
             
             # 预计算当日相对MA10的乖离度
             deviation = None
@@ -2232,6 +2259,107 @@ class RPointPluginService:
             "中长线": 10.0
         }
         return thresholds.get(stock_nature, 12.0)  # 默认波段
+    
+    def _get_turnover_rate(self, stock_code: str, date_str: str) -> Optional[float]:
+        """
+        从只读库查询换手率（huanshou）
+        
+        Args:
+            stock_code: 股票代码
+            date_str: 日期字符串 (YYYY-MM-DD)
+            
+        Returns:
+            换手率百分比，如 9.5 表示 9.5%；查询失败返回 None
+            
+        Note:
+            数据库中 huanshou 列存储的是小数形式，如 0.422 表示 0.422%
+        """
+        try:
+            conn = pymysql.connect(**READONLY_DB_CONFIG)
+            try:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                sql = """
+                    SELECT huanshou 
+                    FROM b_daily_chance 
+                    WHERE stock_code = %s AND DATE(date) = %s
+                    LIMIT 1
+                """
+                cursor.execute(sql, (stock_code, date_str))
+                row = cursor.fetchone()
+                if row and row.get('huanshou') is not None:
+                    # 数据库存储的是小数形式，如 0.422 表示 0.422%
+                    # 直接返回该值作为百分比
+                    return float(row['huanshou'])
+                return None
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"[换手率查询] {stock_code} {date_str} 查询失败: {e}")
+            return None
+    
+    def _check_short_term_stock_precondition(
+        self, 
+        stock_code: str, 
+        date_str: str, 
+        current_data, 
+        stock_nature: str
+    ) -> Tuple[bool, str]:
+        """
+        检查短线股的前置条件（仅对股性为"短线"的股票生效）
+        
+        条件（必须同时满足）：
+        1. 当日是阳线（收盘价 > 开盘价）
+        2. 今日换手率 > 前一日换手率 × 1.5
+        3. 今日换手率 >= 9%
+        
+        Args:
+            stock_code: 股票代码
+            date_str: 日期字符串
+            current_data: 当日K线数据
+            stock_nature: 股性
+            
+        Returns:
+            (是否满足条件, 不满足的原因)
+        """
+        # 只对短线股生效
+        if stock_nature != "短线":
+            return True, ""
+        
+        # 条件1: 当日必须是阳线
+        if not current_data or not current_data.close or not current_data.open:
+            return False, "无法获取当日K线数据"
+        
+        if current_data.close <= current_data.open:
+            return False, f"非阳线(收盘{current_data.close:.2f}<=开盘{current_data.open:.2f})"
+        
+        # 获取今日换手率
+        today_turnover = self._get_turnover_rate(stock_code, date_str)
+        if today_turnover is None:
+            return False, "无法获取今日换手率"
+        
+        # 条件3: 今日换手率 >= 9%
+        if today_turnover < 9.0:
+            return False, f"今日换手率{today_turnover:.2f}%<9%"
+        
+        # 获取前一交易日
+        prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+        if not prev_dates:
+            return False, "无法获取前一交易日"
+        
+        prev_date_str = prev_dates[0]
+        prev_turnover = self._get_turnover_rate(stock_code, prev_date_str)
+        if prev_turnover is None:
+            return False, f"无法获取前一日({prev_date_str})换手率"
+        
+        # 条件2: 今日换手率 > 前一日换手率 × 1.5
+        threshold = prev_turnover * 1.5
+        if today_turnover <= threshold:
+            return False, f"今日换手率{today_turnover:.2f}%<=前一日{prev_turnover:.2f}%×1.5={threshold:.2f}%"
+        
+        logger.debug(f"[短线股前置条件] {stock_code} {date_str} 满足: "
+                    f"阳线+今日换手率{today_turnover:.2f}%>前一日{prev_turnover:.2f}%×1.5且>=9%")
+        return True, ""
+
     
     def _check_bearish_kline_patterns(self, daily_data, stock_code: str = None) -> List[str]:
         """

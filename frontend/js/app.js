@@ -14,6 +14,7 @@ let bullishPatternMap = {}; // 存储多头组合数据，key为日期字符串�
 let bearishPatternMap = {}; // 存储空头组合数据，key为日期字符串，value为空头组合
 let supportPriceMap = {}; // 存储支撑线数据，key为日期字符串，value为支撑价格（整数，需除以100）
 let pressurePriceMap = {}; // 存储压力线数据，key为日期字符串，value为压力价格（整数，需除以100）
+let turnoverRateMap = {}; // 存储换手率数据，key为日期字符串，value为换手率（如9.5表示9.5%）
 let autoRefreshInterval = null; // 自动刷新定时器
 let predictedVolume = null; // 预测的成交量
 let predictedVolumeType = null; // 预测的成交量类型（基于预测成交量实时计算）
@@ -38,7 +39,7 @@ console.log = (...args) => {
 window.enableVerboseLog = (enabled = true) => {
     try {
         localStorage.setItem('enableVerboseLog', enabled ? '1' : '0');
-    } catch (e) {}
+    } catch (e) { }
     window.location.reload();
 };
 
@@ -48,7 +49,7 @@ function waitForECharts(timeout = 15000) {
         // 检查 ECharts 是否已经加载并验证
         function isEChartsReady() {
             try {
-                return typeof echarts !== 'undefined' 
+                return typeof echarts !== 'undefined'
                     && typeof echarts.init === 'function'
                     && window.echartsLoadStatus === 'success';
             } catch (e) {
@@ -70,7 +71,7 @@ function waitForECharts(timeout = 15000) {
         }
 
         const startTime = Date.now();
-        
+
         // 定期检查ECharts是否已加载
         const checkInterval = setInterval(() => {
             // 检查是否加载成功
@@ -80,14 +81,14 @@ function waitForECharts(timeout = 15000) {
                 resolve(echarts);
                 return;
             }
-            
+
             // 检查是否加载失败
             if (window.echartsLoadStatus === 'failed') {
                 clearInterval(checkInterval);
                 reject(new Error('ECharts加载失败：所有CDN都不可用'));
                 return;
             }
-            
+
             // 检查是否超时
             if (Date.now() - startTime > timeout) {
                 clearInterval(checkInterval);
@@ -101,7 +102,7 @@ function waitForECharts(timeout = 15000) {
 function updateStatus(online, text) {
     const indicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
-    
+
     if (indicator && statusText) {
         indicator.className = online ? 'status-indicator online' : 'status-indicator offline';
         statusText.textContent = text;
@@ -112,10 +113,10 @@ function updateStatus(online, text) {
 async function initApp() {
     try {
         updateStatus(false, '正在连接服务器...');
-        
+
         const response = await fetch(`${API_BASE_URL}/stock_groups`);
         const result = await response.json();
-        
+
         if (result.code === 200) {
             allStockGroups = result.data;
             updateStatus(true, `系统运行正常 - 已加载 ${getTotalStockCount()} 支股票`);
@@ -158,10 +159,10 @@ function getTotalStockCount() {
 // 选择策略
 function selectStrategy(strategy) {
     currentStrategy = strategy;
-    
+
     // 切换策略时停止自动刷新
     stopAutoRefresh();
-    
+
     document.querySelectorAll('.strategy-btn').forEach(btn => {
         btn.classList.remove('active');
         if (btn.textContent.includes(strategy)) {
@@ -179,9 +180,9 @@ function selectStrategy(strategy) {
 function updateStockList() {
     const stockSelect = document.getElementById('stockSelect');
     const stocks = allStockGroups[currentStrategy] || [];
-    
+
     stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
-    
+
     stocks.forEach(stock => {
         const option = document.createElement('option');
         option.value = stock.code;
@@ -220,18 +221,18 @@ let searchDebounceTimer = null;
 async function filterStocks() {
     const searchText = document.getElementById('searchInput').value.trim();
     const stockSelect = document.getElementById('stockSelect');
-    
+
     // 清除之前的定时器
     if (searchDebounceTimer) {
         clearTimeout(searchDebounceTimer);
     }
-    
+
     // 如果搜索框为空，显示当前策略下的股票
     if (!searchText) {
         updateStockList();
         return;
     }
-    
+
     // 防抖：延迟300ms执行搜索
     searchDebounceTimer = setTimeout(async () => {
         await performSearch(searchText, stockSelect);
@@ -244,17 +245,17 @@ async function performSearch(keyword, stockSelect) {
         // 显示加载状态
         stockSelect.innerHTML = '<option value="">正在搜索...</option>';
         stockSelect.disabled = true;
-        
+
         // 调用后端搜索接口
         const response = await fetch(`${API_BASE_URL}/stocks/search?keyword=${encodeURIComponent(keyword)}&limit=100`);
         const result = await response.json();
-        
+
         stockSelect.disabled = false;
         stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
-        
+
         if (result.code === 200 && result.data && result.data.length > 0) {
             const stocks = result.data;
-            
+
             stocks.forEach(stock => {
                 const option = document.createElement('option');
                 option.value = stock.code;
@@ -265,7 +266,7 @@ async function performSearch(keyword, stockSelect) {
                 option.dataset.nature = stock.nature; // 保存股性信息
                 stockSelect.appendChild(option);
             });
-            
+
             console.log(`搜索完成: 找到 ${stocks.length} 只股票`);
         } else {
             // 没有找到结果
@@ -275,14 +276,14 @@ async function performSearch(keyword, stockSelect) {
             option.disabled = true;
             stockSelect.appendChild(option);
         }
-        
+
         stockSelect.value = '';
-        
+
     } catch (error) {
         console.error('搜索股票失败:', error);
         stockSelect.disabled = false;
         stockSelect.innerHTML = '<option value="">-- 请选择股票 --</option>';
-        
+
         const option = document.createElement('option');
         option.value = '';
         option.textContent = '搜索失败，请稍后重试';
@@ -295,7 +296,7 @@ async function performSearch(keyword, stockSelect) {
 async function selectStock() {
     const stockSelect = document.getElementById('stockSelect');
     const selectedOption = stockSelect.options[stockSelect.selectedIndex];
-    
+
     if (!stockSelect.value) {
         showEmptyState();
         stopAutoRefresh(); // 停止自动刷新
@@ -334,10 +335,10 @@ function showEmptyState() {
 // 渲染股票视图
 function renderStockView(stockCode, stockName, tableName, stockNature = null) {
     const app = document.getElementById('app');
-    
+
     // 使用传入的股性，如果没有则使用当前策略
     const displayNature = stockNature || currentStrategy;
-    
+
     app.innerHTML = `
         <div class="stock-info-bar">
             <div class="stock-info">
@@ -436,7 +437,7 @@ async function changePeriod(period) {
 
         document.querySelectorAll('.period-btn').forEach(btn => {
             btn.classList.remove('active');
-            if (btn.textContent.includes(period) || 
+            if (btn.textContent.includes(period) ||
                 (period === '30min' && btn.textContent === '30分钟') ||
                 (period === 'day' && btn.textContent === '日K线') ||
                 (period === 'week' && btn.textContent === '周K线') ||
@@ -444,12 +445,12 @@ async function changePeriod(period) {
                 btn.classList.add('active');
             }
         });
-        
+
         // 更新回测按钮状态
         updateBacktestButtonState(period);
 
         await loadStockData(currentStockCode, currentTableName, period);
-        
+
     } catch (error) {
         console.error('切换周期失败:', error);
         const chartDom = document.getElementById('mainChart');
@@ -474,7 +475,7 @@ async function loadStockData(stockCode, tableName, period) {
     console.log(`股票代码: ${stockCode}`);
     console.log(`表名: ${tableName}`);
     console.log(`周期: ${period}`);
-    
+
     try {
         if (!stockCode || !tableName || !period) {
             throw new Error(`参数不完整: stockCode=${stockCode}, tableName=${tableName}, period=${period}`);
@@ -496,7 +497,7 @@ async function loadStockData(stockCode, tableName, period) {
         if (!chartDom) {
             throw new Error('找不到图表容器 mainChart');
         }
-        
+
         chartDom.innerHTML = `
             <div class="loading">
                 <div class="spinner"></div>
@@ -534,7 +535,7 @@ async function loadStockData(stockCode, tableName, period) {
         let klineData = klineResult.data.kline_data || klineResult.data;  // 改为 let，允许后续重新赋值
         const macdData = klineResult.data.macd || null;
         const maData = klineResult.data.ma || null;
-        
+
         if (!klineData || klineData.length === 0) {
             document.getElementById('mainChart').innerHTML = `
                 <div class="error">
@@ -553,7 +554,7 @@ async function loadStockData(stockCode, tableName, period) {
             window.currentMACDData = macdData;
             console.log(`[${period}] ✅ MACD数据已加载`, macdData);
         }
-        
+
         // 保存MA数据供图表使用
         if (maData) {
             window.currentMAData = maData;
@@ -579,7 +580,7 @@ async function loadStockData(stockCode, tableName, period) {
             bearishPatternMap = {};
             supportPriceMap = {};
             pressurePriceMap = {};
-            
+
             // 清空CR点数据（30分钟、周线、月线不应该显示CR点）
             crPointsData = {
                 c_points: [],
@@ -593,7 +594,7 @@ async function loadStockData(stockCode, tableName, period) {
         }
 
         console.log(`[${period}] 开始渲染K线，数据点数: ${klineData.length}`);
-        
+
         // 如果是日K线，尝试获取最新一天的实时K线数据
         if (period === 'day') {
             console.log('[日K线] 尝试获取最新一天的实时K线数据...');
@@ -604,21 +605,21 @@ async function loadStockData(stockCode, tableName, period) {
                     const beforeMergeLength = klineData.length;
                     klineData = mergeLatestKline(klineData, latestKlineData);
                     console.log(`[${period}] ✅ 最新K线数据已合并: ${beforeMergeLength} -> ${klineData.length}`);
-                    
+
                     // 验证klineData是一个有效的数组
                     console.log('[日K线] 验证klineData:', Array.isArray(klineData), '长度:', klineData.length);
                     console.log('[日K线] 最后一条K线:', klineData[klineData.length - 1]);
-                    
+
                     // 重新计算MA和MACD指标
                     console.log('[日K线] 重新计算MA和MACD指标...');
                     console.log('[日K线] 准备计算，K线数据长度:', klineData.length);
                     const newMacdData = calculateMACD(klineData);
                     const newMaData = calculateMA(klineData, [5, 10, 20]);
-                    
+
                     console.log('[日K线] 计算完成后检查:');
                     console.log('[日K线] klineData长度:', klineData.length);
                     console.log('[日K线] MA5长度:', newMaData.ma5?.length, 'MA10长度:', newMaData.ma10?.length, 'MA20长度:', newMaData.ma20?.length);
-                    
+
                     // 验证长度是否一致
                     if (newMaData.ma5 && newMaData.ma5.length === klineData.length) {
                         console.log(`✅ 成功: MA数据长度(${newMaData.ma5.length})与K线数据长度(${klineData.length})匹配！`);
@@ -634,7 +635,7 @@ async function loadStockData(stockCode, tableName, period) {
                 console.error(`[${period}] 获取最新K线数据失败（继续使用原有数据）:`, error);
                 console.error('错误堆栈:', error.stack);
             }
-            
+
             // 获取预测成交量
             try {
                 const predicted = await fetchPredictedVolume(tableName);
@@ -646,19 +647,19 @@ async function loadStockData(stockCode, tableName, period) {
                 predictedVolumeType = null;
             }
         }
-        
+
         try {
             await renderChart(klineData, {}, period);
             updateActivePeriodButton(period);
             console.log(`[${period}] K线渲染成功`);
-            
+
             // 🔥 自动加载完整的历史CR点数据（从第一天到昨天）+ 最新一天
             if (period === 'day') {
                 console.log('[日K线] 开始加载完整的CR点数据（历史+最新）...');
                 analyzeCRPoints().catch(err => {
                     console.error('加载CR点失败:', err);
                 });
-                
+
                 // 启动自动刷新（每分钟更新一次最新K线）
                 startAutoRefresh();
             } else {
@@ -676,15 +677,15 @@ async function loadStockData(stockCode, tableName, period) {
 
     } catch (error) {
         console.error(`加载${stockCode}数据失败:`, error);
-        
+
         // 判断是否是 ECharts 加载失败
         const isEChartsError = error.message && error.message.includes('ECharts');
         const errorIcon = isEChartsError ? '📊' : '⚠️';
         const errorTitle = isEChartsError ? 'ECharts库加载失败' : '数据加载失败';
-        const retryButton = isEChartsError 
+        const retryButton = isEChartsError
             ? '<button onclick="location.reload()" style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">🔄 刷新页面</button>'
             : '<button onclick="selectStock()" style="margin-top: 15px; padding: 8px 20px; background: #4a90e2; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 12px;">重试</button>';
-        
+
         document.getElementById('mainChart').innerHTML = `
             <div class="error">
                 <p>${errorIcon} ${errorTitle}</p>
@@ -699,7 +700,7 @@ async function loadStockData(stockCode, tableName, period) {
 async function fetchPredictedVolume(tableName) {
     try {
         console.log(`[预测成交量] 开始请求: ${tableName}`);
-        
+
         const response = await fetch(`${API_BASE_URL}/predict_volume`, {
             method: 'POST',
             headers: {
@@ -709,33 +710,33 @@ async function fetchPredictedVolume(tableName) {
                 table_name: tableName
             })
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP错误: ${response.status}`);
         }
-        
+
         const result = await response.json();
         console.log(`[预测成交量] 响应结果:`, result);
-        
+
         if (result.code !== 200) {
             throw new Error(result.message || '获取预测成交量失败');
         }
-        
+
         const data = result.data;
         if (data.predicted_volume) {
             console.log(`[预测成交量] ✅ 成功: 当前=${data.current_volume?.toFixed(2)}, 预测=${data.predicted_volume?.toFixed(2)}, 比例=${data.ratio?.toFixed(2)}`);
-            
+
             // 获取预测成交量后，立即计算成交量类型
             fetchPredictedVolumeType(tableName, data.predicted_volume).catch(err => {
                 console.error('[预测成交量类型] 计算失败:', err);
             });
-            
+
             return data.predicted_volume;
         } else {
             console.log(`[预测成交量] 无法预测: ${data.message}`);
             return null;
         }
-        
+
     } catch (error) {
         console.error(`[预测成交量] 获取失败:`, error);
         return null;
@@ -746,7 +747,7 @@ async function fetchPredictedVolume(tableName) {
 async function fetchPredictedVolumeType(tableName, predictedVol) {
     try {
         console.log(`[预测成交量类型] 开始请求: ${tableName}, 预测成交量=${predictedVol}`);
-        
+
         const response = await fetch(`${API_BASE_URL}/predict_volume_type`, {
             method: 'POST',
             headers: {
@@ -757,18 +758,18 @@ async function fetchPredictedVolumeType(tableName, predictedVol) {
                 predicted_volume: predictedVol
             })
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP错误: ${response.status}`);
         }
-        
+
         const result = await response.json();
         console.log(`[预测成交量类型] 响应结果:`, result);
-        
+
         if (result.code !== 200) {
             throw new Error(result.message || '计算预测成交量类型失败');
         }
-        
+
         const data = result.data;
         // 后端返回空字符串""表示无类型，统一转换为'NONE'
         if (data.volume_type && data.volume_type !== '') {
@@ -778,7 +779,7 @@ async function fetchPredictedVolumeType(tableName, predictedVol) {
             predictedVolumeType = 'NONE'; // null或空字符串都转换为'NONE'
             console.log(`[预测成交量类型] ⚠️ 未匹配任何类型（后端返回: ${data.volume_type}）`);
         }
-        
+
     } catch (error) {
         console.error(`[预测成交量类型] 获取失败:`, error);
         predictedVolumeType = null;
@@ -789,7 +790,7 @@ async function fetchPredictedVolumeType(tableName, predictedVol) {
 async function fetchLatestDayKline(tableName) {
     try {
         console.log(`[最新K线] 开始请求最新一天K线数据: ${tableName}`);
-        
+
         const response = await fetch(`${API_BASE_URL}/latest_day_kline`, {
             method: 'POST',
             headers: {
@@ -799,27 +800,27 @@ async function fetchLatestDayKline(tableName) {
                 table_name: tableName
             })
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP错误: ${response.status}`);
         }
-        
+
         const result = await response.json();
         console.log(`[最新K线] 响应结果:`, result);
-        
+
         if (result.code !== 200) {
             throw new Error(result.message || '获取最新K线失败');
         }
-        
+
         const klineData = result.data.kline_data;
         if (!klineData) {
             console.log(`[最新K线] 没有可用的最新K线数据`);
             return null;
         }
-        
+
         console.log(`[最新K线] ✅ 成功获取最新K线数据:`, klineData);
         return klineData;
-        
+
     } catch (error) {
         console.error(`[最新K线] 获取失败:`, error);
         return null;
@@ -832,20 +833,20 @@ function mergeLatestKline(existingKlineData, latestKlineData) {
         console.log('[mergeLatestKline] 没有最新K线数据，返回原数据');
         return existingKlineData;
     }
-    
+
     console.log('[mergeLatestKline] 开始合并，现有数据长度:', existingKlineData.length);
     console.log('[mergeLatestKline] 最新K线数据:', latestKlineData);
-    
+
     // 获取最新K线的日期（只取日期部分，不包括时间）
     const latestDate = latestKlineData.time.split(' ')[0];
     console.log('[mergeLatestKline] 最新K线日期:', latestDate);
-    
+
     // 检查现有数据中是否已经有这个日期的数据
     const existingIndex = existingKlineData.findIndex(item => {
         const itemDate = item.time.split(' ')[0];
         return itemDate === latestDate;
     });
-    
+
     if (existingIndex >= 0) {
         // 如果已经存在，替换旧数据
         console.log(`[mergeLatestKline] 替换现有数据: 日期=${latestDate}, 索引=${existingIndex}`);
@@ -855,7 +856,7 @@ function mergeLatestKline(existingKlineData, latestKlineData) {
         console.log(`[mergeLatestKline] 追加新数据: 日期=${latestDate}`);
         existingKlineData.push(latestKlineData);
     }
-    
+
     console.log('[mergeLatestKline] 合并后数据长度:', existingKlineData.length);
     return existingKlineData;
 }
@@ -878,19 +879,19 @@ function calculateMACD(klineData) {
     const fastPeriod = 12;
     const slowPeriod = 26;
     const signalPeriod = 9;
-    
+
     // 初始化结果数组（与输入长度相同，便于索引对齐）
     const result = {
         dif: Array(n).fill(null),
         dea: Array(n).fill(null),
         macd: Array(n).fill(null)
     };
-    
+
     if (n < slowPeriod) {
         console.warn(`[MACD] 数据不足，需要至少${slowPeriod}个数据点，实际${n}个`);
         return result;
     }
-    
+
     /**
      * 计算EMA - 返回与输入等长的数组
      * 公式: EMA = 前一日EMA × (1 - 2/(period+1)) + 当日价格 × 2/(period+1)
@@ -899,24 +900,24 @@ function calculateMACD(klineData) {
     function calculateEMA(data, period) {
         const ema = Array(data.length).fill(null);
         if (data.length < period) return ema;
-        
+
         const multiplier = 2.0 / (period + 1);
-        
+
         // 首个EMA使用SMA初始化
         let sum = 0;
         for (let i = 0; i < period; i++) {
             sum += data[i];
         }
         ema[period - 1] = sum / period;
-        
+
         // 后续EMA计算
         for (let i = period; i < data.length; i++) {
             ema[i] = ema[i - 1] * (1 - multiplier) + data[i] * multiplier;
         }
-        
+
         return ema;
     }
-    
+
     /**
      * 计算DEA（信号线）
      * 公式: DEA = 前一日DEA × 8/10 + 当日DIF × 2/10
@@ -924,7 +925,7 @@ function calculateMACD(klineData) {
      */
     function calculateDEA(difValues, period) {
         const dea = Array(difValues.length).fill(null);
-        
+
         // 找到第一个有效DIF的索引
         let firstValidIdx = -1;
         for (let i = 0; i < difValues.length; i++) {
@@ -933,24 +934,24 @@ function calculateMACD(klineData) {
                 break;
             }
         }
-        
+
         if (firstValidIdx < 0) return dea;
-        
+
         // 统计有效DIF数量
         let validCount = 0;
         for (let i = firstValidIdx; i < difValues.length; i++) {
             if (difValues[i] !== null) validCount++;
         }
-        
+
         if (validCount < period) return dea;
-        
+
         const multiplier = 2.0 / (period + 1);
-        
+
         // 计算首个DEA: 使用前period个有效DIF的SMA
         let smaSum = 0;
         let count = 0;
         let smaIdx = -1;
-        
+
         for (let i = firstValidIdx; i < difValues.length; i++) {
             if (difValues[i] !== null) {
                 smaSum += difValues[i];
@@ -961,26 +962,26 @@ function calculateMACD(klineData) {
                 }
             }
         }
-        
+
         if (smaIdx < 0) return dea;
-        
+
         // 首日DEA = DIF的9日SMA
         dea[smaIdx] = smaSum / period;
-        
+
         // 后续DEA计算
         for (let i = smaIdx + 1; i < difValues.length; i++) {
             if (difValues[i] !== null && dea[i - 1] !== null) {
                 dea[i] = dea[i - 1] * (1 - multiplier) + difValues[i] * multiplier;
             }
         }
-        
+
         return dea;
     }
-    
+
     // Step 1: 计算快线EMA(12)和慢线EMA(26)
     const ema12 = calculateEMA(closes, fastPeriod);
     const ema26 = calculateEMA(closes, slowPeriod);
-    
+
     // Step 2: 计算DIF = EMA(12) - EMA(26)
     // DIF从第slowPeriod个数据开始有效（索引slowPeriod-1）
     for (let i = slowPeriod - 1; i < n; i++) {
@@ -988,23 +989,23 @@ function calculateMACD(klineData) {
             result.dif[i] = ema12[i] - ema26[i];
         }
     }
-    
+
     // Step 3: 计算DEA = DIF的signalPeriod日EMA
     result.dea = calculateDEA(result.dif, signalPeriod);
-    
+
     // Step 4: 计算MACD柱 = (DIF - DEA) × 2
     for (let i = 0; i < n; i++) {
         if (result.dif[i] !== null && result.dea[i] !== null) {
             result.macd[i] = (result.dif[i] - result.dea[i]) * 2;
         }
     }
-    
+
     // 统计有效数据
     const validDif = result.dif.filter(x => x !== null).length;
     const validDea = result.dea.filter(x => x !== null).length;
     const validMacd = result.macd.filter(x => x !== null).length;
     console.log(`[MACD] 计算完成: DIF有效${validDif}个, DEA有效${validDea}个, MACD柱有效${validMacd}个`);
-    
+
     return result;
 }
 
@@ -1012,9 +1013,9 @@ function calculateMACD(klineData) {
 function calculateMA(klineData, periods) {
     const closes = klineData.map(item => item.close);
     const result = {};
-    
+
     console.log(`[calculateMA] 输入K线数据长度: ${klineData.length}, 收盘价数组长度: ${closes.length}`);
-    
+
     periods.forEach(period => {
         const ma = [];
         for (let i = 0; i < closes.length; i++) {
@@ -1031,7 +1032,7 @@ function calculateMA(klineData, periods) {
         result[`ma${period}`] = ma;
         console.log(`[calculateMA] MA${period}计算完成，长度: ${ma.length}`);
     });
-    
+
     return result;
 }
 
@@ -1039,7 +1040,7 @@ function calculateMA(klineData, periods) {
 async function loadVolumeTypes(stockCode) {
     try {
         console.log(`开始加载成交量类型数据: ${stockCode}`);
-        
+
         const response = await fetch(`${API_BASE_URL}/daily_chance`, {
             method: 'POST',
             headers: {
@@ -1055,7 +1056,7 @@ async function loadVolumeTypes(stockCode) {
         }
 
         const result = await response.json();
-        
+
         if (result.code !== 200) {
             console.warn(`获取成交量类型数据失败: ${result.message}`);
             return;
@@ -1068,25 +1069,26 @@ async function loadVolumeTypes(stockCode) {
         bearishPatternMap = {};
         supportPriceMap = {};
         pressurePriceMap = {};
-        
+        turnoverRateMap = {};
+
         let missingDataCount = 0;
         let totalDataCount = 0;
-        
+
         if (result.data && Array.isArray(result.data)) {
             // 获取今天的日期
             const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            
+
             result.data.forEach(item => {
                 if (item.date) {
                     totalDataCount++;
                     // 处理日期格式，确保是 YYYY-MM-DD 格式
                     const dateStr = item.date.split(' ')[0];
-                    
+
                     // ⚠️ 今天的成交量类型用预测成交量实时计算，其他所有历史日期都从数据库读取
                     if (item.volumeType && dateStr !== today) {
                         volumeTypeMap[dateStr] = item.volumeType;
                     }
-                    
+
                     if (item.totalWinRatioScore !== undefined && item.totalWinRatioScore !== null) {
                         // 后端存储满分40，这里展示按业务满分60放大1.5倍
                         winRatioScoreMap[dateStr] = item.totalWinRatioScore * 1.5;
@@ -1097,18 +1099,21 @@ async function loadVolumeTypes(stockCode) {
                     if (item.bearishPattern) {
                         bearishPatternMap[dateStr] = item.bearishPattern;
                     }
-                    
+                    if (item.huanshou !== undefined && item.huanshou !== null) {
+                        turnoverRateMap[dateStr] = item.huanshou;
+                    }
+
                     // 记录缺少压力支撑线数据的日期
                     const hasSupportPrice = item.supportPrice !== undefined && item.supportPrice !== null;
                     const hasPressurePrice = item.pressurePrice !== undefined && item.pressurePrice !== null;
-                    
+
                     if (hasSupportPrice) {
                         supportPriceMap[dateStr] = item.supportPrice;
                     }
                     if (hasPressurePrice) {
                         pressurePriceMap[dateStr] = item.pressurePrice;
                     }
-                    
+
                     // 调试：记录缺少数据的情况
                     if (!hasSupportPrice && !hasPressurePrice) {
                         missingDataCount++;
@@ -1146,18 +1151,18 @@ async function loadAnalysisData(stockCode, period, klineData) {
             console.log(`[${period}] ⚠️ 取消之前的分析请求`);
             currentAnalysisController.abort();
         }
-        
+
         console.log(`[${period}] 🚀 准备发送 stock_analysis 请求...`);
-        
+
         currentAnalysisController = new AbortController();
         const controller = currentAnalysisController;
-        
+
         const timeoutId = setTimeout(() => {
             if (controller === currentAnalysisController) {
                 controller.abort();
             }
         }, 20000);
-        
+
         console.log(`[${period}] 📡 正在发送 stock_analysis 请求到: ${API_BASE_URL}/stock_analysis`);
         const analysisResponse = await fetch(`${API_BASE_URL}/stock_analysis`, {
             method: 'POST',
@@ -1180,8 +1185,8 @@ async function loadAnalysisData(stockCode, period, klineData) {
 
         const analysisResult = await analysisResponse.json();
         console.log(`[${period}] 分析数据返回:`, analysisResult);
-        
-        const analysisData = (analysisResult.code === 200 && analysisResult.data && analysisResult.data[period]) 
+
+        const analysisData = (analysisResult.code === 200 && analysisResult.data && analysisResult.data[period])
             ? analysisResult.data[period] : {};
 
         if (controller !== currentAnalysisController) {
@@ -1212,10 +1217,10 @@ function updateChartWithAnalysis(analysisData, dataLength) {
 
     const currentOption = chart.getOption();
     let currentSeries = currentOption.series || [];
-    
+
     let supportIndex = currentSeries.findIndex(s => s.name === '支撑线');
     let pressureIndex = currentSeries.findIndex(s => s.name === '压力线');
-    
+
     const supportLine = {
         name: '支撑线',
         type: 'line',
@@ -1229,7 +1234,7 @@ function updateChartWithAnalysis(analysisData, dataLength) {
         symbol: 'none',
         z: 10
     };
-    
+
     const pressureLine = {
         name: '压力线',
         type: 'line',
@@ -1243,7 +1248,7 @@ function updateChartWithAnalysis(analysisData, dataLength) {
         symbol: 'none',
         z: 10
     };
-    
+
     if (analysisData.supportPrice) {
         if (supportIndex >= 0) {
             currentSeries[supportIndex] = supportLine;
@@ -1251,7 +1256,7 @@ function updateChartWithAnalysis(analysisData, dataLength) {
             currentSeries.push(supportLine);
         }
     }
-    
+
     if (analysisData.pressurePrice) {
         if (pressureIndex >= 0) {
             currentSeries[pressureIndex] = pressureLine;
@@ -1259,7 +1264,7 @@ function updateChartWithAnalysis(analysisData, dataLength) {
             currentSeries.push(pressureLine);
         }
     }
-    
+
     chart.setOption({
         series: currentSeries
     });
@@ -1279,7 +1284,7 @@ async function checkAvailablePeriods(tableName) {
         });
 
         const result = await response.json();
-        
+
         if (result.code === 200) {
             availablePeriods = result.data;
             updatePeriodButtons();
@@ -1305,16 +1310,16 @@ async function checkAvailablePeriods(tableName) {
 // 更新周期按钮状态
 function updatePeriodButtons() {
     const periodButtons = document.querySelectorAll('.period-btn');
-    
+
     periodButtons.forEach(btn => {
         const btnText = btn.textContent;
         let period = '';
-        
+
         if (btnText.includes('30分钟')) period = '30min';
         else if (btnText.includes('日K线')) period = 'day';
         else if (btnText.includes('周K线')) period = 'week';
         else if (btnText.includes('月K线')) period = 'month';
-        
+
         if (period && !availablePeriods[period]) {
             btn.disabled = true;
             btn.style.opacity = '0.3';
@@ -1332,13 +1337,13 @@ function updatePeriodButtons() {
 // 选择默认周期
 function selectDefaultPeriod() {
     const priorities = ['day', '30min', 'week', 'month'];
-    
+
     for (const period of priorities) {
         if (availablePeriods[period]) {
             return period;
         }
     }
-    
+
     const available = Object.keys(availablePeriods);
     return available.length > 0 ? available[0] : 'day';
 }
@@ -1354,7 +1359,7 @@ function updateActivePeriodButton(period) {
             btn.classList.add('active');
         }
     });
-    
+
     // 更新回测按钮状态
     updateBacktestButtonState(period);
 }
@@ -1373,7 +1378,7 @@ function getPeriodName(period) {
 // 计算默认显示的数据范围
 function calculateStartPercent(totalDataPoints, period) {
     let targetPoints;
-    switch(period) {
+    switch (period) {
         case '30min':
             targetPoints = 20 * 16;
             break;
@@ -1389,11 +1394,11 @@ function calculateStartPercent(totalDataPoints, period) {
         default:
             targetPoints = 120;
     }
-    
+
     if (totalDataPoints <= targetPoints) {
         return 0;
     }
-    
+
     const startPercent = ((totalDataPoints - targetPoints) / totalDataPoints) * 100;
     return Math.max(0, startPercent);
 }
@@ -1416,60 +1421,60 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
     try {
         // 等待ECharts加载完成
         await waitForECharts();
-        
+
         // 更新当前周期
         currentPeriod = period;
-        
+
         const chartDom = document.getElementById('mainChart');
         if (!chartDom) {
             console.error('找不到图表容器 mainChart');
             return;
         }
-        
+
         chart = echarts.init(chartDom);
         console.log(`[${period}] ECharts实例已初始化`);
 
         const dates = klineData.map(item => item.time);
         const values = klineData.map(item => [item.open, item.close, item.low, item.high]);
         const volumes = klineData.map(item => item.volume);
-        
+
         // 使用后端返回的MACD数据
         const macdData = window.currentMACDData || { dif: [], dea: [], macd: [] };
         if (window.currentMACDData) {
             console.log(`[${period}] 使用后端计算的MACD - DIF数:${macdData.dif.length}, DEA数:${macdData.dea.length}, MACD数:${macdData.macd.length}`);
         }
-        
+
         // 使用后端返回的MA数据
         const maData = window.currentMAData || {};
         if (window.currentMAData) {
             console.log(`[${period}] 使用后端计算的MA - ${Object.keys(maData).join(', ')}`);
             console.log(`[${period}] MA数据长度 - MA5:${maData.ma5?.length}, MA10:${maData.ma10?.length}, MA20:${maData.ma20?.length}`);
             console.log(`[${period}] K线数据长度:${dates.length}, MA数据长度:${maData.ma5?.length}`);
-            
+
             // 验证数据长度是否一致
             if (maData.ma5 && maData.ma5.length !== dates.length) {
                 console.warn(`[${period}] ⚠️ 警告: MA数据长度(${maData.ma5.length})与K线数据长度(${dates.length})不一致！`);
             }
         }
-        
+
         console.log(`[${period}] 数据准备完成 - 日期数:${dates.length}, K线数:${values.length}, 成交量数:${volumes.length}`);
 
         const latestData = klineData[klineData.length - 1] || {};
-        
+
         // 记录最新一天的日期（用于tooltip中判断）
         const latestDate = dates.length > 0 ? dates[dates.length - 1].split(' ')[0] : null;
-        
+
         // 找到前一交易日的日期（用于最新一天的tooltip显示）
         let previousTradingDate = null;
         if (dates.length >= 2) {
             previousTradingDate = dates[dates.length - 2].split(' ')[0];
         }
-        
+
         console.log(`[${period}] 最新日期: ${latestDate}, 前一交易日: ${previousTradingDate}`);
 
-        const supportLine = (analysisData && analysisData.supportPrice) ? 
+        const supportLine = (analysisData && analysisData.supportPrice) ?
             Array(dates.length).fill(analysisData.supportPrice) : null;
-        const pressureLine = (analysisData && analysisData.pressurePrice) ? 
+        const pressureLine = (analysisData && analysisData.pressurePrice) ?
             Array(dates.length).fill(analysisData.pressurePrice) : null;
 
         const option = {
@@ -1490,29 +1495,29 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     color: '#fff',
                     fontSize: 13
                 },
-                formatter: function(params) {
+                formatter: function (params) {
                     let result = params[0].name + '<br/>';
                     const currentDate = params[0].name;
                     // 提取纯日期部分（去掉时间）
                     const dateOnly = currentDate.split(' ')[0];
-                    
+
                     // 收集MA数据和R点数据，最后显示
                     let maLines = [];
                     let rPointInfo = null;
-                    
+
                     params.forEach(param => {
                         if (param.seriesName === 'K线') {
                             result += `开盘: ${param.value[1]}<br/>`;
                             result += `收盘: ${param.value[2]}<br/>`;
                             result += `最低: ${param.value[3]}<br/>`;
                             result += `最高: ${param.value[4]}<br/>`;
-                            
+
                             // 检查是否是C点，如果是则显示机会概率值
                             let isC点 = false;
                             let strategy1Score = 0;
                             let strategy2Score = 0;
                             let isGoldenC = false;
-                            
+
                             // 从所有C点中查找当前日期的C点
                             if (crPointsData.c_points) {
                                 const cPoint = crPointsData.c_points.find(cp => cp.triggerDate === dateOnly);
@@ -1532,19 +1537,19 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                     isGoldenC = s2cPoint.isGolden || false;
                                 }
                             }
-                            
+
                             // 如果是C点，计算并显示机会概率值
                             if (isC点) {
                                 const maxScore = Math.max(strategy1Score, strategy2Score);
                                 const probabilityValue = Math.min(maxScore * 1.2, 99);
                                 result += `<span style="color: #FFD700; font-weight: bold; font-size: 12px;">🎯 机会概率值: ${probabilityValue.toFixed(1)}%</span><br/>`;
-                                
+
                                 // 如果是金色C点，显示特殊标记
                                 if (isGoldenC) {
                                     result += `<span style="color: #FFD700; font-weight: bold; font-size: 11px;">⭐ 金色C点（5日内策略一和策略二都有发C）</span><br/>`;
                                 }
                             }
-                            
+
                             // 显示策略1的评分和插件信息（如果存在）
                             // 🔥 调试：查看策略评分数据
                             console.log(`[Tooltip] 当前日期: ${dateOnly}, latestDate: ${latestDate}`);
@@ -1553,13 +1558,13 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                 console.log(`[Tooltip] strategy1_scores的日期列表:`, Object.keys(crPointsData.strategy1_scores));
                                 console.log(`[Tooltip] ${dateOnly}的数据:`, crPointsData.strategy1_scores[dateOnly]);
                             }
-                            
+
                             if (crPointsData.strategy1_scores && crPointsData.strategy1_scores[dateOnly]) {
                                 const s1Data = crPointsData.strategy1_scores[dateOnly];
                                 result += `<span style="color: #2196F3; font-weight: bold;">📊 策略1评分</span><br/>`;
                                 result += `<span style="color: #2196F3; font-size: 11px;">最终分: ${s1Data.score.toFixed(2)}</span><br/>`;
                                 result += `<span style="color: #2196F3; font-size: 11px;">基础分: ${s1Data.base_score.toFixed(2)}</span><br/>`;
-                                
+
                                 // 显示触发的插件
                                 if (s1Data.plugins && s1Data.plugins.length > 0) {
                                     result += `<span style="color: #2196F3; font-size: 11px;">🔌 触发插件:</span><br/>`;
@@ -1578,7 +1583,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                         }
                                     });
                                 }
-                                
+
                                 // 显示是否触发C点
                                 if (s1Data.is_c_point) {
                                     result += `<span style="color: #2196F3; font-size: 11px;">✅ 触发C点</span><br/>`;
@@ -1588,21 +1593,21 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                     result += `<span style="color: #64B5F6; font-size: 11px;">未触发C点（分数<70）</span><br/>`;
                                 }
                             }
-                            
+
                             // 显示赔率总分、成交量总分、成交量类型（仅日K线）
                             if (period === 'day') {
                                 // 判断当前日期是否是最新一天
                                 const isLatestDate = (dateOnly === latestDate);
-                                
+
                                 // 如果是最新一天，使用前一交易日的数据；否则使用当天的数据
                                 const dateForData = isLatestDate && previousTradingDate ? previousTradingDate : dateOnly;
-                                
+
                                 const winRatioScore = winRatioScoreMap[dateForData];
-                                
+
                                 // 成交量类型：最新一天使用实时计算的，历史数据使用数据库的
                                 let volumeType = null;
                                 let volumeTypeLabel = '成交量类型';
-                                
+
                                 if (isLatestDate) {
                                     // 最新一天：使用实时计算的成交量类型
                                     volumeType = predictedVolumeType;
@@ -1612,13 +1617,13 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                     volumeType = volumeTypeMap[dateOnly];
                                     volumeTypeLabel = '成交量类型';
                                 }
-                                
+
                                 // 显示赔率总分（最新一天显示前一交易日的）
                                 if (winRatioScore !== undefined && winRatioScore !== null) {
                                     const label = isLatestDate ? '赔率总分(前一日)' : '赔率总分';
                                     result += `<span style="color: #2196F3;">${label}: ${winRatioScore.toFixed(2)}</span><br/>`;
                                 }
-                                
+
                                 // 计算并显示成交量总分和类型
                                 if (volumeType && volumeType !== 'NONE') {
                                     function calculateVolumeScore(volumeType) {
@@ -1631,7 +1636,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                     }
                                     const volumeScore = calculateVolumeScore(volumeType);
                                     result += `<span style="color: #2196F3;">成交量总分: ${volumeScore}分</span><br/>`;
-                                    
+
                                     // 显示成交量类型（只显示字母）
                                     const types = volumeType.split(',').map(t => t.trim());
                                     const displayColor = isLatestDate ? '#FFD700' : '#2196F3'; // 最新一天用金色突出显示
@@ -1642,6 +1647,12 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                 } else if (isLatestDate) {
                                     // 最新一天如果还在计算中（null或undefined）
                                     result += `<span style="color: #999;">成交量类型(实时): 计算中...</span><br/>`;
+                                }
+
+                                // 显示换手率
+                                const turnoverRate = turnoverRateMap[dateOnly];
+                                if (turnoverRate !== undefined && turnoverRate !== null) {
+                                    result += `<span style="color: #FF9800;">换手率: ${turnoverRate.toFixed(2)}%</span><br/>`;
                                 }
                             }
                         } else if (param.seriesName === 'MA5' || param.seriesName === 'MA10' || param.seriesName === 'MA20') {
@@ -1680,14 +1691,14 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                             result += `${param.seriesName}: ${param.value}<br/>`;
                         }
                     });
-                    
+
                     // 显示多头组合和空头组合（仅日K线）
                     if (period === 'day' && params[0] && params[0].name) {
                         const dateStr = params[0].name;
                         const dateOnly = dateStr.split(' ')[0];
                         const bullishPattern = bullishPatternMap[dateOnly];
                         const bearishPattern = bearishPatternMap[dateOnly];
-                        
+
                         // 显示多头组合
                         if (bullishPattern) {
                             result += `<span style="color: #26a69a; font-weight: bold;">📈 多头组合:</span><br/>`;
@@ -1697,7 +1708,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                 result += `<span style="color: #26a69a; margin-left: 10px;">• ${patternLabel}</span><br/>`;
                             });
                         }
-                        
+
                         // 显示空头组合
                         if (bearishPattern) {
                             result += `<span style="color: #ef5350; font-weight: bold;">📉 空头组合:</span><br/>`;
@@ -1707,13 +1718,13 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                 result += `<span style="color: #ef5350; margin-left: 10px;">• ${patternLabel}</span><br/>`;
                             });
                         }
-                        
+
                         // 显示策略2评分（所有日K线）
                         if (crPointsData && crPointsData.strategy2_scores && params[0] && params[0].name) {
                             const dateStr = params[0].name;
                             const dateOnly = dateStr.split(' ')[0];
                             const strategy2Score = crPointsData.strategy2_scores[dateOnly];
-                            
+
                             if (strategy2Score) {
                                 const triggeredText = strategy2Score.triggered ? ' ✓ 已触发' : '';
                                 result += `<span style="color: #9C27B0; font-weight: bold;">策略二: ${strategy2Score.score.toFixed(0)}分${triggeredText}</span><br/>`;
@@ -1722,14 +1733,14 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                 }
                             }
                         }
-                        
+
                         // 显示R点信息（在策略2之后、支撑压力线之前）
                         if (rPointInfo) {
                             if (rPointInfo.simple) {
                                 result += `<span style="color: #4CAF50;">R点</span><br/>`;
                             } else {
                                 result += `<span style="color: #4CAF50; font-weight: bold;">R点触发</span><br/>`;
-                                
+
                                 // 显示触发的插件信息
                                 if (rPointInfo.plugins && rPointInfo.plugins.length > 0) {
                                     result += `<span style="color: #4CAF50; font-weight: bold;">风险插件:</span><br/>`;
@@ -1740,30 +1751,30 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                                 }
                             }
                         }
-                        
+
                         // 显示当天的压力线和支撑线（历史数据，数据库存储为整数，需除以100）
                         if (params[0] && params[0].name) {
                             const dateStr = params[0].name;
                             const dateOnly = dateStr.split(' ')[0];
-                            
+
                             // 判断当前日期是否是最新一天
                             const isLatestDate = (dateOnly === latestDate);
-                            
+
                             // 如果是最新一天，使用前一交易日的数据；否则使用当天的数据
                             const dateForData = isLatestDate && previousTradingDate ? previousTradingDate : dateOnly;
-                            
+
                             const supportPrice = supportPriceMap[dateForData];
                             const pressurePrice = pressurePriceMap[dateForData];
-                            
+
                             if (supportPrice !== undefined || pressurePrice !== undefined) {
                                 const labelSuffix = isLatestDate ? '(前一日)' : '';
-                                
+
                                 if (supportPrice !== undefined && supportPrice !== null) {
                                     // 数据库存储的是整数，需要除以100转换为实际价格
                                     const actualSupportPrice = supportPrice / 100;
                                     result += `<span style="color: #26a69a; font-weight: bold;">支撑线${labelSuffix}: ${actualSupportPrice.toFixed(2)}</span><br/>`;
                                 }
-                                
+
                                 if (pressurePrice !== undefined && pressurePrice !== null) {
                                     // 数据库存储的是整数，需要除以100转换为实际价格
                                     const actualPressurePrice = pressurePrice / 100;
@@ -1772,14 +1783,14 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                             }
                         }
                     }
-                    
+
                     // 最后显示MA均线
                     if (maLines.length > 0) {
                         maLines.forEach(line => {
                             result += line + '<br/>';
                         });
                     }
-                    
+
                     return result;
                 }
             },
@@ -1812,7 +1823,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     axisLine: { lineStyle: { color: '#4a90e2' } },
                     axisLabel: {
                         color: '#888',
-                        formatter: function(value) {
+                        formatter: function (value) {
                             if (period === '30min') {
                                 return value.substring(5, 16);
                             } else {
@@ -1845,7 +1856,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     axisLine: { lineStyle: { color: '#4a90e2' } },
                     axisLabel: {
                         color: '#888',
-                        formatter: function(value) {
+                        formatter: function (value) {
                             if (period === '30min') {
                                 return value.substring(5, 16);
                             } else {
@@ -1875,7 +1886,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     gridIndex: 1,
                     splitNumber: 2,
                     axisLine: { lineStyle: { color: '#4a90e2' } },
-                    axisLabel: { 
+                    axisLabel: {
                         show: false
                     },
                     splitLine: {
@@ -1889,7 +1900,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     gridIndex: 2,
                     splitNumber: 3,
                     axisLine: { lineStyle: { color: '#4a90e2' } },
-                    axisLabel: { 
+                    axisLabel: {
                         color: '#888',
                         fontSize: 10
                     },
@@ -1988,7 +1999,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     yAxisIndex: 1,
                     data: volumes,
                     itemStyle: {
-                        color: function(params) {
+                        color: function (params) {
                             const dataIndex = params.dataIndex;
                             if (dataIndex === 0) return '#26a69a';
                             return values[dataIndex][1] > values[dataIndex][0] ? '#ef5350' : '#26a69a';
@@ -2024,7 +2035,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     },
                     label: {
                         show: true,
-                        formatter: function(params) {
+                        formatter: function (params) {
                             if (params.value !== null) {
                                 // 格式化显示：如果大于1万，显示xx万，否则直接显示数字
                                 if (params.value >= 10000) {
@@ -2084,7 +2095,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                     yAxisIndex: 2,
                     data: macdData.macd,
                     itemStyle: {
-                        color: function(params) {
+                        color: function (params) {
                             return params.value >= 0 ? '#e74c3c' : '#2ecc71';
                         }
                     },
@@ -2100,7 +2111,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
             label: {
                 show: true,
                 position: 'end',
-                formatter: function(params) {
+                formatter: function (params) {
                     return params.name + ': ' + params.value.toFixed(2);
                 },
                 fontSize: 11,
@@ -2172,9 +2183,9 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
 
         // 使用updateAxisPointer来动态显示压力/支撑线（优化后：整个日期区域都能触发）
         let lastHoverDate = null;  // 记录上次悬停的日期，避免重复更新
-        
+
         chart.off('updateAxisPointer');  // 移除旧的监听器
-        chart.on('updateAxisPointer', function(event) {
+        chart.on('updateAxisPointer', function (event) {
             // 获取当前鼠标指向的数据点
             const xAxisInfo = event.axesInfo[0];
             if (xAxisInfo && xAxisInfo.value !== undefined) {
@@ -2182,18 +2193,18 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                 if (dataIndex >= 0 && dataIndex < dates.length) {
                     const dateStr = dates[dataIndex];
                     const dateOnly = dateStr.split(' ')[0];
-                    
+
                     // 如果是同一个日期，不重复更新（性能优化）
                     if (dateOnly === lastHoverDate) {
                         return;
                     }
                     lastHoverDate = dateOnly;
-                    
+
                     const supportPrice = supportPriceMap[dateOnly];
                     const pressurePrice = pressurePriceMap[dateOnly];
-                    
+
                     const markLineData = [];
-                    
+
                     // 添加支撑线（黄色）
                     if (supportPrice !== undefined && supportPrice !== null) {
                         const actualSupportPrice = supportPrice / 100;
@@ -2211,7 +2222,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                         });
                         console.log(`[压力支撑线] 支撑: ${actualSupportPrice.toFixed(2)} (日期: ${dateOnly})`);
                     }
-                    
+
                     // 添加压力线（黄色）
                     if (pressurePrice !== undefined && pressurePrice !== null) {
                         const actualPressurePrice = pressurePrice / 100;
@@ -2234,7 +2245,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                             console.log(`[压力支撑线] 日期 ${dateOnly} 没有压力/支撑线数据`);
                         }
                     }
-                    
+
                     // 更新markLine
                     chart.setOption({
                         series: [{
@@ -2249,7 +2260,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
 
         // 监听鼠标移出图表区域，清除markLine
         chart.off('globalout');
-        chart.on('globalout', function() {
+        chart.on('globalout', function () {
             lastHoverDate = null;  // 重置记录
             chart.setOption({
                 series: [{
@@ -2271,13 +2282,13 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                 chart.resize();
             }
         };
-        
+
         window.removeEventListener('resize', resizeHandler);
         window.addEventListener('resize', resizeHandler);
-        
+
     } catch (error) {
         console.error(`[${period}] renderChart异常:`, error);
-        
+
         // 显示友好的错误提示
         const chartDom = document.getElementById('mainChart');
         if (chartDom && error.message && error.message.includes('ECharts')) {
@@ -2290,7 +2301,7 @@ async function renderChart(klineData, analysisData, period, viewState = null) {
                 </div>
             `;
         }
-        
+
         throw error;
     }
 }
@@ -2302,13 +2313,13 @@ function updateAnalysisInfo(analysisData, latestData) {
         const winLoseRatio = (analysisData && analysisData.winLoseRatio) || '--';
         winLoseRatioEl.textContent = typeof winLoseRatio === 'number' ? winLoseRatio.toFixed(2) : winLoseRatio;
     }
-    
+
     const supportEl = document.getElementById('supportValue');
     if (supportEl) {
         const supportPrice = (analysisData && analysisData.supportPrice) || '--';
         supportEl.textContent = typeof supportPrice === 'number' ? supportPrice.toFixed(2) : supportPrice;
     }
-    
+
     const pressureEl = document.getElementById('pressureValue');
     if (pressureEl) {
         const pressurePrice = (analysisData && analysisData.pressurePrice) || '--';
@@ -2318,9 +2329,9 @@ function updateAnalysisInfo(analysisData, latestData) {
 
 // ============ CR点分析功能 ============
 
-let crPointsData = { 
-    c_points: [], 
-    r_points: [], 
+let crPointsData = {
+    c_points: [],
+    r_points: [],
     rejected_c_points: [],
     strategy2_c_points: [],
     strategy2_scores: {},
@@ -2333,13 +2344,13 @@ async function analyzeCRPointsAuto() {
     if (!currentStockCode || !currentTableName) {
         return;
     }
-    
+
     try {
         console.log('[快速加载] 开始获取最新一天的策略评分...', { stockCode: currentStockCode });
         const stockSelect = document.getElementById('stockSelect');
         const selectedOption = stockSelect ? stockSelect.options[stockSelect.selectedIndex] : null;
         const stockNature = selectedOption?.dataset?.nature || currentStrategy || '波段';
-        
+
         // 🔥 只调用最新一天的CR点接口，不分析483天的历史数据
         const response = await fetch(`${API_BASE_URL}/latest_cr_points`, {
             method: 'POST',
@@ -2352,34 +2363,34 @@ async function analyzeCRPointsAuto() {
                 stockNature: stockNature
             })
         });
-        
+
         const result = await response.json();
         console.log('[快速加载] 最新一天策略评分结果:', result);
-        
+
         // 🔥 后端返回的code是200，不是0！
         if (result.code === 200 && result.data && result.data.success) {
             const latestData = result.data;
-            
+
             // 保存最新一天的策略评分到crPointsData
             if (latestData.date) {
                 console.log(`✅ [快速加载] 获取到最新一天(${latestData.date})的策略评分`);
-                
+
                 // 初始化策略评分对象
                 crPointsData.strategy1_scores = crPointsData.strategy1_scores || {};
                 crPointsData.strategy2_scores = crPointsData.strategy2_scores || {};
-                
+
                 // 保存策略1评分
                 if (latestData.strategy1) {
                     crPointsData.strategy1_scores[latestData.date] = latestData.strategy1;
                     console.log(`  ✅ 策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
                 }
-                
+
                 // 保存策略2评分
                 if (latestData.strategy2) {
                     crPointsData.strategy2_scores[latestData.date] = latestData.strategy2;
                     console.log(`  ✅ 策略2评分: ${latestData.strategy2.score.toFixed(2)}`);
                 }
-                
+
                 console.log('[快速加载] 策略评分已保存到crPointsData，可以显示tooltip');
             }
         } else {
@@ -2396,21 +2407,21 @@ async function analyzeCRPoints() {
         console.warn('⚠️ 请先选择股票');
         return;
     }
-    
+
     const stockSelect = document.getElementById('stockSelect');
     const selectedOption = stockSelect.options[stockSelect.selectedIndex];
     const stockName = selectedOption.dataset.name || '';
     const stockNature = selectedOption.dataset.nature || currentStrategy || '波段';
-    
+
     const analyzeBtn = document.getElementById('analyzeCRBtn');
     if (analyzeBtn) {
         analyzeBtn.disabled = true;
         analyzeBtn.textContent = '分析中...';
     }
-    
+
     try {
         console.log('开始分析CR点...', { stockCode: currentStockCode, stockName, tableName: currentTableName });
-        
+
         const response = await fetch(`${API_BASE_URL}/cr_points/analyze`, {
             method: 'POST',
             headers: {
@@ -2424,10 +2435,10 @@ async function analyzeCRPoints() {
                 stockNature: stockNature
             })
         });
-        
+
         const result = await response.json();
         console.log('CR点分析结果:', result);
-        
+
         // 调试：检查strategy1_scores
         if (result.data && result.data.strategy1_scores) {
             console.log('✅ strategy1_scores存在，数量:', Object.keys(result.data.strategy1_scores).length);
@@ -2436,26 +2447,26 @@ async function analyzeCRPoints() {
         } else {
             console.log('❌ strategy1_scores不存在或为空');
         }
-        
+
         if (result.code === 200) {
             const cCount = result.data.c_points_count || 0;
             const rCount = result.data.r_points_count || 0;
-            
+
             // 保存MACD数据（如果有）
             if (result.data.macd) {
                 window.currentMACDData = result.data.macd;
                 console.log('MACD数据已更新');
             }
-            
+
             // 保存MA数据（如果有）
             if (result.data.ma) {
                 window.currentMAData = result.data.ma;
                 console.log('MA数据已更新', Object.keys(result.data.ma));
             }
-            
+
             // 🔥 自动加载时不弹提示框，控制台输出即可
             console.log(`✅ CR点加载完成！C点(买入信号): ${cCount}个, R点(卖出信号): ${rCount}个`);
-            
+
             // 使用实时计算的结果直接显示
             await loadCRPoints(result.data);
 
@@ -2517,18 +2528,18 @@ async function analyzeCRPoints() {
 // 加载CR点数据（实时计算）
 async function loadCRPoints(existingData = null) {
     if (!currentStockCode) return;
-    
+
     try {
         let c_points = [];
         let r_points = [];
         let rejected_c_points = [];
-        
+
         // 如果传入了已有数据，直接使用
         if (existingData) {
             c_points = existingData.c_points || [];
             r_points = existingData.r_points || [];
             rejected_c_points = existingData.rejected_c_points || [];
-            
+
             // 添加策略2相关数据
             if (existingData.strategy2_c_points) {
                 crPointsData.strategy2_c_points = existingData.strategy2_c_points;
@@ -2536,15 +2547,15 @@ async function loadCRPoints(existingData = null) {
             if (existingData.strategy2_scores) {
                 crPointsData.strategy2_scores = existingData.strategy2_scores;
             }
-            
+
             // 添加策略1评分数据
             if (existingData.strategy1_scores) {
                 crPointsData.strategy1_scores = existingData.strategy1_scores;
                 console.log('✅ 保存strategy1_scores到crPointsData，数量:', Object.keys(existingData.strategy1_scores).length);
             }
-            
-            console.log('使用已有的CR点数据:', { 
-                c_points: c_points.length, 
+
+            console.log('使用已有的CR点数据:', {
+                c_points: c_points.length,
                 r_points: r_points.length,
                 rejected_c_points: rejected_c_points.length,
                 strategy2_c_points: (existingData.strategy2_c_points || []).length,
@@ -2556,9 +2567,9 @@ async function loadCRPoints(existingData = null) {
             const selectedOption = stockSelect.options[stockSelect.selectedIndex];
             const stockName = selectedOption.dataset.name || '';
             const stockNature = selectedOption.dataset.nature || currentStrategy || '波段';
-            
+
             console.log('实时计算CR点...', { stockCode: currentStockCode, stockName });
-            
+
             const response = await fetch(`${API_BASE_URL}/cr_points/analyze`, {
                 method: 'POST',
                 headers: {
@@ -2572,15 +2583,15 @@ async function loadCRPoints(existingData = null) {
                     stockNature: stockNature
                 })
             });
-            
+
             const result = await response.json();
             console.log('实时计算CR点结果:', result);
-            
+
             if (result.code === 200) {
                 c_points = result.data.c_points || [];
                 r_points = result.data.r_points || [];
                 rejected_c_points = result.data.rejected_c_points || [];
-                
+
                 // 保存策略2相关数据
                 if (result.data.strategy2_c_points) {
                     crPointsData.strategy2_c_points = result.data.strategy2_c_points;
@@ -2588,7 +2599,7 @@ async function loadCRPoints(existingData = null) {
                 if (result.data.strategy2_scores) {
                     crPointsData.strategy2_scores = result.data.strategy2_scores;
                 }
-                
+
                 // 🔥 获取最新一天的CR点（如果有预测数据的话）
                 try {
                     console.log('正在获取最新一天的CR点...');
@@ -2603,17 +2614,17 @@ async function loadCRPoints(existingData = null) {
                             stockNature: stockNature
                         })
                     });
-                    
+
                     const latestResult = await latestResponse.json();
                     console.log('最新一天CR点结果:', latestResult);
-                    
+
                     if (latestResult.code === 0 && latestResult.data && latestResult.data.success) {
                         const latestData = latestResult.data;
-                        
+
                         // 合并最新一天的策略评分
                         if (latestData.date) {
                             console.log(`✅ 合并最新一天(${latestData.date})的CR点数据`);
-                            
+
                             // 合并策略1评分
                             if (latestData.strategy1) {
                                 result.data.strategy1_scores = result.data.strategy1_scores || {};
@@ -2621,7 +2632,7 @@ async function loadCRPoints(existingData = null) {
                                 crPointsData.strategy1_scores = result.data.strategy1_scores;
                                 console.log(`  ✅ 策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
                             }
-                            
+
                             // 合并策略2评分
                             if (latestData.strategy2) {
                                 result.data.strategy2_scores = result.data.strategy2_scores || {};
@@ -2639,20 +2650,20 @@ async function loadCRPoints(existingData = null) {
                 return;
             }
         }
-        
+
         // 保存CR点数据
         crPointsData.c_points = c_points;
         crPointsData.r_points = r_points;
         crPointsData.rejected_c_points = rejected_c_points;
-        
+
         // 默认显示CR点，更新图表
         if (chart) {
             updateChartWithCRPoints();
         }
-        
+
         // 更新统计信息
         updateCRPointsStats();
-        
+
         // 如果有C点数据且当前是日K线，更新回测提示
         if (c_points.length > 0 && currentPeriod === 'day') {
             const backtestHint = document.querySelector('.backtest-hint');
@@ -2661,7 +2672,7 @@ async function loadCRPoints(existingData = null) {
                 backtestHint.style.color = '#28a745';
             }
         }
-        
+
     } catch (error) {
         console.error('加载CR点失败:', error);
     }
@@ -2670,13 +2681,13 @@ async function loadCRPoints(existingData = null) {
 // 切换CR点显示
 function toggleCRPoints() {
     showCRPoints = !showCRPoints;
-    
+
     const toggleBtn = document.getElementById('toggleCRBtn');
     if (toggleBtn) {
         toggleBtn.textContent = showCRPoints ? '✅ 隐藏CR点' : '👁️ 显示CR点';
         toggleBtn.style.background = showCRPoints ? '#26a69a' : '#4a90e2';
     }
-    
+
     if (chart) {
         updateChartWithCRPoints();
     }
@@ -2685,22 +2696,22 @@ function toggleCRPoints() {
 // 更新图表显示CR点
 function updateChartWithCRPoints() {
     if (!chart) return;
-    
+
     // 只在日K线时显示CR点，30分钟、周线、月线不显示
     if (currentPeriod !== 'day') {
         console.log(`[${currentPeriod}] 非日K线，跳过CR点渲染`);
         return;
     }
-    
+
     const currentOption = chart.getOption();
     let currentSeries = currentOption.series || [];
-    
+
     // 移除旧的CR点标记系列
     currentSeries = currentSeries.filter(s => s.name !== 'C点' && s.name !== 'R点' && s.name !== '被否决C点' && s.name !== '策略2C');
-    
+
     if (showCRPoints && crPointsData) {
         const dates = currentOption.xAxis[0].data;
-        
+
         // 创建一个日期映射，将K线的日期转换为日期字符串（去掉时间部分）用于匹配
         const dateMap = new Map();
         dates.forEach((dateStr, index) => {
@@ -2710,7 +2721,7 @@ function updateChartWithCRPoints() {
                 dateMap.set(dateOnly, index);
             }
         });
-        
+
         // 添加C点标记（金色或红色，在K线下方）
         if (crPointsData.c_points && crPointsData.c_points.length > 0) {
             const cPointData = crPointsData.c_points.map(point => {
@@ -2720,7 +2731,7 @@ function updateChartWithCRPoints() {
                     // 判断是否为金色C点
                     const isGolden = point.isGolden || false;
                     const cColor = isGolden ? '#FFD700' : '#ff0000';  // 金色或红色
-                    
+
                     return {
                         value: [index, point.lowPrice],
                         cPointInfo: {
@@ -2748,7 +2759,7 @@ function updateChartWithCRPoints() {
                 }
                 return null;
             }).filter(item => item !== null);
-            
+
             if (cPointData.length > 0) {
                 const cPointSeries = {
                     name: 'C点',
@@ -2761,7 +2772,7 @@ function updateChartWithCRPoints() {
                 currentSeries.push(cPointSeries);
             }
         }
-        
+
         // 被否决的C点不显示在图表上（隐藏）
         // 如果需要显示，取消下面的注释
         /*
@@ -2811,7 +2822,7 @@ function updateChartWithCRPoints() {
             }
         }
         */
-        
+
         // 添加策略2 C点标记（金色或紫色矩形，在K线下方，标记为"C"）
         if (crPointsData.strategy2_c_points && crPointsData.strategy2_c_points.length > 0) {
             const strategy2CPointData = crPointsData.strategy2_c_points.map(point => {
@@ -2821,7 +2832,7 @@ function updateChartWithCRPoints() {
                     // 判断是否为金色C点
                     const isGolden = point.isGolden || false;
                     const s2Color = isGolden ? '#FFD700' : '#9C27B0';  // 金色或紫色
-                    
+
                     return {
                         value: [index, point.lowPrice * 0.995],  // 略微降低位置，避免与策略1重叠
                         cPointInfo: {
@@ -2849,7 +2860,7 @@ function updateChartWithCRPoints() {
                 }
                 return null;
             }).filter(item => item !== null);
-            
+
             if (strategy2CPointData.length > 0) {
                 const strategy2CPointSeries = {
                     name: '策略2C',
@@ -2862,7 +2873,7 @@ function updateChartWithCRPoints() {
                 currentSeries.push(strategy2CPointSeries);
             }
         }
-        
+
         // 添加R点标记（绿色，在K线上方）
         if (crPointsData.r_points && crPointsData.r_points.length > 0) {
             const rPointData = crPointsData.r_points.map(point => {
@@ -2894,7 +2905,7 @@ function updateChartWithCRPoints() {
                 }
                 return null;
             }).filter(item => item !== null);
-            
+
             if (rPointData.length > 0) {
                 const rPointSeries = {
                     name: 'R点',
@@ -2908,7 +2919,7 @@ function updateChartWithCRPoints() {
             }
         }
     }
-    
+
     chart.setOption({
         series: currentSeries
     });
@@ -2923,13 +2934,13 @@ function updateCRPointsStats() {
             statsEl.textContent = '仅日K线支持';
             return;
         }
-        
+
         // c_points现在只包含策略1的C点
         const strategy1Count = crPointsData.c_points ? crPointsData.c_points.length : 0;
         const strategy2Count = crPointsData.strategy2_c_points ? crPointsData.strategy2_c_points.length : 0;
         const totalCCount = strategy1Count + strategy2Count;
         const rCount = crPointsData.r_points ? crPointsData.r_points.length : 0;
-        
+
         // 显示C点和R点数量，区分策略1和策略2
         let text = `C点(买入): ${totalCCount}`;
         if (strategy2Count > 0) {
@@ -2944,9 +2955,9 @@ function updateCRPointsStats() {
 function updateBacktestButtonState(period) {
     const backtestBtn = document.getElementById('backtestBtn');
     const backtestHint = document.querySelector('.backtest-hint');
-    
+
     if (!backtestBtn) return;
-    
+
     if (period === 'day') {
         backtestBtn.disabled = false;
         backtestBtn.style.opacity = '1';
@@ -2974,24 +2985,24 @@ async function runBacktest() {
             alert('请先选择股票');
             return;
         }
-        
+
         // 检查是否是日K线
         if (currentPeriod !== 'day') {
             alert('回测功能仅支持日K线，请切换到日K线周期后再试');
             return;
         }
-        
+
         // 检查是否有CR点数据（策略1或策略2的C点）
         const hasCPoints = crPointsData && (
             (crPointsData.c_points && crPointsData.c_points.length > 0) ||
             (crPointsData.strategy2_c_points && crPointsData.strategy2_c_points.length > 0)
         );
-        
+
         if (!hasCPoints) {
             alert('当前没有C点数据，无法进行回测\n\n提示：\n1. 请确保已切换到日K线\n2. 系统会自动分析日K线的CR点\n3. 等待CR点加载完成后再点击回测');
             return;
         }
-        
+
         const backtestResult = document.getElementById('backtestResult');
         backtestResult.innerHTML = `
             <div class="loading" style="padding: 20px;">
@@ -2999,25 +3010,25 @@ async function runBacktest() {
                 <p>正在计算回测结果...</p>
             </div>
         `;
-        
+
         console.log('='.repeat(60));
         console.log('开始回测:');
         console.log('  股票代码:', currentStockCode);
         console.log('  表名:', currentTableName);
-        
+
         // 合并策略1和策略2的C点
         const allCPoints = [
             ...(crPointsData.c_points || []),
             ...(crPointsData.strategy2_c_points || [])
         ];
-        
+
         console.log('  策略1 C点数量:', (crPointsData.c_points || []).length);
         console.log('  策略2 C点数量:', (crPointsData.strategy2_c_points || []).length);
         console.log('  总C点数量:', allCPoints.length);
         console.log('  R点数量:', crPointsData.r_points.length);
         console.log('  所有C点详情:', allCPoints);
         console.log('  R点详情:', crPointsData.r_points);
-        
+
         // 调用回测API
         const startMonth = document.getElementById('btStartDate')?.value || '';
         const endMonth = document.getElementById('btEndDate')?.value || '';
@@ -3045,10 +3056,10 @@ async function runBacktest() {
                 backtestConfig
             })
         });
-        
+
         const result = await response.json();
         console.log('回测响应:', result);
-        
+
         // 检查业务逻辑是否成功（无论HTTP状态码）
         if (result.code !== 200 || !response.ok) {
             // 显示详细的错误信息
@@ -3068,10 +3079,10 @@ async function runBacktest() {
             `;
             return;
         }
-        
+
         // 显示回测结果
         displayBacktestResult(result.data);
-        
+
     } catch (error) {
         console.error('回测失败:', error);
         const backtestResult = document.getElementById('backtestResult');
@@ -3089,7 +3100,7 @@ function displayBacktestResult(data) {
     const backtestResult = document.getElementById('backtestResult');
     const summary = data.summary;
     const trades = data.trades;
-    
+
     // 如果没有任何交易数据
     if (!trades || trades.length === 0) {
         backtestResult.innerHTML = `
@@ -3106,7 +3117,7 @@ function displayBacktestResult(data) {
         `;
         return;
     }
-    
+
     let html = `
         <div class="backtest-summary">
             <h3>📊 回测汇总</h3>
@@ -3178,7 +3189,7 @@ function displayBacktestResult(data) {
                     </thead>
                     <tbody>
     `;
-    
+
     trades.forEach((trade, index) => {
         const returnClass = trade.return_rate > 0 ? 'positive' : (trade.return_rate < 0 ? 'negative' : '');
         const statusText = trade.status === 'holding' ? '持仓中' : '已完成';
@@ -3213,7 +3224,7 @@ function displayBacktestResult(data) {
             if (rPluginNames.length) return rPluginNames.join('，');
             return '';
         })();
-        
+
         html += `
             <tr>
                 <td>${index + 1}</td>
@@ -3233,14 +3244,14 @@ function displayBacktestResult(data) {
             </tr>
         `;
     });
-    
+
     html += `
                     </tbody>
                 </table>
             </div>
         </div>
     `;
-    
+
     backtestResult.innerHTML = html;
 }
 
@@ -3248,10 +3259,10 @@ function displayBacktestResult(data) {
 function startAutoRefresh() {
     // 清除已有的定时器
     stopAutoRefresh();
-    
+
     const refreshIntervalMs = 5 * 60 * 1000; // 5分钟
     console.log(`[自动刷新] 启动定时器，每${refreshIntervalMs / 60000}分钟更新一次最新数据`);
-    
+
     // 设置定时器，每5分钟更新一次
     autoRefreshInterval = setInterval(async () => {
         if (currentPeriod === 'day' && currentTableName && chart) {
@@ -3282,16 +3293,16 @@ async function refreshLatestKline() {
     try {
         console.log('[刷新最新K线] 获取最新数据...');
         const latestKlineData = await fetchLatestDayKline(currentTableName);
-        
+
         if (!latestKlineData || !chart) {
             console.log('[刷新最新K线] 没有新数据或图表不存在');
             return;
         }
-        
+
         const currentOption = chart.getOption();
         const currentDates = currentOption.xAxis[0].data;
         const currentValues = currentOption.series[0].data;
-        
+
         let volumeSeries = null;
         for (let series of currentOption.series) {
             if (series.name === '成交量') {
@@ -3299,16 +3310,16 @@ async function refreshLatestKline() {
                 break;
             }
         }
-        
+
         if (!volumeSeries) {
             console.error('[刷新最新K线] 找不到成交量series');
             return;
         }
-        
+
         const viewState = captureViewState(currentOption);
 
         console.log('[刷新最新K线] 找到成交量series，数据长度:', volumeSeries.data.length);
-        
+
         const baseKlineData = currentDates.map((date, index) => {
             const value = currentValues[index];
             const volumeData = volumeSeries.data[index];
@@ -3323,17 +3334,17 @@ async function refreshLatestKline() {
                 weibi: 0
             };
         });
-        
+
         const latestDate = latestKlineData.time.split(' ')[0];
         const existingIndex = currentDates.findIndex(date => date.split(' ')[0] === latestDate);
-        
+
         let needUpdate = false;
         let klineData = baseKlineData;
-        
+
         if (existingIndex >= 0) {
             const existingValue = currentValues[existingIndex];
             const existingVolume = volumeSeries.data[existingIndex];
-            
+
             if (
                 existingValue[0] !== latestKlineData.open ||
                 existingValue[1] !== latestKlineData.close ||
@@ -3352,23 +3363,23 @@ async function refreshLatestKline() {
             needUpdate = true;
             klineData = [...baseKlineData, latestKlineData];
         }
-        
+
         let macdData = window.currentMACDData;
         let maData = window.currentMAData;
-        
+
         if (needUpdate) {
             console.log('[刷新最新K线] 重新计算技术指标...');
             console.log('[刷新最新K线] K线数据长度:', klineData.length);
             macdData = calculateMACD(klineData);
             maData = calculateMA(klineData, [5, 10, 20]);
             console.log('[刷新最新K线] MA5长度:', maData.ma5?.length, 'MA10长度:', maData.ma10?.length, 'MA20长度:', maData.ma20?.length);
-            
+
             window.currentMACDData = macdData;
             window.currentMAData = maData;
         } else {
             console.log('[刷新最新K线] K线无变化，复用已有技术指标');
         }
-        
+
         let predictedVolumeChanged = false;
         try {
             const predicted = await fetchPredictedVolume(currentTableName);
@@ -3380,7 +3391,7 @@ async function refreshLatestKline() {
         } catch (error) {
             console.error('[刷新最新K线] 更新预测成交量失败:', error);
         }
-        
+
         let latestCRUpdated = false;
         try {
             const stockSelect = document.getElementById('stockSelect');
@@ -3397,13 +3408,13 @@ async function refreshLatestKline() {
                     stockNature: stockNature
                 })
             });
-            
+
             const latestResult = await latestResponse.json();
             console.log('[刷新最新K线] 获取最新CR点数据成功:', latestResult);
-            
+
             if (latestResult.code === 200 && latestResult.data && latestResult.data.success) {
                 const latestData = latestResult.data;
-                
+
                 if (latestData.date) {
                     if (latestData.strategy1) {
                         if (!crPointsData.strategy1_scores) {
@@ -3413,7 +3424,7 @@ async function refreshLatestKline() {
                         latestCRUpdated = true;
                         console.log(`[刷新最新K线] 更新策略1评分: ${latestData.strategy1.score.toFixed(2)}`);
                     }
-                    
+
                     if (latestData.strategy2) {
                         if (!crPointsData.strategy2_scores) {
                             crPointsData.strategy2_scores = {};
@@ -3427,21 +3438,21 @@ async function refreshLatestKline() {
         } catch (latestError) {
             console.warn('[刷新最新K线] 获取最新CR点失败:', latestError);
         }
-        
+
         const shouldRerender = needUpdate || predictedVolumeChanged || latestCRUpdated;
         if (shouldRerender) {
             console.log('[刷新最新K线] 重新渲染图表...');
             await renderChart(klineData, {}, 'day', viewState);
-            
+
             if (chart) {
                 updateChartWithCRPoints();
             }
-            
+
             console.log('[刷新最新K线] ✅ 更新完成');
         } else {
             console.log('[刷新最新K线] 无需重渲染，保持当前视图');
         }
-        
+
     } catch (error) {
         console.error('[刷新最新K线] 刷新失败:', error);
     }

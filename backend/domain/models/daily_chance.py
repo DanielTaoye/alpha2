@@ -21,6 +21,7 @@ class DailyChance:
     volume_type: Optional[str] = None  # 成交量类型(A/B/C/D/E/F/G/H/X/Y/Z)
     bullish_pattern: Optional[str] = None  # 多头组合
     bearish_pattern: Optional[str] = None  # 空头组合
+    huanshou: Optional[float] = None  # 换手率（百分比，如 9.5 表示 9.5%）
     created_at: Optional[datetime] = None  # 创建时间
     
     def to_dict(self) -> dict:
@@ -40,6 +41,8 @@ class DailyChance:
             'volumeType': self.volume_type,
             'bullishPattern': self.bullish_pattern,
             'bearishPattern': self.bearish_pattern,
+            'huanshou': self.huanshou,
             'createdAt': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
         }
+
 

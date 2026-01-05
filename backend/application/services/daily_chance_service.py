@@ -1,6 +1,7 @@
-"""每日机会应用服务"""
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
+import pymysql
+import pymysql.cursors
 from domain.models.daily_chance import DailyChance
 from domain.models.stock import StockGroups
 from domain.repositories.daily_chance_repository import IDailyChanceRepository
@@ -8,6 +9,18 @@ from infrastructure.external_apis.daily_chance_api import DailyChanceApiClient
 from infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 只读库配置（用于查询换手率数据）
+READONLY_DB_CONFIG = {
+    'host': 'sh-cdbrg-8f14w39q.sql.tencentcdb.com',
+    'port': 25924,
+    'user': 'root',
+    'password': 'MrEPYZus7myr',
+    'database': 'stock',
+    'charset': 'utf8mb4',
+    'connect_timeout': 10,
+    'read_timeout': 10,
+}
 
 
 class DailyChanceService:
@@ -122,11 +135,68 @@ class DailyChanceService:
         
         return result
     
+    def _merge_turnover_rates(self, daily_chances: List[DailyChance]) -> List[DailyChance]:
+        """合并换手率数据"""
+        if not daily_chances:
+            return daily_chances
+            
+        try:
+            # 提取股票代码和日期范围
+            stock_code = daily_chances[0].stock_code
+            dates = [dc.date.strftime('%Y-%m-%d') for dc in daily_chances if dc.date]
+            
+            if not dates:
+                return daily_chances
+                
+            start_date = min(dates)
+            end_date = max(dates)
+            
+            # 从只读库查询换手率
+            conn = pymysql.connect(**READONLY_DB_CONFIG)
+            try:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                sql = """
+                    SELECT DATE(date) as date, Huanshou as huanshou
+                    FROM b_daily_chance 
+                    WHERE stock_code = %s AND date >= %s AND date <= %s
+                """
+                cursor.execute(sql, (stock_code, start_date, end_date))
+                rows = cursor.fetchall()
+                
+                # 构建换手率映射 {date_str: huanshou}
+                turnover_map = {}
+                for row in rows:
+                    if row['date'] and row['huanshou']:
+                        date_str = str(row['date'])
+                        try:
+                            turnover_map[date_str] = float(row['huanshou'])
+                        except (ValueError, TypeError):
+                            pass
+                
+                # 填充换手率
+                for dc in daily_chances:
+                    if dc.date:
+                        date_str = dc.date.strftime('%Y-%m-%d')
+                        if date_str in turnover_map:
+                            dc.huanshou = turnover_map[date_str]
+                            
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"合并换手率数据失败: {e}")
+            
+        return daily_chances
+
     def get_daily_chance_by_stock(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[DailyChance]:
         """获取股票的每日机会数据"""
-        return self.repository.find_by_stock_code(stock_code, start_date, end_date)
+        daily_chances = self.repository.find_by_stock_code(stock_code, start_date, end_date)
+        return self._merge_turnover_rates(daily_chances)
     
     def get_daily_chance_by_date(self, date: str) -> List[DailyChance]:
         """获取指定日期的所有股票机会数据"""
+        # 注意：按日期查询通常是查所有股票，这里暂不合并换手率以避免N+1查询性能问题
+        # 如果确实需要，应优化批量查询逻辑
         return self.repository.find_by_date(date)
+
 
