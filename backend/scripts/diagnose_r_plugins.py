@@ -2617,7 +2617,7 @@ def diagnose_high_stagnation_bearish(stock_code: str, date_str: str, current_dat
         from domain.services.config_service import get_config_service
         gain_threshold_pct = get_config_service().get_high_stagnation_gain_threshold()
     except Exception:
-        gain_threshold_pct = 15.0
+        gain_threshold_pct = 25.0
     
     if not current_chance or not prev_chance:
         print("  ❌ 缺少当日或前一日daily_chance数据")

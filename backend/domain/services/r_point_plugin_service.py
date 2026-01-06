@@ -55,6 +55,9 @@ class RPointPluginService:
         self._daily_chance_cache = {}  # {date_str: DailyChance}
         self._sorted_dates = []  # 🚀 性能优化：预排序日期列表，避免每次都 sorted()
         self._cr_history_cache = {}  # {(stock_code, cutoff_date): {'c': [...], 'r': [...]}}
+        # kline_data 日期->索引缓存：用于按“C点日期”取 MA20/MACD 序列值
+        self._kline_date_index_cache_key = None
+        self._kline_date_index_cache = None
         # 🚀 性能优化：换手率缓存（优先来自已预加载的 daily_chance.huanshou）
         # {date_str: huanshou_percent_float}
         self._turnover_rate_cache = {}
@@ -115,6 +118,8 @@ class RPointPluginService:
         self._daily_cache = {}
         self._daily_chance_cache = {}
         self._sorted_dates = []
+        self._kline_date_index_cache_key = None
+        self._kline_date_index_cache = None
         self._turnover_rate_cache = {}
         self._turnover_prefetch_attempted = False
         self._turnover_prefetch_stock_code = None
@@ -125,7 +130,9 @@ class RPointPluginService:
                      ma_data: Optional[dict] = None, macd_data: Optional[dict] = None, 
                      current_index: Optional[int] = None, kline_data: Optional[list] = None,
                      last_valid_point_type: Optional[str] = None,
-                     last_c_point_type: Optional[str] = None) -> Tuple[bool, List[RPointPluginResult]]:
+                     last_c_point_type: Optional[str] = None,
+                     historical_c_points: Optional[list] = None,
+                     historical_r_points: Optional[list] = None) -> Tuple[bool, List[RPointPluginResult]]:
         """
         检查是否触发R点（卖出信号）
         
@@ -185,6 +192,24 @@ class RPointPluginService:
             triggered_plugins.append(plugin6)
             logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin6.reason}")
             return True, triggered_plugins
+
+        # 插件14: 横盘震荡+风险信号
+        # 依赖：历史C/R点序列（C不落库，只能由上层 analyze 循环传入），以及 MA/MACD 序列用于横盘与风险判定
+        if kline_data is not None and current_index is not None and ma_data is not None and (historical_c_points or historical_r_points):
+            plugin14 = self._check_sideways_oscillation_risk(
+                stock_code=stock_code,
+                date=date,
+                ma_data=ma_data,
+                macd_data=macd_data,
+                current_index=current_index,
+                kline_data=kline_data,
+                historical_c_points=historical_c_points or [],
+                historical_r_points=historical_r_points or [],
+            )
+            if plugin14.triggered:
+                triggered_plugins.append(plugin14)
+                logger.info(f"[R点插件-横盘震荡+风险信号] {stock_code} {date}: {plugin14.reason}")
+                return True, triggered_plugins
 
         # 插件13: 阶段涨幅过大（30交易日涨幅>=30% + 任意量型 + 跌破MA20(昨>今<) + DIF<DEA）
         if ma_data and macd_data and current_index is not None:
@@ -260,6 +285,330 @@ class RPointPluginService:
             return True, triggered_plugins
 
         return False, triggered_plugins
+
+    # =========================
+    # 插件14：横盘震荡+风险信号
+    # =========================
+    def _check_sideways_oscillation_risk(
+        self,
+        stock_code: str,
+        date: datetime,
+        ma_data: dict,
+        macd_data: Optional[dict],
+        current_index: int,
+        kline_data: list,
+        historical_c_points: list,
+        historical_r_points: list,
+    ) -> RPointPluginResult:
+        """
+        横盘震荡+风险信号（用户定义版）
+
+        横盘阶段判定（以“最近一次R之后的连续C序列”为横盘锚定）：
+        - 从“今日之前”的最后一个有效信号开始回溯，若上个信号是C，则继续向前找上上个C，直到再上个是R；
+          取这段 C 序列中：
+            - 离上个R最近的第一个C（最早的C / 离今天最远的C） 记为 firstC
+            - 今日最近的上个C（最新的C）记为 lastC
+        - 认为处于横盘阶段需同时满足：
+            1) abs(lastC_support - firstC_support) / firstC_support < 6%
+            2) abs(lastC_open - firstC_open) / firstC_open < 2%
+            3) 对该段内每个C点日：abs(C_open - C_MA20) / C_open < 6%
+        - 横盘阶段“直到下个R为止”（在CR循环里，本插件触发即产生下个R，结束横盘）
+
+        横盘阶段内的风险触发（满足任一即出R）：
+        1) 跌破或已跌破 MA20 + MACD已死叉(DEA>DIF)
+        2) 跌破或已跌破 最近C日支撑位 + MACD已死叉(DEA>DIF)
+        3) 当日有任意成交量类型 + 跌破或已跌破 最近C日支撑位
+        4) 当日有任意成交量类型 + 跌破或已跌破 MA20
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else str(date)
+
+            # 需要 MA20 序列
+            ma20_list = ma_data.get("ma20") if isinstance(ma_data, dict) else None
+            if not ma20_list or current_index >= len(ma20_list):
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+            ma20_today = ma20_list[current_index]
+            if ma20_today is None or ma20_today <= 0:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            # 当前日数据
+            current_data = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_data:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+            current_close = getattr(current_data, "close", 0) or 0
+            current_low = getattr(current_data, "low", 0) or 0
+
+            # 当前日 daily_chance（成交量类型）
+            current_chance = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            volume_type_str = getattr(current_chance, "volume_type", None) if current_chance else None
+            has_any_volume_type = bool(str(volume_type_str).strip()) if volume_type_str is not None else False
+
+            # 组装“今日之前”的有效点序列（来自上层传入的历史点列表；C不落库，必须依赖该序列）
+            points = []
+            for p in (historical_c_points or []) + (historical_r_points or []):
+                info = self._extract_cr_point_info(p)
+                if not info:
+                    continue
+                # 只考虑今日之前
+                if info["dt"] and info["dt"] < date:
+                    points.append(info)
+
+            if not points:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            points.sort(key=lambda x: x["dt"])
+            last_sig = points[-1]
+            if last_sig["type"] != "C":
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            # 回溯：从 last_sig 往前数连续的C，直到遇到R
+            idx = len(points) - 1
+            j = idx - 1
+            while j >= 0 and points[j]["type"] == "C":
+                j -= 1
+            if j < 0 or points[j]["type"] != "R":
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            c_segment = points[j + 1 : idx + 1]  # 连续C序列（R之后）
+            if len(c_segment) < 2:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            first_c = c_segment[0]  # 离上个R最近的第一个C（最早的C）
+            last_c = c_segment[-1]  # 今日最近的上个C（最新的C）
+
+            # 取C点支撑位（来自 daily_chance.support_price）
+            first_support = self._get_support_price_actual(stock_code, first_c["date_str"])
+            last_support = self._get_support_price_actual(stock_code, last_c["date_str"])
+            if not first_support or not last_support or first_support <= 0:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            # 取C点开盘价（优先来自点本身；兜底用 daily）
+            first_open = first_c.get("open_price") or self._get_daily_open(stock_code, first_c["date_str"])
+            last_open = last_c.get("open_price") or self._get_daily_open(stock_code, last_c["date_str"])
+            if not first_open or not last_open or first_open <= 0:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            support_delta_pct = abs(last_support - first_support) / first_support * 100
+            open_delta_pct = abs(last_open - first_open) / first_open * 100
+            if support_delta_pct >= 6.0 or open_delta_pct >= 2.0:
+                return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            # 每个C点日：开盘价与MA20接近
+            for c_info in c_segment:
+                c_open = c_info.get("open_price") or self._get_daily_open(stock_code, c_info["date_str"])
+                if not c_open or c_open <= 0:
+                    return RPointPluginResult("横盘震荡+风险信号", False, "")
+                c_ma20 = self._get_ma20_by_date_str(ma20_list, kline_data, c_info["date_str"])
+                if c_ma20 is None or c_ma20 <= 0:
+                    return RPointPluginResult("横盘震荡+风险信号", False, "")
+                ma20_delta_pct = abs(c_open - c_ma20) / c_open * 100
+                if ma20_delta_pct >= 6.0:
+                    return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+            # 横盘阶段成立，开始判断风险触发
+            # 最近1个C的支撑位
+            last_c_support = last_support
+
+            # 取前一交易日（用于“已跌破”）
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            prev_date_str = prev_dates[0] if prev_dates else None
+            prev_data = None
+            prev_ma20 = None
+            if prev_date_str:
+                prev_data = self._daily_cache.get(prev_date_str) or self.daily_repo.find_by_date(stock_code, prev_date_str)
+                if current_index - 1 >= 0 and current_index - 1 < len(ma20_list):
+                    prev_ma20 = ma20_list[current_index - 1]
+
+            def _below_or_was_below_price(threshold: float) -> bool:
+                if not threshold or threshold <= 0:
+                    return False
+                # 今日：收/最低任一跌破
+                if (current_close and current_close < threshold) or (current_low and current_low < threshold):
+                    return True
+                # 已跌破：前一交易日收/最低任一跌破
+                if prev_data is not None:
+                    pc = getattr(prev_data, "close", 0) or 0
+                    pl = getattr(prev_data, "low", 0) or 0
+                    if (pc and pc < threshold) or (pl and pl < threshold):
+                        return True
+                return False
+
+            def _below_or_was_below_ma20() -> bool:
+                if ma20_today and ((current_close and current_close < ma20_today) or (current_low and current_low < ma20_today)):
+                    return True
+                if prev_data is not None and prev_ma20 and prev_ma20 > 0:
+                    pc = getattr(prev_data, "close", 0) or 0
+                    pl = getattr(prev_data, "low", 0) or 0
+                    if (pc and pc < prev_ma20) or (pl and pl < prev_ma20):
+                        return True
+                return False
+
+            # MACD死叉状态：DEA > DIF
+            is_dead_cross = False
+            dif_v = None
+            dea_v = None
+            if macd_data and isinstance(macd_data, dict):
+                dif_list = macd_data.get("dif") or []
+                dea_list = macd_data.get("dea") or []
+                if current_index < len(dif_list) and current_index < len(dea_list):
+                    dif_v = dif_list[current_index]
+                    dea_v = dea_list[current_index]
+                    if dif_v is not None and dea_v is not None:
+                        is_dead_cross = dea_v > dif_v
+
+            break_ma20 = _below_or_was_below_ma20()
+            break_c_support = _below_or_was_below_price(last_c_support)
+
+            # 规则1/2 需要死叉；3/4 需要任意量型
+            if break_ma20 and is_dead_cross:
+                return RPointPluginResult(
+                    "横盘震荡+风险信号",
+                    True,
+                    f"横盘成立(firstC={first_c['date_str']},lastC={last_c['date_str']},支撑差{support_delta_pct:.2f}%,开盘差{open_delta_pct:.2f}%) "
+                    f"+ 跌破/已跌破MA20({ma20_today:.2f}) + MACD死叉(DEA>{dea_v if dea_v is not None else 'None'},DIF={dif_v if dif_v is not None else 'None'})"
+                )
+
+            if break_c_support and is_dead_cross:
+                return RPointPluginResult(
+                    "横盘震荡+风险信号",
+                    True,
+                    f"横盘成立(firstC={first_c['date_str']},lastC={last_c['date_str']},支撑差{support_delta_pct:.2f}%,开盘差{open_delta_pct:.2f}%) "
+                    f"+ 跌破/已跌破C支撑({last_c_support:.2f}) + MACD死叉(DEA>{dea_v if dea_v is not None else 'None'},DIF={dif_v if dif_v is not None else 'None'})"
+                )
+
+            if has_any_volume_type and break_c_support:
+                return RPointPluginResult(
+                    "横盘震荡+风险信号",
+                    True,
+                    f"横盘成立(firstC={first_c['date_str']},lastC={last_c['date_str']},支撑差{support_delta_pct:.2f}%,开盘差{open_delta_pct:.2f}%) "
+                    f"+ 任意量型({volume_type_str}) + 跌破/已跌破C支撑({last_c_support:.2f})"
+                )
+
+            if has_any_volume_type and break_ma20:
+                return RPointPluginResult(
+                    "横盘震荡+风险信号",
+                    True,
+                    f"横盘成立(firstC={first_c['date_str']},lastC={last_c['date_str']},支撑差{support_delta_pct:.2f}%,开盘差{open_delta_pct:.2f}%) "
+                    f"+ 任意量型({volume_type_str}) + 跌破/已跌破MA20({ma20_today:.2f})"
+                )
+
+            return RPointPluginResult("横盘震荡+风险信号", False, "")
+        except Exception as e:
+            logger.error(f"R点插件-横盘震荡+风险信号检查失败: {e}")
+            return RPointPluginResult("横盘震荡+风险信号", False, "")
+
+    def _extract_cr_point_info(self, point) -> Optional[dict]:
+        """
+        统一解析 CRPoint（对象或to_dict后的dict）：
+        返回：{type:'C'/'R', dt:datetime, date_str:'YYYY-MM-DD', open_price:float|None}
+        """
+        try:
+            if point is None:
+                return None
+
+            if isinstance(point, dict):
+                pt = point.get("pointType") or point.get("point_type") or ""
+                td = point.get("triggerDate") or point.get("trigger_date")
+                op = point.get("openPrice") or point.get("open_price") or point.get("open")
+            else:
+                pt = getattr(point, "point_type", "") or ""
+                td = getattr(point, "trigger_date", None)
+                op = getattr(point, "open_price", None)
+
+            pt_u = str(pt).upper()
+            norm_type = "C" if pt_u.startswith("C") else ("R" if pt_u.startswith("R") else None)
+            if norm_type is None:
+                return None
+
+            dt = None
+            if isinstance(td, str):
+                try:
+                    dt = datetime.strptime(td.split(" ")[0], "%Y-%m-%d")
+                except Exception:
+                    dt = None
+            elif hasattr(td, "strftime"):
+                dt = td
+            if not dt:
+                return None
+
+            date_str = dt.strftime("%Y-%m-%d")
+            open_price = None
+            try:
+                if op is not None:
+                    open_price = float(op)
+            except Exception:
+                open_price = None
+
+            return {"type": norm_type, "dt": dt, "date_str": date_str, "open_price": open_price}
+        except Exception:
+            return None
+
+    def _get_support_price_actual(self, stock_code: str, date_str: str) -> Optional[float]:
+        """取某日支撑位（daily_chance.support_price / 100），取不到返回None。"""
+        try:
+            dc = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            sp = getattr(dc, "support_price", None) if dc else None
+            if not sp or sp <= 0:
+                return None
+            return float(sp) / 100.0
+        except Exception:
+            return None
+
+    def _get_daily_open(self, stock_code: str, date_str: str) -> Optional[float]:
+        """取某日开盘价（daily.open），取不到返回None。"""
+        try:
+            d = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
+            op = getattr(d, "open", None) if d else None
+            if op is None:
+                return None
+            return float(op)
+        except Exception:
+            return None
+
+    def _get_kline_date_index_map(self, kline_data: list) -> dict:
+        """
+        为当前 kline_data 构建 date_str->index 映射（缓存到 service 实例，避免在循环里反复O(N)构建）
+        兼容 DomainKLineData / SimpleNamespace / dict（time/date字段）。
+        """
+        key = id(kline_data)
+        if self._kline_date_index_cache_key == key and isinstance(self._kline_date_index_cache, dict):
+            return self._kline_date_index_cache
+
+        m = {}
+        for i, k in enumerate(kline_data or []):
+            try:
+                t = None
+                if isinstance(k, dict):
+                    t = k.get("time") or k.get("date")
+                else:
+                    t = getattr(k, "time", None)
+                if isinstance(t, str):
+                    dt = datetime.strptime(t.split(" ")[0], "%Y-%m-%d")
+                elif hasattr(t, "strftime"):
+                    dt = t
+                else:
+                    continue
+                m[dt.strftime("%Y-%m-%d")] = i
+            except Exception:
+                continue
+
+        self._kline_date_index_cache_key = key
+        self._kline_date_index_cache = m
+        return m
+
+    def _get_ma20_by_date_str(self, ma20_list: list, kline_data: list, date_str: str) -> Optional[float]:
+        """按日期取MA20（依赖kline_data与ma20_list对齐）。"""
+        try:
+            idx_map = self._get_kline_date_index_map(kline_data)
+            idx = idx_map.get(date_str)
+            if idx is None:
+                return None
+            if idx < 0 or idx >= len(ma20_list):
+                return None
+            v = ma20_list[idx]
+            return float(v) if v is not None else None
+        except Exception:
+            return None
     
     def _check_deviation(self, stock_code: str, date: datetime,
                          ma_data: Optional[dict] = None,

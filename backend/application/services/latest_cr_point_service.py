@@ -498,7 +498,9 @@ class LatestCRPointService:
                 macd_data,
                 kline_data,
                 last_c_point_date,  # 传入最近的C点日期
-                last_valid_point_type=last_valid_point_type  # 传入最近有效点类型（允许插件2生效）
+                last_valid_point_type=last_valid_point_type,  # 传入最近有效点类型（允许插件2生效）
+                historical_c_points=historical_c_points,
+                historical_r_points=historical_r_points,
             )
             
             # 12. 不再需要清空缓存（全局缓存会自动管理）
@@ -785,7 +787,9 @@ class LatestCRPointService:
         macd_data: Dict,
         kline_data: List[Dict],
         c_point_date = None,  # 最近的C点日期
-        last_valid_point_type: Optional[str] = None  # 最近有效点类型（C/R）
+        last_valid_point_type: Optional[str] = None,  # 最近有效点类型（C/R）
+        historical_c_points: Optional[List] = None,  # 历史C点（来自CRPointService的to_dict结果）
+        historical_r_points: Optional[List] = None,  # 历史R点（来自CRPointService的to_dict结果）
     ) -> Dict:
         """检查R点"""
         try:
@@ -848,7 +852,9 @@ class LatestCRPointService:
                 macd_data,
                 current_index,
                 kline_objects,
-                last_valid_point_type=last_valid_point_type
+                last_valid_point_type=last_valid_point_type,
+                historical_c_points=historical_c_points,
+                historical_r_points=historical_r_points,
             )
             
             return {

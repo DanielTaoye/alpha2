@@ -123,11 +123,11 @@ class ConfigService:
                             "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
                         },
                         "high_position_r": {
-                            "gain_threshold_pct": 18.0,
+                            "gain_threshold_pct": 25.0,
                             "description": "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值"
                         },
                         "high_stagnation_bearish": {
-                            "gain_threshold_pct": 15.0,
+                            "gain_threshold_pct": 25.0,
                             "description": "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值"
                         }
                     },
@@ -162,11 +162,11 @@ class ConfigService:
         pressure_cfg.setdefault("description", "临近压力位滞涨插件-股价距离压力线的百分比阈值")
         
         high_position_cfg = r_cfg.setdefault("high_position_r", {})
-        high_position_cfg.setdefault("gain_threshold_pct", 18.0)
+        high_position_cfg.setdefault("gain_threshold_pct", 25.0)
         high_position_cfg.setdefault("description", "高位发R插件-前20个交易日最低价到当前价格的涨幅阈值")
         
         high_stagnation_cfg = r_cfg.setdefault("high_stagnation_bearish", {})
-        high_stagnation_cfg.setdefault("gain_threshold_pct", 15.0)
+        high_stagnation_cfg.setdefault("gain_threshold_pct", 25.0)
         high_stagnation_cfg.setdefault("description", "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值")
     
     def _save_config(self):
@@ -272,12 +272,12 @@ class ConfigService:
     def get_high_position_gain_threshold(self) -> float:
         """获取高位发R插件的涨幅阈值（百分比）"""
         config = self.get_config()
-        return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 18.0))
+        return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 25.0))
     
     def get_high_stagnation_gain_threshold(self) -> float:
         """获取高位滞涨+空头组合插件的高低点涨幅阈值（百分比）"""
         config = self.get_config()
-        return float(config.get('r_point_plugins', {}).get('high_stagnation_bearish', {}).get('gain_threshold_pct', 15.0))
+        return float(config.get('r_point_plugins', {}).get('high_stagnation_bearish', {}).get('gain_threshold_pct', 25.0))
     
     def update_config(self, strategy1_threshold: float = None, strategy2_threshold: float = None, market_type: str = None, 
                      pressure_distance_threshold: float = None, high_position_gain_threshold: float = None,

@@ -211,7 +211,10 @@ class CRPointService:
                 index,  # 传入当前K线索引（用于高位发R插件）
                 kline_data,  # 传入完整K线数据（用于箱体回踩插件）
                 last_valid_point_type=last_valid_point_type,  # 传入最近有效点类型，供插件2使用
-                last_c_point_type=last_c_point_type  # 传入最近C点类型（策略1/策略2）
+                last_c_point_type=last_c_point_type,  # 传入最近C点类型（策略1/策略2）
+                # 新R插件“横盘震荡+风险信号”需要历史点序列（C点不落库，只能依赖循环内累积的列表）
+                historical_c_points=(c_points + strategy2_c_points),
+                historical_r_points=r_points,
             )
             t_r_total += (perf_counter() - t_r0)
             r_calls += 1

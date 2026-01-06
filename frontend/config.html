@@ -829,9 +829,9 @@
                     document.getElementById('currentStrategy2').textContent = `短线 ${s2Short}分 | 波段 ${s2Swing}分 | 中长线 ${s2Mid}分`;
                     
                     // 更新R点插件参数显示
-                    const highPositionGain = config.r_point_plugins?.high_position_r?.gain_threshold_pct ?? 18.0;
+                    const highPositionGain = config.r_point_plugins?.high_position_r?.gain_threshold_pct ?? 25.0;
                     document.getElementById('currentHighPositionGain').textContent = highPositionGain + ' %';
-                    const highStagnationGain = config.r_point_plugins?.high_stagnation_bearish?.gain_threshold_pct ?? 15.0;
+                    const highStagnationGain = config.r_point_plugins?.high_stagnation_bearish?.gain_threshold_pct ?? 25.0;
                     document.getElementById('currentHighStagnationGain').textContent = highStagnationGain + ' %';
                     const pressureDistance = config.r_point_plugins?.pressure_stagnation?.distance_threshold_pct ?? 8.0;
                     document.getElementById('currentPressureDistance').textContent = pressureDistance + ' %';
