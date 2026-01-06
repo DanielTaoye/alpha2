@@ -185,6 +185,14 @@ class RPointPluginService:
             triggered_plugins.append(plugin6)
             logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin6.reason}")
             return True, triggered_plugins
+
+        # 插件13: 阶段涨幅过大（30交易日涨幅>=30% + 任意量型 + 跌破MA20(昨>今<) + DIF<DEA）
+        if ma_data and macd_data and current_index is not None:
+            plugin13 = self._check_stage_rally_too_high(stock_code, date, ma_data, macd_data, current_index)
+            if plugin13.triggered:
+                triggered_plugins.append(plugin13)
+                logger.info(f"[R点插件-阶段涨幅过大] {stock_code} {date}: {plugin13.reason}")
+                return True, triggered_plugins
         
         # 插件7: 高位发R
         if ma_data and macd_data and current_index is not None:
@@ -2806,4 +2814,100 @@ class RPointPluginService:
         except Exception as e:
             logger.error(f"R点插件-跌破支撑位检查失败: {e}")
             return RPointPluginResult("跌破支撑位", False, "")
+
+    def _check_stage_rally_too_high(self, stock_code: str, date: datetime, ma_data: dict,
+                                    macd_data: dict, current_index: int) -> RPointPluginResult:
+        """
+        插件: 阶段涨幅过大
+
+        触发条件（同一天同时满足）：
+        1) 从当日往前统计30个交易日涨幅 >= 30%
+           - 取“今天往前的31个交易日”的收盘价作为起点（即 t-30 的收盘价）到今天收盘价的涨幅
+        2) 今天出现任意成交量类型（daily_chance.volume_type 非空）
+        3) 今天跌破MA20：昨天close > 昨天MA20 且 今天close < 今天MA20
+        4) 今天MACD处于死叉状态：DIF < DEA
+        """
+        plugin_name = "阶段涨幅过大"
+        try:
+            date_str = self._to_date_str(date)
+
+            # --- 今日/昨日数据 ---
+            if current_index < 1:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # 今日收盘
+            current_daily = self._daily_cache.get(date_str) or self.daily_repo.find_by_date(stock_code, date_str)
+            if not current_daily or not getattr(current_daily, "close", None):
+                return RPointPluginResult(plugin_name, False, "")
+            close_today = float(current_daily.close)
+            if close_today <= 0:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # 今日量型（任意即可，但必须存在）
+            current_chance = self._daily_chance_cache.get(date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
+            vol_type_str = (getattr(current_chance, "volume_type", None) or "").strip()
+            vol_types = [v.strip() for v in vol_type_str.split(",") if v.strip()]
+            if not vol_types:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # --- 条件1：30交易日累计涨幅 ---
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            # prev_dates[0] = 昨天 ... prev_dates[29] = 往前第30个交易日（含今天共31个交易日）
+            if len(prev_dates) < 30:
+                return RPointPluginResult(plugin_name, False, "")
+            base_date_str = prev_dates[29]
+            base_daily = self._daily_cache.get(base_date_str) or self.daily_repo.find_by_date(stock_code, base_date_str)
+            if not base_daily or not getattr(base_daily, "close", None):
+                return RPointPluginResult(plugin_name, False, "")
+            close_base = float(base_daily.close)
+            if close_base <= 0:
+                return RPointPluginResult(plugin_name, False, "")
+
+            rise_pct = ((close_today - close_base) / close_base) * 100.0
+            if rise_pct < 30.0:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # --- 条件3：跌破MA20（昨>今<）---
+            ma20_list = ma_data.get("ma20") or []
+            if current_index >= len(ma20_list) or (current_index - 1) >= len(ma20_list):
+                return RPointPluginResult(plugin_name, False, "")
+            ma20_today = ma20_list[current_index]
+            ma20_yesterday = ma20_list[current_index - 1]
+            if ma20_today is None or ma20_yesterday is None:
+                return RPointPluginResult(plugin_name, False, "")
+
+            # 昨日收盘（用缓存交易日回推更稳，避免current_index与数据源不一致时的错位）
+            yesterday_str = prev_dates[0]
+            daily_yesterday = self._daily_cache.get(yesterday_str) or self.daily_repo.find_by_date(stock_code, yesterday_str)
+            if not daily_yesterday or not getattr(daily_yesterday, "close", None):
+                return RPointPluginResult(plugin_name, False, "")
+            close_yesterday = float(daily_yesterday.close)
+            if close_yesterday <= 0:
+                return RPointPluginResult(plugin_name, False, "")
+
+            if not (close_yesterday > float(ma20_yesterday) and close_today < float(ma20_today)):
+                return RPointPluginResult(plugin_name, False, "")
+
+            # --- 条件4：MACD死叉状态 DIF < DEA ---
+            dif_list = macd_data.get("dif") or []
+            dea_list = macd_data.get("dea") or []
+            if current_index >= len(dif_list) or current_index >= len(dea_list):
+                return RPointPluginResult(plugin_name, False, "")
+            dif_today = dif_list[current_index]
+            dea_today = dea_list[current_index]
+            if dif_today is None or dea_today is None:
+                return RPointPluginResult(plugin_name, False, "")
+            if float(dif_today) >= float(dea_today):
+                return RPointPluginResult(plugin_name, False, "")
+
+            reason = (
+                f"30交易日涨幅{rise_pct:.2f}% (起点{base_date_str}收盘{close_base:.2f}→今日{close_today:.2f})"
+                f"+今日量型({vol_type_str})"
+                f"+跌破MA20(昨收{close_yesterday:.2f}>MA20{float(ma20_yesterday):.2f}, 今收{close_today:.2f}<MA20{float(ma20_today):.2f})"
+                f"+MACD死叉状态(DIF{float(dif_today):.4f}<DEA{float(dea_today):.4f})"
+            )
+            return RPointPluginResult(plugin_name, True, reason)
+        except Exception as e:
+            logger.error(f"R点插件-{plugin_name}检查异常: {e}")
+            return RPointPluginResult(plugin_name, False, "")
 

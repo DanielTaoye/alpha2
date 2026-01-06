@@ -699,6 +699,64 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         [stock_code, check_date],
         checks=checks_p6,
     )
+
+    # 插件13：阶段涨幅过大（30交易日涨幅>=30% + 任意量型 + 跌破MA20(昨>今<) + DIF<DEA）
+    checks_p13: List[Dict[str, Any]] = []
+    close_today = _safe_float(current_data.get("close"))
+    # 条件1：30交易日累计涨幅>=30%（t-30收盘 -> 今日收盘）
+    if prev_dates and len(prev_dates) >= 30:
+        base_date_str = prev_dates[29]
+        base_data = get_daily_data(stock_code, base_date_str) if base_date_str else None
+        close_base = _safe_float((base_data or {}).get("close"))
+        rise_30 = (close_today - close_base) / close_base * 100 if close_base > 0 else None
+        checks_p13.append({
+            "label": "30交易日累计涨幅>=30%(t-30收盘→今日收盘)",
+            "ok": (rise_30 is not None and rise_30 >= 30.0),
+            "detail": f"base={base_date_str}, close_base={close_base:.2f}, close_today={close_today:.2f}, rise={rise_30:.2f}%" if rise_30 is not None else f"base={base_date_str}, close_base={close_base:.2f}, close_today={close_today:.2f}"
+        })
+    else:
+        checks_p13.append({"label": "需要至少30个前序交易日(prev_dates>=30)", "ok": False, "detail": f"len(prev_dates)={len(prev_dates) if prev_dates is not None else 0}"})
+
+    # 条件2：今日出现任意成交量类型（volume_type非空）
+    vt_today = (current_chance.get("volume_type") or "").strip()
+    vols_today = [v.strip() for v in vt_today.split(",") if v.strip()]
+    checks_p13.append({"label": "今日出现任意成交量类型(volume_type非空)", "ok": bool(vols_today), "detail": f"volume_type={vt_today or '无'}"})
+
+    # 条件3：跌破MA20（昨天close>MA20 且 今天close<MA20）
+    ma20_list = ma_data.get("ma20") if ma_data else None
+    if ma20_list is not None and target_index is not None and target_index >= 1 and target_index < len(ma20_list):
+        ma20_today = ma20_list[target_index]
+        ma20_yesterday = ma20_list[target_index - 1] if (target_index - 1) < len(ma20_list) else None
+        close_yesterday = _safe_float((prev_day_data or {}).get("close"))
+        ok_ma20 = (ma20_today is not None and ma20_yesterday is not None and close_yesterday > float(ma20_yesterday) and close_today < float(ma20_today))
+        checks_p13.append({
+            "label": "跌破MA20(昨收>昨MA20 且 今收<今MA20)",
+            "ok": bool(ok_ma20),
+            "detail": f"y_close={close_yesterday:.2f}, y_ma20={float(ma20_yesterday) if ma20_yesterday is not None else None}, t_close={close_today:.2f}, t_ma20={float(ma20_today) if ma20_today is not None else None}"
+        })
+    else:
+        checks_p13.append({"label": "MA20数据齐全且target_index>=1", "ok": False, "detail": f"target_index={target_index}, ma20_len={len(ma20_list) if ma20_list is not None else 0}"})
+
+    # 条件4：MACD死叉状态（DIF<DEA）
+    dif_list = macd_data.get("dif") if macd_data else None
+    dea_list = macd_data.get("dea") if macd_data else None
+    if dif_list and dea_list and target_index is not None and target_index < len(dif_list) and target_index < len(dea_list):
+        dif_today = dif_list[target_index]
+        dea_today = dea_list[target_index]
+        ok_dead = (dif_today is not None and dea_today is not None and dif_today < dea_today)
+        checks_p13.append({"label": "MACD死叉状态(DIF<DEA)", "ok": bool(ok_dead), "detail": f"DIF={dif_today}, DEA={dea_today}"})
+    else:
+        checks_p13.append({"label": "MACD数据齐全(dif/dea)且存在target_index", "ok": False, "detail": f"target_index={target_index}"})
+
+    _run_plugin(
+        "插件13: 阶段涨幅过大",
+        ["30交易日累计涨幅>=30%(取今天往前31个交易日的起点收盘价到今日收盘)", "今日出现任意成交量类型", "跌破MA20(昨>今<)", "MACD死叉状态(DIF<DEA)"],
+        rp._check_stage_rally_too_high,
+        [stock_code, check_date, ma_data, macd_data, target_index],
+        requires=["ma_macd_index"],
+        checks=checks_p13,
+    )
+
     # 插件7：高位发R（按代码门槛逐条列）
     checks_p7: List[Dict[str, Any]] = []
     if ma_data and macd_data and target_index is not None:
@@ -2955,7 +3013,7 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     print("\n" + "=" * 80)
     print("📝 诊断结论")
     print("=" * 80)
-    print("   以上是所有8个R点插件的详细条件检查。")
+    print("   以上是所有13个R点插件的详细条件检查。")
     print("   要触发R点，需要满足任意一个插件的全部条件。")
 
 
