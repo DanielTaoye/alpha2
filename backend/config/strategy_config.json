@@ -11,7 +11,7 @@
   "strategy2": {
     "c_point_threshold": 99.0,
     "nature_thresholds": {
-      "短线": 60.0,
+      "短线": 66.0,
       "波段": 99.0,
       "中长线": 60.0
     },
@@ -19,7 +19,7 @@
   },
   "r_point_plugins": {
     "pressure_stagnation": {
-      "distance_threshold_pct": 10.0,
+      "distance_threshold_pct": 8.0,
       "description": "临近压力位滞涨插件-股价距离压力线的百分比阈值"
     },
     "high_position_r": {
@@ -33,7 +33,7 @@
   },
   "market_type": "bull",
   "market_type_description": "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市",
-  "last_updated": "2026-01-05 17:04:35",
+  "last_updated": "2026-01-06 16:21:52",
   "market_type_rule": {
     "mode": "date_rule",
     "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",

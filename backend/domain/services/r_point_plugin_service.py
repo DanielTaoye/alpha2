@@ -278,6 +278,8 @@ class RPointPluginService:
             last_valid_point_type,
             macd_data=macd_data,
             current_index=current_index,
+            historical_c_points=historical_c_points,
+            historical_r_points=historical_r_points,
         )
         if plugin2.triggered:
             triggered_plugins.append(plugin2)
@@ -923,6 +925,8 @@ class RPointPluginService:
         last_valid_point_type: Optional[str] = None,
         macd_data: Optional[dict] = None,
         current_index: Optional[int] = None,
+        historical_c_points: Optional[list] = None,
+        historical_r_points: Optional[list] = None,
     ) -> RPointPluginResult:
         """
         插件2: 临近压力位滞涨（重写版）
@@ -931,12 +935,20 @@ class RPointPluginService:
         1）临近压力位 + 放量 + 风险K线
         2）临近压力位 + 前两日放量 + 风险K线
         
-        公共前置：
-        - 向前找到最近的有效C（上一个点为C）；否则不触发
-        - 取“今日前一交易日”的压力线，与“发C日”的压力线比较，若发C日压力线 > 今日前一日压力线 => 不触发
-        - 若发C日压力线为空/0，则用“发C日前一日收盘”到“今日收盘”涨幅，需 >15%，否则不触发
+        公共前置（优化版，后续情形1-4条件不变）：
+        - 必须“上一个有效点”为C（由上层传入 c_point_date + last_valid_point_type）
+        - 分两种场景：
+          A）仅一个C：往前是C且再往前是R
+             - 用“今日前一日压力位” vs “发C日压力位”比较：
+               - 若 C压力位 > 今日前一日压力位 => 不满足
+               - 若 C压力位 <= 今日前一日压力位 => 继续后续逻辑
+             - 若 C日无压力位（0/空）：统计“发C日 → 今日”的涨幅，若 >15% 视为压力位有效，继续后续逻辑
+          B）多个C：上个是C、上上也是C、再往前是R（即：上个R之后出现连续多个C）
+             - 取“离R点最近的第一个C”的压力位，与“今日前一日压力位”对比：必须相同
+             - 若相同，再判断空间阈值 ≥15%：
+               空间阈值 = (今日前一日压力位 - firstC支撑位) / firstC支撑位
         - 前一交易日赔率 > 0
-        - 距离压力线：0% < (压力线-今日收盘)/今日收盘 < 距离阈值（主/非主一致，可配置，默认10%）
+        - 距离压力线：0% < (压力线-今日收盘)/今日收盘 < 距离阈值（主/非主一致，可配置）
         
         情形1（放量当日）：
         - 当日放量（XYZH）
@@ -976,34 +988,80 @@ class RPointPluginService:
             if not prev_chance or not prev_data:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             
-            # 回溯最近C点：由上层传入最近C点和最近有效点类型，避免在此重算历史
+            # 回溯最近C点：由上层传入最近C点和最近有效点类型
             if not c_point_date or last_valid_point_type != 'C':
                 return RPointPluginResult("临近压力位滞涨", False, "")
-            c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else str(c_point_date)
-            
-            # 发C日压力线 vs 今日前一日压力线
-            c_chance = self._daily_chance_cache.get(c_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, c_date_str)
-            c_prev_date = self._get_previous_trading_dates_from_cache(c_date_str, stock_code)
-            c_prev_close = None
-            if c_prev_date:
-                c_prev_data = self._daily_cache.get(c_prev_date[0]) or self.daily_repo.find_by_date(stock_code, c_prev_date[0])
-                if c_prev_data:
-                    c_prev_close = c_prev_data.close
-            
+
             if not prev_chance.pressure_price:
                 return RPointPluginResult("临近压力位滞涨", False, "")
             prev_pressure = prev_chance.pressure_price / 100.0
-            c_pressure = c_chance.pressure_price / 100.0 if c_chance and c_chance.pressure_price else 0
-            
-            if c_pressure > prev_pressure:
-                return RPointPluginResult("临近压力位滞涨", False, "")
-            
-            if c_pressure == 0:
-                if c_prev_close is None or c_prev_close <= 0:
+
+            # ========= 公共前置：单C vs 多C =========
+            # 默认按“单C”处理；若上层传入了历史点序列，则按真实信号序列判断“单C/多C”。
+            c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else str(c_point_date)
+
+            # 解析今日之前的有效点序列（C/R），用于判断“上个R之后是1个C还是多个C”
+            points = []
+            if historical_c_points or historical_r_points:
+                for p in (historical_c_points or []) + (historical_r_points or []):
+                    info = self._extract_cr_point_info(p)
+                    if not info:
+                        continue
+                    if info.get("dt") and info["dt"] < date:
+                        points.append(info)
+                points.sort(key=lambda x: x["dt"])
+
+            # 尝试以历史序列修正“当前最近C日期”（避免上层 c_point_date 与序列末端不一致）
+            if points and points[-1].get("type") == "C":
+                c_date_str = points[-1].get("date_str") or c_date_str
+
+            # 判定是否多C：上个是C、上上也是C、再往前是R
+            multi_c_mode = False
+            first_c_after_r_date_str = None
+            if points and len(points) >= 3 and points[-1].get("type") == "C":
+                if points[-2].get("type") == "C":
+                    j = len(points) - 2
+                    while j >= 0 and points[j].get("type") == "C":
+                        j -= 1
+                    if j >= 0 and points[j].get("type") == "R":
+                        # 连续C序列：points[j+1 ... end]
+                        multi_c_mode = True
+                        first_c_after_r_date_str = points[j + 1].get("date_str")
+
+            if multi_c_mode and first_c_after_r_date_str:
+                # 多C：对齐 firstC 压力位 == 今日前一日压力位；且空间阈值 >=15%
+                first_c_chance = self._daily_chance_cache.get(first_c_after_r_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, first_c_after_r_date_str)
+                first_c_pressure = (first_c_chance.pressure_price / 100.0) if (first_c_chance and getattr(first_c_chance, "pressure_price", None)) else 0
+                if not first_c_pressure or first_c_pressure <= 0:
                     return RPointPluginResult("临近压力位滞涨", False, "")
-                gain_from_c = (current_data.close - c_prev_close) / c_prev_close * 100
-                if gain_from_c <= 15:
+
+                # “是否相同”按严格相等 + 微小误差容忍
+                if abs(first_c_pressure - prev_pressure) > 1e-6:
                     return RPointPluginResult("临近压力位滞涨", False, "")
+
+                first_c_support = self._get_support_price_actual(stock_code, first_c_after_r_date_str)
+                if not first_c_support or first_c_support <= 0:
+                    return RPointPluginResult("临近压力位滞涨", False, "")
+
+                space_pct = (prev_pressure - first_c_support) / first_c_support * 100
+                if space_pct < 15.0:
+                    return RPointPluginResult("临近压力位滞涨", False, "")
+            else:
+                # 单C：用发C日压力位与今日前一日压力位比较；若C日无压力位则用“发C日→今日”涨幅>15%兜底
+                c_chance = self._daily_chance_cache.get(c_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, c_date_str)
+                c_pressure = (c_chance.pressure_price / 100.0) if (c_chance and getattr(c_chance, "pressure_price", None)) else 0
+
+                if c_pressure and c_pressure > 0:
+                    if c_pressure > prev_pressure:
+                        return RPointPluginResult("临近压力位滞涨", False, "")
+                else:
+                    # 无压力位：统计发C日至今涨幅 >15%
+                    c_data = self._daily_cache.get(c_date_str) or self.daily_repo.find_by_date(stock_code, c_date_str)
+                    if not c_data or not getattr(c_data, "close", None) or c_data.close <= 0:
+                        return RPointPluginResult("临近压力位滞涨", False, "")
+                    gain_from_c = (current_data.close - c_data.close) / c_data.close * 100
+                    if gain_from_c <= 15.0:
+                        return RPointPluginResult("临近压力位滞涨", False, "")
             
             # 前一日赔率>0
             day_win_ratio_score = prev_chance.day_win_ratio_score or 0

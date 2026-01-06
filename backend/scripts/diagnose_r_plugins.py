@@ -137,20 +137,30 @@ def _parse_dt(value):
     return None
 
 
-def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_data: Dict) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def infer_last_cr_points(
+    stock_code: str,
+    stock_name: str,
+    date_str: str,
+    api_data: Dict
+) -> Tuple[Optional[str], Optional[str], Optional[str], List[Dict], List[Dict]]:
     """
     基于 CR 全量计算推断目标日前最近的有效点类型与最近的C点日期
-    返回: (last_c_point_date_str, last_valid_point_type)
+    返回:
+    - last_c_point_date_str
+    - last_valid_point_type
+    - last_r_point_date_str
+    - historical_c_points（策略1 C + 策略2 C）
+    - historical_r_points
     """
     try:
         kline_list = api_data.get('kline_data') or api_data.get('klineData') or []
         if not kline_list:
-            return None, None, None
+            return None, None, None, [], []
 
         # 目标日期转换
         target_dt = _parse_dt(date_str)
         if not target_dt:
-            return None, None, None
+            return None, None, None, [], []
 
         # 转 DomainKLineData
         k_objs = []
@@ -170,12 +180,12 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
             ))
 
         if not k_objs:
-            return None, None
+            return None, None, None, [], []
 
         # 只计算到目标日，避免未来数据干扰
         k_objs = [k for k in k_objs if k.time <= target_dt]
         if not k_objs:
-            return None, None
+            return None, None, None, [], []
 
         # 需要 MA/MACD 参与策略2计算（若缺失会自动降级）
         ma_data = api_data.get('ma', {})
@@ -196,6 +206,8 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
         c_points = cr_result.get('c_points', []) or []
         s2_c_points = cr_result.get('strategy2_c_points', []) or []
         r_points = cr_result.get('r_points', []) or []
+        historical_c_points = (c_points + s2_c_points) or []
+        historical_r_points = r_points or []
 
         # 推断“进入目标日计算前”的CR上下文：严格小于目标日，避免把当日新产生的点算进去
         def _last_before(points, ptypes):
@@ -210,7 +222,7 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
             return last_dt
 
         # C点需要同时考虑策略1(C)和策略2(C_STRATEGY2)
-        last_c_dt = _last_before(c_points + s2_c_points, {'C', 'C_STRATEGY2'})
+        last_c_dt = _last_before(historical_c_points, {'C', 'C_STRATEGY2'})
         last_r_dt = _last_before(r_points, {'R'})
 
         last_type = None
@@ -224,10 +236,10 @@ def infer_last_cr_points(stock_code: str, stock_name: str, date_str: str, api_da
 
         last_c_str = last_c_dt.strftime('%Y-%m-%d') if last_c_dt else None
         last_r_str = last_r_dt.strftime('%Y-%m-%d') if last_r_dt else None
-        return last_c_str, last_type, last_r_str
+        return last_c_str, last_type, last_r_str, historical_c_points, historical_r_points
     except Exception as e:
         print(f"[WARN] 推断CR序列失败: {e}")
-        return None, None, None
+        return None, None, None, [], []
 
 
 def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: Optional[str] = None) -> str:
@@ -299,10 +311,13 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             target_index = i
             break
 
-    # 推断“进入目标日之前”的 CR 上下文（含策略2 C）
+    # 推断“进入目标日之前”的 CR 上下文（含策略2 C）+ 历史点序列（用于插件2单C/多C判断）
     last_c_str, last_valid_type, last_r_str = (None, None, None)
+    historical_c_points, historical_r_points = ([], [])
     if api_data:
-        last_c_str, last_valid_type, last_r_str = infer_last_cr_points(stock_code, stock_name, date_str, api_data)
+        last_c_str, last_valid_type, last_r_str, historical_c_points, historical_r_points = infer_last_cr_points(
+            stock_code, stock_name, date_str, api_data
+        )
     last_c_dt = _as_dt(last_c_str)
     last_valid_type = last_valid_type or None
 
@@ -352,6 +367,26 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             return str(t) if t is not None else None
         except Exception:
             return None
+
+    # 将“print版诊断函数”的输出捕获进 report（用于Web端 /r_diagnose/ 展示更完整的细节）
+    def _append_print_block(title: str, fn, *args, **kwargs):
+        try:
+            import io
+            import contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                fn(*args, **kwargs)
+            text = (buf.getvalue() or "").rstrip("\n")
+            if text:
+                lines.append("")
+                lines.append(title)
+                lines.append("-" * 88)
+                lines.extend(text.splitlines())
+        except Exception as e:
+            lines.append("")
+            lines.append(title)
+            lines.append("-" * 88)
+            lines.append(f"[WARN] 捕获诊断输出失败: {e}")
 
     def _print_checks(checks: List[Dict[str, Any]]):
         for c in checks:
@@ -698,6 +733,48 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         rp._check_break_support,
         [stock_code, check_date],
         checks=checks_p6,
+    )
+
+    # 插件14：横盘震荡+风险信号（依赖：MA20 + 历史C/R点序列）
+    def _run_plugin14():
+        return rp._check_sideways_oscillation_risk(
+            stock_code=stock_code,
+            date=check_date,
+            ma_data=ma_data,
+            macd_data=macd_data,
+            current_index=target_index,
+            kline_data=kline_list,
+            historical_c_points=historical_c_points or [],
+            historical_r_points=historical_r_points or [],
+        )
+
+    _run_plugin(
+        "插件14: 横盘震荡+风险信号(最后检查)",
+        [
+            "横盘阶段判定：上个R之后连续C序列的支撑/开盘/MA20接近",
+            "横盘阶段内：满足任一风险条件(跌破MA20/跌破C支撑 + 可选MACD死叉/任意量型)即出R",
+        ],
+        _run_plugin14,
+        [],
+        requires=["ma_macd_index", "kline_index"],
+        checks=None,
+    )
+
+    # Web端需要更完整的“打印版”细节：firstC/lastC/横盘三条件/4条风险触发逐条
+    _append_print_block(
+        "插件14-详细诊断(打印版，供Web端展示):",
+        diagnose_sideways_oscillation_risk,
+        stock_code,
+        date_str,
+        current_data,
+        current_chance,
+        prev_day_chance,
+        ma_data,
+        macd_data,
+        kline_list,
+        target_index,
+        historical_c_points=historical_c_points,
+        historical_r_points=historical_r_points,
     )
 
     # 插件13：阶段涨幅过大（30交易日涨幅>=30% + 任意量型 + 跌破MA20(昨>今<) + DIF<DEA）
@@ -1448,9 +1525,36 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             "情形1/2/3/4满足任一即可触发(其中情形4: 空头组合 + 近5日MACD死叉 + 当日DIF<DEA且MACD<0)",
         ],
         rp._check_pressure_stagnation,
-        [stock_code, check_date, last_c_dt, last_valid_type, macd_data, target_index],
+        [
+            stock_code,
+            check_date,
+            last_c_dt,
+            last_valid_type,
+            macd_data,
+            target_index,
+            historical_c_points,
+            historical_r_points,
+        ],
         requires=["c_point", "last_valid_type"],
         checks=checks_p2,
+    )
+
+    # Web端需要更完整的“公共前置(单C/多C) + 情形1/2/3/4 + 汇总 + firstC/lastC/R后第一个C”等打印信息
+    _append_print_block(
+        "插件2-详细诊断(打印版，供Web端展示):",
+        diagnose_pressure_stagnation,
+        stock_code,
+        date_str,
+        current_data,
+        current_chance,
+        prev_day_chance,
+        inferred_c_point=last_c_str,
+        inferred_last_type=last_valid_type,
+        historical_c_points=historical_c_points,
+        historical_r_points=historical_r_points,
+        macd_data=macd_data,
+        kline_list=kline_list,
+        target_index=target_index,
     )
 
     lines.append("")
@@ -2077,10 +2181,20 @@ def diagnose_deviation(stock_code: str, date_str: str, current_data: Dict,
                 print(f"  前20日涨幅: {gain_20days:.2f}% (条件6需>50%)")
 
 
-def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: Dict,
-                                  current_chance: Dict, prev_chance: Dict,
-                                  macd_data: Dict = None, kline_list: List = None,
-                                  target_index: int = None):
+def diagnose_pressure_stagnation(
+    stock_code: str,
+    date_str: str,
+    current_data: Dict,
+    current_chance: Dict,
+    prev_chance: Dict,
+    inferred_c_point: Optional[str] = None,
+    inferred_last_type: Optional[str] = None,
+    historical_c_points: Optional[List[Dict]] = None,
+    historical_r_points: Optional[List[Dict]] = None,
+    macd_data: Dict = None,
+    kline_list: List = None,
+    target_index: int = None
+):
     """诊断临近压力位滞涨插件（含情形4-MACD死叉+空头组合）"""
     print("\n" + "=" * 80)
     print("📊 插件2: 临近压力位滞涨")
@@ -2096,6 +2210,13 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     if not prev_chance:
         print("  ❌ 无前一日daily_chance数据，无法判断")
         return
+
+    # 距离阈值（尽量与后端配置一致）
+    try:
+        from domain.services.config_service import get_config_service
+        distance_threshold = float(get_config_service().get_pressure_stagnation_distance_threshold() or 8.0)
+    except Exception:
+        distance_threshold = 8.0
     
     # 获取股性
     stock_nature = current_chance.get('stock_nature', '波段') if current_chance else '波段'
@@ -2108,7 +2229,15 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     is_near_pressure = day_win_ratio_score > 0
     print(f"  是否满足赔率条件: {'✅' if is_near_pressure else '❌'}")
     
-    # 压力位距离
+    # ========= 新公共前置（单C/多C）诊断 =========
+    print("\n  --- 公共前置（单C/多C优化版） ---")
+    if not inferred_c_point or (inferred_last_type or "").upper() != "C":
+        print(f"  ❌ 最近有效点不是C（inferred_last_type={inferred_last_type or 'None'}），插件不应触发")
+    else:
+        print(f"  最近C点(inferred): {inferred_c_point}")
+        print(f"  上一有效点类型(inferred): {inferred_last_type}")
+
+    # 压力位（今日前一交易日）
     pressure_price_raw = float(prev_chance.get('pressure_price') or 0)
     if pressure_price_raw > 0:
         pressure_price = pressure_price_raw / 100.0
@@ -2116,12 +2245,108 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
         distance_pct = (pressure_price - current_close) / current_close * 100
         print(f"  压力位: {pressure_price:.2f}元 (数据库原值: {pressure_price_raw:.0f})")
         print(f"  当前收盘价: {current_close:.2f}元")
-        print(f"  距离压力位: {distance_pct:.2f}% (需要: 0% < 距离 < 10%)")
+        print(f"  距离压力位: {distance_pct:.2f}% (需要: 0% < 距离 < {distance_threshold:.2f}%)")
         
-        in_range = 0 < distance_pct < 10
+        in_range = 0 < distance_pct < distance_threshold
         print(f"  是否在距离范围内: {'✅' if in_range else '❌'}")
     else:
         print("  ❌ 无压力位数据")
+
+    # 公共前置细节：按历史点序列判断“单C/多C”
+    # 说明：真实插件在多C场景下会以“上个R之后的连续C序列”来判定。
+    def _extract_point_info(p: Dict) -> Optional[Tuple[str, str]]:
+        try:
+            pt = (p.get("pointType") or "").upper()
+            dt = _parse_dt(p.get("triggerDate"))
+            if not dt:
+                return None
+            t = "C" if pt.startswith("C") else ("R" if pt.startswith("R") else None)
+            if not t:
+                return None
+            return t, dt.strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    points = []
+    for p in (historical_c_points or []) + (historical_r_points or []):
+        info = _extract_point_info(p)
+        if not info:
+            continue
+        t, d = info
+        # 只看目标日前（不含当日）
+        if d < date_str:
+            points.append((t, d))
+    points.sort(key=lambda x: x[1])
+
+    multi_c_mode = False
+    first_c_after_r = None
+    last_r_before_cs = None
+    if len(points) >= 3 and points[-1][0] == "C":
+        if points[-2][0] == "C":
+            j = len(points) - 2
+            while j >= 0 and points[j][0] == "C":
+                j -= 1
+            if j >= 0 and points[j][0] == "R":
+                multi_c_mode = True
+                last_r_before_cs = points[j][1]
+                first_c_after_r = points[j + 1][1]
+
+    if pressure_price_raw > 0:
+        prev_pressure = pressure_price_raw / 100.0
+    else:
+        prev_pressure = None
+
+    if not prev_pressure or prev_pressure <= 0:
+        print("  ⚠️ 公共前置无法继续：前一日压力位为空/0")
+    else:
+        # 是否存在“上上个C”
+        has_prev_c = (len(points) >= 2 and points[-1][0] == "C" and points[-2][0] == "C")
+        print(f"  上个C前是否存在上上个C: {'✅' if has_prev_c else '❌'}")
+        if has_prev_c:
+            print(f"  上上个C日期: {points[-2][1]}")
+
+        if multi_c_mode and first_c_after_r:
+            print(f"  模式: 多C（上个C、上上C、再往前是R） -> firstC={first_c_after_r}")
+            if last_r_before_cs:
+                print(f"  上个R日期: {last_r_before_cs}")
+            first_dc = get_daily_chance(stock_code, first_c_after_r) or {}
+            first_pressure_raw = float(first_dc.get("pressure_price") or 0)
+            first_support_raw = float(first_dc.get("support_price") or 0)
+            first_pressure = first_pressure_raw / 100.0 if first_pressure_raw > 0 else 0
+            first_support = first_support_raw / 100.0 if first_support_raw > 0 else 0
+
+            same_pressure = abs(first_pressure - prev_pressure) <= 1e-6 if first_pressure > 0 else False
+            print(f"  firstC压力位: {first_pressure:.2f} (raw={first_pressure_raw:.0f}) vs 前一日压力位: {prev_pressure:.2f} -> 相同: {'✅' if same_pressure else '❌'}")
+
+            if first_support > 0:
+                space_pct = (prev_pressure - first_support) / first_support * 100
+                ok_space = space_pct >= 15.0
+                print(f"  空间阈值: (前一日压力位- firstC支撑)/firstC支撑 = ({prev_pressure:.2f}-{first_support:.2f})/{first_support:.2f} = {space_pct:.2f}% (需≥15%) -> {'✅' if ok_space else '❌'}")
+            else:
+                print("  ❌ firstC支撑位为空/0，无法计算空间阈值")
+        else:
+            c_date = inferred_c_point
+            print(f"  模式: 单C（往前是C且再往前是R） -> C={c_date or 'None'}")
+            if not c_date:
+                print("  ❌ 缺少C点日期，无法进行单C前置判断")
+            else:
+                c_dc = get_daily_chance(stock_code, c_date) or {}
+                c_pressure_raw = float(c_dc.get("pressure_price") or 0)
+                c_pressure = c_pressure_raw / 100.0 if c_pressure_raw > 0 else 0
+                if c_pressure > 0:
+                    ok_cmp = c_pressure <= prev_pressure
+                    print(f"  C日压力位: {c_pressure:.2f} (raw={c_pressure_raw:.0f}) <= 前一日压力位{prev_pressure:.2f} ? {'✅' if ok_cmp else '❌'}")
+                else:
+                    # 新逻辑：C日无压力位，则用“C日→今日”涨幅 >15%
+                    c_k = get_daily_data(stock_code, c_date) or {}
+                    c_close = float(c_k.get("close") or 0)
+                    today_close = float(current_data.get("close") or 0)
+                    if c_close > 0:
+                        gain_from_c = (today_close - c_close) / c_close * 100
+                        ok_gain = gain_from_c > 15.0
+                        print(f"  C日无压力位 -> 用C→今日涨幅: ({today_close:.2f}-{c_close:.2f})/{c_close:.2f} = {gain_from_c:.2f}% (需>15%) -> {'✅' if ok_gain else '❌'}")
+                    else:
+                        print("  ❌ C日收盘价为空/0，无法计算C→今日涨幅")
     
     # 成交量
     volume_type = current_chance.get('volume_type', '') if current_chance else ''
@@ -2157,6 +2382,8 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     print(f"  当日是否放量(XYZH): {'✅' if is_volume_xyzh else '❌'}")
     print(f"  当日形态: {pattern_today or '无'} | 振幅: {amplitude_today:.2f}% (阈值 {amplitude_threshold}%) | 跌幅: {decline_today:.2f}% (阈值 {-decline_threshold}%)")
     print(f"  风险K线判定: {'✅' if is_risky_today else '❌'}（冲高回落/高开低走且振幅超阈值，或阴线跌幅超阈值）")
+    meets_case1 = bool(is_volume_xyzh and is_risky_today)
+    print(f"  情形1判定: {'✅ 触发' if meets_case1 else '❌ 未触发'}")
 
     # 情形2：当日未放量，前两日任一天放量 + 当日风险K线（含乌云盖顶）
     print("\n  --- 情形2：前两日放量+风险K线 ---")
@@ -2209,11 +2436,49 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
     print(f"  当日形态: {pattern_today or '无'} | 振幅: {amplitude_today:.2f}% (阈值 {amplitude_threshold}%) | 跌幅: {decline_today:.2f}% (阈值 {-decline_threshold}%)")
     print(f"  空头组合含乌云盖顶: {'✅' if has_cloud else '❌'}")
     print(f"  风险K线判定(情形2): {'✅' if is_risky_case2 else '❌'}（冲高回落/高开低走振幅超阈值 或 乌云盖顶）")
+    day1_dist_ok = bool(day1_dist and 0 < day1_dist[0] < distance_threshold)
+    day2_dist_ok = bool(day2_dist and 0 < day2_dist[0] < distance_threshold)
+    has_volume_prev2 = bool(day1_volume or day2_volume)
+    meets_case2 = (not is_volume_xyzh) and day1_dist_ok and day2_dist_ok and has_volume_prev2 and is_risky_case2
+    print(f"  前一日距压在阈值内: {'✅' if day1_dist_ok else '❌'}；前两日距压在阈值内: {'✅' if day2_dist_ok else '❌'}；前两日任一天放量: {'✅' if has_volume_prev2 else '❌'}")
+    print(f"  情形2判定: {'✅ 触发' if meets_case2 else '❌ 未触发'}")
+
+    # 情形3：熊市 + 近3个交易日无AXYZ放量 + 当日空头组合（不看当日放量）
+    print("\n  --- 情形3：熊市 + 近3日无AXYZ放量 + 当日空头组合 ---")
+    try:
+        from domain.services.config_service import get_config_service
+        market_type = get_config_service().get_market_type(datetime.strptime(date_str, '%Y-%m-%d'))
+    except Exception:
+        market_type = None
+    is_bear = (market_type == 'bear')
+    print(f"  市场类型: {market_type or '未知'} (需bear): {'✅' if is_bear else '❌'}")
+    prev3_chances = get_prev_daily_chances(stock_code, date_str, 3) or []
+    prev3_dates = []
+    no_ax_yz_prev3 = True
+    for dc in prev3_chances[:3]:
+        d = dc.get('date')
+        d_str = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)
+        prev3_dates.append(d_str)
+        vt = (dc.get('volume_type') or '').split(',')
+        vt = [t.strip() for t in vt if t.strip()]
+        has_ax_yz = any(t in ['A', 'X', 'Y', 'Z'] for t in vt)
+        if has_ax_yz:
+            no_ax_yz_prev3 = False
+    if len(prev3_dates) < 3:
+        print(f"  ⚠️ 近3日daily_chance不足({len(prev3_dates)}条)，无法完全判断“近3日无AXYZ放量”")
+    print(f"  近3日: {', '.join(prev3_dates) if prev3_dates else '无'}")
+    print(f"  近3日无AXYZ放量: {'✅' if no_ax_yz_prev3 else '❌'}")
+
+    # 当日空头组合（供情形3/4复用，避免局部变量未赋值）
+    bearish_pattern_today = (current_chance.get('bearish_pattern') or '') if current_chance else ''
+    has_bearish_today3 = bool(str(bearish_pattern_today).strip())
+    print(f"  当日空头组合: {'✅' if has_bearish_today3 else '❌'} ({bearish_pattern_today or '无'})")
+    meets_case3 = bool(is_bear and len(prev3_dates) >= 3 and no_ax_yz_prev3 and has_bearish_today3)
+    print(f"  情形3判定: {'✅ 触发' if meets_case3 else '❌ 未触发'}")
 
     # 情形4：当日空头组合 + 近5日内出现MACD死叉（当日DIF<DEA且MACD<0）
     print("\n  --- 情形4：空头组合 + 近5日MACD死叉 ---")
-    bearish_pattern_today = current_chance.get('bearish_pattern') if current_chance else ''
-    has_bearish_today = bool(bearish_pattern_today)
+    has_bearish_today = bool(str(bearish_pattern_today).strip())
     print(f"  当日空头组合: {'✅' if has_bearish_today else '❌'} ({bearish_pattern_today or '无'})")
     if macd_data and target_index is not None:
         dif_list = macd_data.get('dif') or []
@@ -2252,6 +2517,199 @@ def diagnose_pressure_stagnation(stock_code: str, date_str: str, current_data: D
             print("  ❌ MACD数据不足，索引越界")
     else:
         print("  ❌ 无MACD数据，无法检查情形4（空头组合+近5日死叉）")
+
+    # 汇总：情形1/2/3/4 任一触发
+    try:
+        _m1 = meets_case1
+    except Exception:
+        _m1 = False
+    try:
+        _m2 = meets_case2
+    except Exception:
+        _m2 = False
+    try:
+        _m3 = meets_case3
+    except Exception:
+        _m3 = False
+    try:
+        _m4 = meets_case4
+    except Exception:
+        _m4 = False
+    print(f"\n  >>> 插件2情形汇总: 情形1={'✅' if _m1 else '❌'} 情形2={'✅' if _m2 else '❌'} 情形3={'✅' if _m3 else '❌'} 情形4={'✅' if _m4 else '❌'}（任一为✅则触发）")
+
+
+def diagnose_sideways_oscillation_risk(
+    stock_code: str,
+    date_str: str,
+    current_data: Dict,
+    current_chance: Dict,
+    ma_data: Dict,
+    macd_data: Dict,
+    kline_list: List,
+    target_index: int,
+    historical_c_points: Optional[List[Dict]] = None,
+    historical_r_points: Optional[List[Dict]] = None,
+):
+    """诊断横盘震荡+风险信号（插件14）"""
+    print("\n" + "=" * 80)
+    print("📊 插件14: 横盘震荡+风险信号")
+    print("=" * 80)
+
+    if target_index is None or target_index < 0:
+        print("  ❌ 缺少目标索引，无法诊断")
+        return
+
+    ma20 = (ma_data or {}).get('ma20') or []
+    if not ma20 or target_index >= len(ma20) or ma20[target_index] in [None, 0]:
+        print("  ❌ MA20数据不足")
+        return
+
+    # 构建日期->index映射
+    date_to_idx = {}
+    for i, k in enumerate(kline_list or []):
+        kd = k.get('date') or k.get('time') or ''
+        if hasattr(kd, 'strftime'):
+            ds = kd.strftime('%Y-%m-%d')
+        else:
+            ds = str(kd).split(' ')[0]
+        if ds:
+            date_to_idx[ds] = i
+
+    # 解析历史点序列（只看目标日前）
+    def _pt(p: Dict):
+        pt = (p.get('pointType') or '').upper()
+        d = _parse_dt(p.get('triggerDate'))
+        if not d:
+            return None
+        t = 'C' if pt.startswith('C') else ('R' if pt.startswith('R') else None)
+        if not t:
+            return None
+        return (t, d.strftime('%Y-%m-%d'), float(p.get('openPrice') or 0) if p.get('openPrice') is not None else 0)
+
+    pts = []
+    for p in (historical_c_points or []) + (historical_r_points or []):
+        x = _pt(p)
+        if not x:
+            continue
+        if x[1] < date_str:
+            pts.append(x)
+    pts.sort(key=lambda x: x[1])
+
+    if not pts or pts[-1][0] != 'C':
+        print("  ❌ 今日之前最近有效点不是C（无法形成横盘段）")
+        return
+
+    # 找到“上个R之后的连续C序列”
+    end = len(pts) - 1
+    j = end - 1
+    while j >= 0 and pts[j][0] == 'C':
+        j -= 1
+    if j < 0 or pts[j][0] != 'R':
+        print("  ❌ 未找到上个R（无法形成横盘段）")
+        return
+    c_seg = pts[j+1:end+1]
+    if len(c_seg) < 2:
+        print("  ❌ 连续C数量不足2个，无法判定横盘")
+        return
+
+    firstC = c_seg[0][1]
+    lastC = c_seg[-1][1]
+    print(f"  上个R日期: {pts[j][1]}")
+    print(f"  firstC(离R最近): {firstC}")
+    print(f"  lastC(离今天最近): {lastC}")
+
+    # 支撑位/开盘价接近
+    def _dc(d): return get_daily_chance(stock_code, d) or {}
+    def _dd(d): return get_daily_data(stock_code, d) or {}
+    first_support = float(_dc(firstC).get('support_price') or 0) / 100.0
+    last_support = float(_dc(lastC).get('support_price') or 0) / 100.0
+    first_open = float(_dd(firstC).get('open') or 0)
+    last_open = float(_dd(lastC).get('open') or 0)
+
+    if first_support <= 0 or last_support <= 0 or first_open <= 0 or last_open <= 0:
+        print("  ❌ C点支撑/开盘价数据不足")
+        return
+
+    support_delta = abs(last_support - first_support) / first_support * 100
+    open_delta = abs(last_open - first_open) / first_open * 100
+    ok_support = support_delta < 6.0
+    ok_open = open_delta < 2.0
+    print(f"  支撑接近: |{last_support:.2f}-{first_support:.2f}|/{first_support:.2f}={support_delta:.2f}% (<6%) -> {'✅' if ok_support else '❌'}")
+    print(f"  开盘接近: |{last_open:.2f}-{first_open:.2f}|/{first_open:.2f}={open_delta:.2f}% (<2%) -> {'✅' if ok_open else '❌'}")
+
+    ok_ma20_all = True
+    for _, d, _op in c_seg:
+        idx = date_to_idx.get(d)
+        if idx is None or idx >= len(ma20) or ma20[idx] in [None, 0]:
+            ok_ma20_all = False
+            print(f"  ❌ {d} 缺MA20，无法校验开盘/MA20接近")
+            break
+        o = float(_dd(d).get('open') or 0)
+        m = float(ma20[idx] or 0)
+        if o <= 0 or m <= 0:
+            ok_ma20_all = False
+            print(f"  ❌ {d} 开盘或MA20无效")
+            break
+        delta = abs(o - m) / o * 100
+        if delta >= 6.0:
+            ok_ma20_all = False
+        print(f"  {d}: |open-MA20|/open={delta:.2f}% (<6%) -> {'✅' if delta < 6.0 else '❌'}")
+
+    is_sideways = ok_support and ok_open and ok_ma20_all
+    print(f"  横盘阶段判定: {'✅ 成立' if is_sideways else '❌ 不成立'}")
+    if not is_sideways:
+        return
+
+    # 风险触发（4条）
+    today_close = float(current_data.get('close') or 0)
+    today_low = float(current_data.get('low') or 0)
+    ma20_today = float(ma20[target_index] or 0)
+    break_ma20 = (today_close < ma20_today) or (today_low < ma20_today)
+
+    # 近1日“已跌破”判定：用前一交易日
+    prev1 = (get_prev_daily_chances(stock_code, date_str, 1) or [])
+    prev_date = None
+    if prev1:
+        d = prev1[0].get('date')
+        prev_date = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)
+    prev_break_ma20 = False
+    if prev_date and prev_date in date_to_idx:
+        prev_k = _dd(prev_date)
+        pi = date_to_idx[prev_date]
+        pm = float(ma20[pi] or 0) if pi < len(ma20) and ma20[pi] not in [None, 0] else 0
+        if pm > 0:
+            prev_break_ma20 = (float(prev_k.get('close') or 0) < pm) or (float(prev_k.get('low') or 0) < pm)
+    break_or_was_break_ma20 = break_ma20 or prev_break_ma20
+
+    lastC_support = last_support
+    break_support = (today_close < lastC_support) or (today_low < lastC_support)
+    prev_break_support = False
+    if prev_date:
+        prev_k = _dd(prev_date)
+        prev_break_support = (float(prev_k.get('close') or 0) < lastC_support) or (float(prev_k.get('low') or 0) < lastC_support)
+    break_or_was_break_support = break_support or prev_break_support
+
+    vt = (current_chance.get('volume_type') or '').strip()
+    has_any_vt = bool(vt)
+
+    dif_list = (macd_data or {}).get('dif') or []
+    dea_list = (macd_data or {}).get('dea') or []
+    dead_cross = False
+    if target_index < len(dif_list) and target_index < len(dea_list):
+        d = dif_list[target_index]
+        e = dea_list[target_index]
+        if d is not None and e is not None:
+            dead_cross = e > d
+
+    print("\n  --- 风险触发（4条任一触发即出R） ---")
+    r1 = break_or_was_break_ma20 and dead_cross
+    r2 = break_or_was_break_support and dead_cross
+    r3 = has_any_vt and break_or_was_break_support
+    r4 = has_any_vt and break_or_was_break_ma20
+    print(f"  1) 跌破/已跌破MA20 + DEA>DIF: {'✅' if r1 else '❌'} (MA20={ma20_today:.2f})")
+    print(f"  2) 跌破/已跌破最近C支撑 + DEA>DIF: {'✅' if r2 else '❌'} (support={lastC_support:.2f})")
+    print(f"  3) 任意量型 + 跌破/已跌破最近C支撑: {'✅' if r3 else '❌'} (vt={vt or '无'})")
+    print(f"  4) 任意量型 + 跌破/已跌破MA20: {'✅' if r4 else '❌'} (MA20={ma20_today:.2f}, vt={vt or '无'})")
 
 
 def diagnose_fundamental_negative(stock_code: str, date_str: str, current_data: Dict):
@@ -2853,9 +3311,13 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     # 如果未显式传入C点/上一有效点，尝试用CR全量计算推断
     inferred_c_point = c_point_date
     inferred_last_type = last_valid_point_type
+    inferred_historical_c_points: List[Dict] = []
+    inferred_historical_r_points: List[Dict] = []
     api_data_for_infer = load_api_data()
-    if api_data_for_infer and (not c_point_date or not last_valid_point_type):
-        last_c, last_type, last_r = infer_last_cr_points(stock_code, stock_name, date_str, api_data_for_infer)
+    if api_data_for_infer:
+        last_c, last_type, last_r, inferred_historical_c_points, inferred_historical_r_points = infer_last_cr_points(
+            stock_code, stock_name, date_str, api_data_for_infer
+        )
         if not inferred_c_point:
             inferred_c_point = last_c
         if not inferred_last_type:
@@ -2864,13 +3326,12 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
         print(f"   最近C点: {last_c or '未找到'}")
         print(f"   最近R点: {last_r or '未找到'}")
         print(f"   上一有效点类型: {last_type or '未找到'}")
-    else:
-        if inferred_c_point or inferred_last_type:
-            print("\n🧭 使用外部传入的CR上下文")
-            if inferred_c_point:
-                print(f"   最近C点: {inferred_c_point}")
-            if inferred_last_type:
-                print(f"   上一有效点类型: {inferred_last_type}")
+    elif inferred_c_point or inferred_last_type:
+        print("\n🧭 使用外部传入的CR上下文")
+        if inferred_c_point:
+            print(f"   最近C点: {inferred_c_point}")
+        if inferred_last_type:
+            print(f"   上一有效点类型: {inferred_last_type}")
     
     # 运行实际的R点检查（第一遍：仅缓存数据，用于对比）
     print("\n" + "=" * 80)
@@ -2888,7 +3349,12 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
         check_date = datetime.strptime(date_str, '%Y-%m-%d')
         
         is_r_point, r_plugins = r_plugin_service.check_r_point(
-            stock_code, check_date, c_point_datetime, last_valid_point_type=inferred_last_type
+            stock_code,
+            check_date,
+            c_point_datetime,
+            last_valid_point_type=inferred_last_type,
+            historical_c_points=inferred_historical_c_points,
+            historical_r_points=inferred_historical_r_points,
         )
         
         if is_r_point:
@@ -2903,7 +3369,55 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     
     # 逐个插件详细诊断（插件1-6）
     diagnose_deviation(stock_code, date_str, current_data, current_chance, historical_data)
-    diagnose_pressure_stagnation(stock_code, date_str, current_data, current_chance, prev_chance)
+    diagnose_pressure_stagnation(
+        stock_code,
+        date_str,
+        current_data,
+        current_chance,
+        prev_chance,
+        inferred_c_point=inferred_c_point,
+        inferred_last_type=inferred_last_type,
+        historical_c_points=inferred_historical_c_points,
+        historical_r_points=inferred_historical_r_points,
+    )
+    # 新增：插件14 横盘震荡+风险信号（需要MA20 + 历史点序列）
+    try:
+        api_data_for_diag = api_data_cache or load_api_data() or {}
+        ma_data_ = (api_data_for_diag or {}).get('ma') or {}
+        macd_data_ = (api_data_for_diag or {}).get('macd') or {}
+        kline_list_ = (api_data_for_diag or {}).get('kline_data') or (api_data_for_diag or {}).get('klineData') or []
+        target_index_ = None
+        for i, k in enumerate(kline_list_):
+            kd = k.get('date') or k.get('time') or ''
+            if isinstance(kd, str) and kd.startswith(date_str):
+                target_index_ = i
+                break
+            if hasattr(kd, 'strftime') and kd.strftime('%Y-%m-%d') == date_str:
+                target_index_ = i
+                break
+        if target_index_ is not None:
+            diagnose_sideways_oscillation_risk(
+                stock_code,
+                date_str,
+                current_data,
+                current_chance,
+                ma_data_,
+                macd_data_,
+                kline_list_,
+                target_index_,
+                historical_c_points=inferred_historical_c_points,
+                historical_r_points=inferred_historical_r_points,
+            )
+        else:
+            print("\n" + "=" * 80)
+            print("📊 插件14: 横盘震荡+风险信号")
+            print("=" * 80)
+            print("  ❌ 无法从API数据定位目标日期索引，跳过诊断")
+    except Exception as e:
+        print("\n" + "=" * 80)
+        print("📊 插件14: 横盘震荡+风险信号")
+        print("=" * 80)
+        print(f"  ⚠️ 诊断失败: {e}")
     diagnose_strong_to_weak(stock_code, date_str, current_data, current_chance, prev_chance)
     diagnose_fundamental_negative(stock_code, date_str, current_data)
     diagnose_weak_breakout(stock_code, date_str, current_data, current_chance, prev_chance, 
@@ -2978,7 +3492,9 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
                     stock_code, check_date, c_point_datetime,
                     ma_data=ma_data, macd_data=macd_data,
                     current_index=target_index, kline_data=k_objs,
-                    last_valid_point_type=inferred_last_type
+                    last_valid_point_type=inferred_last_type,
+                    historical_c_points=inferred_historical_c_points,
+                    historical_r_points=inferred_historical_r_points,
                 )
                 
                 print("\n🛰 携带MA/MACD/索引的R点重检结果")
@@ -2993,7 +3509,11 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
             
             # 重新诊断插件2（临近压力位滞涨），补充情形4 (MACD死叉)
             diagnose_pressure_stagnation(stock_code, date_str, current_data, current_chance, prev_chance,
-                                          macd_data=macd_data, kline_list=kline_list, target_index=target_index)
+                                         inferred_c_point=inferred_c_point,
+                                         inferred_last_type=inferred_last_type,
+                                         historical_c_points=inferred_historical_c_points,
+                                         historical_r_points=inferred_historical_r_points,
+                                         macd_data=macd_data, kline_list=kline_list, target_index=target_index)
             
             # 诊断插件7-10
             diagnose_high_position_r(stock_code, date_str, current_data, prev_chance, 
@@ -3013,7 +3533,7 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
     print("\n" + "=" * 80)
     print("📝 诊断结论")
     print("=" * 80)
-    print("   以上是所有13个R点插件的详细条件检查。")
+    print("   以上是所有14个R点插件的详细条件检查。")
     print("   要触发R点，需要满足任意一个插件的全部条件。")
 
 
