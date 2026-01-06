@@ -2459,7 +2459,7 @@ class RPointPluginService:
         """
         插件10: 高位滞涨+空头组合
         
-        1. 从当前价格往前20个交易日，找到最高价那日X（含当日）
+        1. 从当日往前“不含当日”5个交易日，找到最高价那日X
         2. 从X日向前推20个交易日，找到最低价Y
         3. 若X日最高价 > Y日最低价 * (1+配置阈值)，视为高位（默认15%）
         4. 满足高位后，同时出现以下任一组合即触发：
@@ -2477,15 +2477,15 @@ class RPointPluginService:
             
             current_price = current_data.close
             
-            # ===== 步骤1：找到20日内最高价日X（包含当日）=====
+            # ===== 步骤1：找到“近5个交易日(不含当日)”最高价日X =====
             all_dates = sorted(self._daily_cache.keys(), reverse=True)
             prev_dates = [d for d in all_dates if d < date_str]
             
-            # 至少需要40个交易日数据：20天找X，再向前20天找Y
-            if len(prev_dates) < 39:
+            # 至少需要25个交易日数据：前5日找X（不含当日），再向前20日找Y
+            if len(prev_dates) < 25:
                 return RPointPluginResult("高位滞涨+空头组合", False, "")
             
-            check_dates = [date_str] + prev_dates[:19]  # 共20个交易日（含当日）
+            check_dates = prev_dates[:5]  # 共5个交易日（不含当日）
             x_high = None
             x_date_str = None
             for d_str in check_dates:

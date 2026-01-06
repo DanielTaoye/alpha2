@@ -1236,12 +1236,13 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
     checks_p10: List[Dict[str, Any]] = []
     all_dates = sorted(getattr(rp, "_daily_cache", {}).keys(), reverse=True)
     prev_dates_cache = [d for d in all_dates if d < date_str]
-    ok_40 = len(prev_dates_cache) >= 39
-    checks_p10.append({"label": "至少40个交易日数据(20+20回溯)", "ok": ok_40, "detail": f"prev_dates={len(prev_dates_cache)}"})
+    ok_25 = len(prev_dates_cache) >= 25
+    checks_p10.append({"label": "至少25个交易日数据(5+20回溯)", "ok": ok_25, "detail": f"prev_dates={len(prev_dates_cache)}"})
     x_high = None
     x_date_str = None
-    if ok_40:
-        check_dates = [date_str] + prev_dates_cache[:19]
+    if ok_25:
+        # 当日往前不含当日共5个交易日找X
+        check_dates = prev_dates_cache[:5]
         for d in check_dates:
             k = rp._daily_cache.get(d)
             if not k or getattr(k, "high", None) is None:
@@ -1249,7 +1250,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
             if x_high is None or k.high > x_high:
                 x_high = k.high
                 x_date_str = d
-    checks_p10.append({"label": "步骤1：20日内最高价X日存在", "ok": (x_high is not None and x_date_str is not None), "detail": f"x_date={x_date_str}, x_high={float(x_high or 0):.2f}"})
+    checks_p10.append({"label": "步骤1：5日内(不含当日)最高价X日存在", "ok": (x_high is not None and x_date_str is not None), "detail": f"x_date={x_date_str}, x_high={float(x_high or 0):.2f}"})
     y_low = None
     y_date_str = None
     if x_date_str:
@@ -3081,13 +3082,14 @@ def diagnose_high_stagnation_bearish(stock_code: str, date_str: str, current_dat
         print("  ❌ 缺少当日或前一日daily_chance数据")
         return
     
-    if target_index < 39:
-        print(f"  ❌ 数据不足40个交易日（当前索引: {target_index}）")
+    # 需要：当日往前不含当日5日找X，且X日前20日找Y => 至少25个交易日数据
+    if target_index < 25:
+        print(f"  ❌ 数据不足25个交易日（当前索引: {target_index}）")
         return
     
-    # 步骤1：近20日最高价X
-    x_range_start = max(0, target_index - 19)
-    x_range_end = target_index
+    # 步骤1：当日往前不含当日共5个交易日 最高价X
+    x_range_start = max(0, target_index - 5)
+    x_range_end = target_index - 1
     x_high = -1
     x_idx = -1
     for i in range(x_range_start, x_range_end + 1):
