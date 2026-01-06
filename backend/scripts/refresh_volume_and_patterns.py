@@ -1293,6 +1293,58 @@ def identify_bearish_patterns(stock_code: str, daily_data: List[Dict], target_id
                         prev_mid = (prev_day['open'] + prev_day['close']) / 2
                         if today['open'] > prev_day['close'] and today['close'] < prev_mid:
                             matched_patterns.append("强转弱")
+
+    # 16. 空方炮
+    # 条件：
+    # - 今日(T)：阴线（开盘>收盘）且 跌幅>2%（昨收->今收）且 B>2%（B=实体，按B/最低价*100）
+    # - 前一交易日(T-1)：阳线（收盘>开盘），且 T-1收盘 < (T-2开盘 + T-2收盘)/2
+    # - 再前一日(T-2)：阴线（开盘>收盘）且 跌幅>3%（T-3收->T-2收）且 B>3%
+    if target_idx >= 2:
+        today = daily_data[target_idx]
+        prev_day = daily_data[target_idx - 1]
+        day_2 = daily_data[target_idx - 2]
+
+        # 今日阴线
+        if today['open'] > today['close'] and prev_day['close'] > 0:
+            # 今日跌幅（昨收->今收）
+            # 必须是相对昨收下跌
+            if today['close'] >= prev_day['close']:
+                today_decline_pct = 0
+            else:
+                today_decline_pct = ((prev_day['close'] - today['close']) / prev_day['close']) * 100
+
+            # 今日B%
+            today_abc = KLinePatternService.calculate_abc(
+                today['open'], today['close'], today['high'], today['low']
+            )
+            today_b_ratio = (today_abc.b / today['low']) * 100 if today['low'] > 0 else 0
+
+            if today_decline_pct > 2.0 and today_b_ratio > 2.0:
+                # T-1：阳线 + 收盘落在T-2实体下半
+                mid_2 = (day_2['open'] + day_2['close']) / 2
+                if prev_day['close'] > prev_day['open'] and prev_day['close'] < mid_2:
+                    # T-2：阴线 + 跌幅>3% + B>3%
+                    is_day2_negative = day_2['open'] > day_2['close']
+                    prev_close_2 = day_2.get('prev_close')
+                    if prev_close_2 is None:
+                        if target_idx >= 3:
+                            prev_close_2 = daily_data[target_idx - 3]['close']
+                        else:
+                            prev_close_2 = 0
+
+                    if is_day2_negative and prev_close_2 and prev_close_2 > 0:
+                        # 必须是相对前收下跌
+                        if day_2['close'] >= prev_close_2:
+                            day2_decline_pct = 0
+                        else:
+                            day2_decline_pct = ((prev_close_2 - day_2['close']) / prev_close_2) * 100
+                        day2_abc = KLinePatternService.calculate_abc(
+                            day_2['open'], day_2['close'], day_2['high'], day_2['low']
+                        )
+                        day2_b_ratio = (day2_abc.b / day_2['low']) * 100 if day_2['low'] > 0 else 0
+
+                        if day2_decline_pct > 3.0 and day2_b_ratio > 3.0:
+                            matched_patterns.append("空方炮")
     
     return matched_patterns
 

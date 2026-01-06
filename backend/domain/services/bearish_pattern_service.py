@@ -175,6 +175,13 @@ class BearishPatternService:
             )
             if pattern15:
                 matched_patterns.append(pattern15)
+
+            # 16. 空方炮
+            pattern16 = BearishPatternService._check_pattern16(
+                stock_code, daily_data, target_idx
+            )
+            if pattern16:
+                matched_patterns.append(pattern16)
             
             return matched_patterns
             
@@ -850,6 +857,83 @@ class BearishPatternService:
             return None
         
         return "强转弱"
+
+    @staticmethod
+    def _check_pattern16(stock_code: str, daily_data: List[Dict], target_idx: int) -> Optional[str]:
+        """
+        16. 空方炮
+
+        逻辑（按用户定义）：
+        - 今日(T)：阴线（开盘价>收盘价）且 跌幅>2%（昨收->今收）且 B>2%（B=实体，按B/最低价*100）
+        - 前一交易日(T-1)：阳线（收盘价>开盘价），且 T-1收盘价 < (T-2开盘价 + T-2收盘价)/2
+        - 再前一日(T-2)：阴线（开盘价>收盘价）且 跌幅>3%（T-3收->T-2收）且 B>3%
+        """
+        # 需要至少3根K线，且T-2需要有prev_close可计算跌幅
+        if target_idx < 2:
+            return None
+
+        today = daily_data[target_idx]
+        prev_day = daily_data[target_idx - 1]
+        day_2 = daily_data[target_idx - 2]  # T-2
+
+        # ---- 今日条件：阴线 + 跌幅>2%（昨收->今收） + B>2% ----
+        if not (today.get('open', 0) > today.get('close', 0)):
+            return None
+
+        if prev_day.get('close', 0) <= 0:
+            return None
+        # 必须是相对昨收下跌
+        if today.get('close', 0) >= prev_day.get('close', 0):
+            return None
+        today_decline_pct = ((prev_day.get('close', 0) - today.get('close', 0)) / prev_day.get('close', 0)) * 100
+        if today_decline_pct <= 2.0:
+            return None
+
+        today_abc = KLinePatternService.calculate_abc(
+            today.get('open', 0), today.get('close', 0), today.get('high', 0), today.get('low', 0)
+        )
+        today_low = today.get('low', 0) or 0
+        today_b_ratio = (today_abc.b / today_low) * 100 if today_low > 0 else 0
+        if today_b_ratio <= 2.0:
+            return None
+
+        # ---- T-1：阳线 + 收盘价落在T-2实体下半 ----
+        if not (prev_day.get('close', 0) > prev_day.get('open', 0)):
+            return None
+
+        mid_2 = (day_2.get('open', 0) + day_2.get('close', 0)) / 2
+        if not (prev_day.get('close', 0) < mid_2):
+            return None
+
+        # ---- T-2：阴线 + 跌幅>3%（T-3收->T-2收） + B>3% ----
+        if not (day_2.get('open', 0) > day_2.get('close', 0)):
+            return None
+
+        prev_close_2 = day_2.get('prev_close')
+        if prev_close_2 is None:
+            if (target_idx - 3) >= 0:
+                prev_close_2 = daily_data[target_idx - 3].get('close', 0)
+            else:
+                prev_close_2 = 0
+        if not prev_close_2 or prev_close_2 <= 0:
+            return None
+
+        # 必须是相对前收下跌
+        if day_2.get('close', 0) >= prev_close_2:
+            return None
+        day2_decline_pct = ((prev_close_2 - day_2.get('close', 0)) / prev_close_2) * 100
+        if day2_decline_pct <= 3.0:
+            return None
+
+        day2_abc = KLinePatternService.calculate_abc(
+            day_2.get('open', 0), day_2.get('close', 0), day_2.get('high', 0), day_2.get('low', 0)
+        )
+        day2_low = day_2.get('low', 0) or 0
+        day2_b_ratio = (day2_abc.b / day2_low) * 100 if day2_low > 0 else 0
+        if day2_b_ratio <= 3.0:
+            return None
+
+        return "空方炮"
     
     @staticmethod
     def _calculate_amplitude(high: float, low: float, prev_close: float) -> float:
