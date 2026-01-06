@@ -69,7 +69,15 @@ class BatchBacktestController:
     def market_index(self):
         """获取大盘指数数据用于图表对比"""
         try:
-            data = BatchBacktestService.get_market_index(index_name='上证指数', start_date='2024-01-01')
+            # 支持前端传入起始日期：用于把基准(0%)对齐到“本次回测选择的开始日期”
+            start_date = (
+                (request.args.get("start_date") or request.args.get("startDate") or "").strip()
+                or "2024-01-01"
+            )
+            # 简单兜底校验，避免异常格式导致SQL报错
+            if len(start_date) != 10 or start_date[4] != "-" or start_date[7] != "-":
+                start_date = "2024-01-01"
+            data = BatchBacktestService.get_market_index(index_name='上证指数', start_date=start_date)
             return jsonify(ResponseBuilder.success(data, "ok")), 200
         except Exception as e:
             logger.error(f"获取大盘指数失败: {e}", exc_info=True)

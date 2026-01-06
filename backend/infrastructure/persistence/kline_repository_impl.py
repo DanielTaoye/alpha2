@@ -43,7 +43,8 @@ class KLineRepositoryImpl(IKLineRepository):
                     LIMIT %s
                 """
                 cursor.execute(query, (period_code, start_date, end_date, limit))
-            results = cursor.fetchall()
+            # PyMySQL 的 fetchall() 通常返回 tuple；需要转成 list 才能 reverse
+            results = list(cursor.fetchall() or [])
             
             # 反转顺序，从旧到新
             results.reverse()

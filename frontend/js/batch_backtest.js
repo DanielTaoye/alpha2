@@ -392,7 +392,8 @@ async function startBatchBacktest() {
 
         // 显示结果（无论完成还是取消，都展示已完成数据）
         try {
-            displayResults(results, successCount, failCount, skippedCount);
+            // 传入本次批量回测的配置（用于图表基准起始日对齐）
+            displayResults(results, successCount, failCount, skippedCount, backtestConfig);
         } catch (e) {
             console.error('displayResults 渲染异常:', e);
             showError('结果渲染异常（已在控制台输出错误），请稍后重试或降低并发数');
@@ -586,7 +587,7 @@ function updateProgress(percent, text) {
 }
 
 // 显示结果
-function displayResults(results, successCount, failCount, skippedCount = 0) {
+function displayResults(results, successCount, failCount, skippedCount = 0, backtestConfig = null) {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'block';
 
@@ -647,10 +648,14 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
     if (successStockCount === 0) successStockCount = 1;
     console.log(`策略收益曲线：共 ${successStockCount} 只成功回测的股票`);
 
-    // 设定时间轴范围
-    const startDateStr = "2024-01-01";
+    // 设定时间轴范围：
+    // - 若用户在批量回测里选择了开始日期，则以该日期作为曲线起点 & 上证指数 0% 基准日
+    // - 否则回退到 minDate（策略交易收益最早日期），再不行才用旧默认值
+    const selectedStartDateStr = (backtestConfig && backtestConfig.startDate) ? String(backtestConfig.startDate).trim() : '';
+    const startDateStr = selectedStartDateStr || minDate || "2024-01-01";
     const todayStr = new Date().toISOString().split('T')[0];
-    let cursorDateStr = (minDate && minDate < startDateStr) ? minDate : startDateStr;
+    // 若用户明确选择开始日期，则严格从该日开始展示；否则允许向前扩展到 minDate
+    let cursorDateStr = selectedStartDateStr ? startDateStr : ((minDate && minDate < startDateStr) ? minDate : startDateStr);
 
     // 构造策略的收益序列 (红色) - 平均收益率
     const xData = [];
@@ -671,8 +676,8 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
 
         cursor.setDate(cursor.getDate() + 1);
     }
-    // 3. fetch 基准数据 (上证指数)
-    fetch('/api/batch_backtest/market_index')
+    // 3. fetch 基准数据 (上证指数)：把起始日期传给后端，确保 0% 基准日对齐
+    fetch(`/api/batch_backtest/market_index?start_date=${encodeURIComponent(startDateStr)}`)
         .then(res => res.json())
         .then(res => {
             let benchmarkData = [];
@@ -686,9 +691,8 @@ function displayResults(results, successCount, failCount, skippedCount = 0) {
                 console.log("First record:", benchmarkData[0]);
             }
 
-            // 找到基准价 (Base Price): 2024-01-01 (或数据的第一个点)
-            // 因为API返回的是 >= 2024-01-01 的数据，按日期升序
-            // 所以 benchmarkData[0] 就是 2024年开盘第一天的数据，作为基准
+            // 找到基准价 (Base Price): startDateStr 对应区间的第一个有效交易日收盘价
+            // 后端返回的是 >= startDateStr 的数据，按日期升序，所以 benchmarkData[0] 就是基准点
             let baseClose = null;
             if (benchmarkData.length > 0) {
                 baseClose = benchmarkData[0].close;
