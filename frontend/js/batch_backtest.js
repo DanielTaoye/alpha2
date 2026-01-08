@@ -620,6 +620,7 @@ function displayResults(results, successCount, failCount, skippedCount = 0, back
     let maxDate = null;
 
     // 统计回测成功且有交易数据的股票数量
+    // 注意：这里统计的是有收益数据的股票，用于折线图计算
     let successStockCount = 0;
 
     // 2. 收集所有交易的 (日期, 收益率)
@@ -660,9 +661,16 @@ function displayResults(results, successCount, failCount, skippedCount = 0, back
         }
     });
 
-    // 如果没有成功的股票，避免除以0
-    if (successStockCount === 0) successStockCount = 1;
-    console.log(`策略收益曲线：共 ${successStockCount} 只成功回测的股票`);
+    // 计算汇总数据（在折线图计算之前，确保使用正确的分母）
+    // 注意：统计/平均值只基于"真正跑出回测数据"的股票：
+    // - success=true 且 skipped=false 且 data.summary 存在（后端保证此时 trades 非空）
+    const successResults = results.filter(r => r && r.success && !r.skipped);
+    const statResults = successResults.filter(r => r.data && r.data.summary);
+    
+    // 使用 statResults.length 作为折线图的分母，确保与平均收益率计算一致
+    // 这是真正成功回测且有CR点收益的股票数量（不是总回测数量）
+    const finalStockCount = statResults.length > 0 ? statResults.length : 1;
+    console.log(`策略收益曲线：共 ${finalStockCount} 只成功回测的股票（总回测：${results.length}，有收益数据：${successStockCount}，有summary：${statResults.length}）`);
 
     // 设定时间轴范围：
     // - 若用户在批量回测里选择了开始日期，则以该日期作为曲线起点 & 上证指数 0% 基准日
@@ -687,8 +695,9 @@ function displayResults(results, successCount, failCount, skippedCount = 0, back
         cumSum += dayYield;
 
         xData.push(dStr);
-        // 除以股票数量，得到平均收益率
-        strategyYData.push(parseFloat((cumSum / successStockCount).toFixed(2)));
+        // 除以成功回测的股票数量（不是总回测数量），得到平均收益率
+        // 使用 finalStockCount 确保与平均收益率计算的分母一致
+        strategyYData.push(parseFloat((cumSum / finalStockCount).toFixed(2)));
 
         cursor.setDate(cursor.getDate() + 1);
     }
@@ -840,11 +849,8 @@ function displayResults(results, successCount, failCount, skippedCount = 0, back
             });
         }
     }
-    // 计算汇总数据
-    // 注意：统计/平均值只基于“真正跑出回测数据”的股票：
-    // - success=true 且 skipped=false 且 data.summary 存在（后端保证此时 trades 非空）
-    const successResults = results.filter(r => r && r.success && !r.skipped);
-    const statResults = successResults.filter(r => r.data && r.data.summary);
+    // 计算汇总数据（复用之前计算的 statResults）
+    // 注意：statResults 已在折线图计算之前计算过，这里直接使用
 
     let totalTrades = 0;
     let totalReturnSum = 0;
