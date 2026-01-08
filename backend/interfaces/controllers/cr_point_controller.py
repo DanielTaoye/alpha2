@@ -76,7 +76,7 @@ class CRPointController:
                     end_dt = datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1) - timedelta(seconds=1)
                 if start_date_str:
                     raw_start = datetime.strptime(start_date_str, '%Y-%m-%d')
-                    start_dt = raw_start - timedelta(days=180)
+                    start_dt = raw_start - timedelta(days=200)
                     # 按范围动态调高limit，避免范围稍大时被2000截断
                     if end_dt:
                         span_days = max(1, int((end_dt - start_dt).days) + 1)
