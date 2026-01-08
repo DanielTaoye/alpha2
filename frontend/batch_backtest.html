@@ -392,7 +392,7 @@
 
             <div class="control-row">
                 <label class="control-label">回测时间:</label>
-                <input type="date" class="stock-limit-input" id="btStartDate" style="width: 160px;">
+                <input type="date" class="stock-limit-input" id="btStartDate" style="width: 160px;" value="2024-03-01">
                 <span style="color:#666; font-size:14px;">到</span>
                 <input type="date" class="stock-limit-input" id="btEndDate" style="width: 160px;">
                 <span style="color:#666; font-size:14px;">（可选）</span>
@@ -411,16 +411,16 @@
                 <label class="control-label">买卖价口径:</label>
                 <span style="color:#666; font-size:14px;">C执行价</span>
                 <select class="strategy-select" id="btBuyPriceMode" style="max-width: 260px;">
-                    <option value="NEXT_OPEN" selected>C日次日开盘</option>
+                    <option value="NEXT_OPEN">C日次日开盘</option>
                     <option value="TRIGGER_OPEN">C日开盘</option>
-                    <option value="TRIGGER_CLOSE">C日收盘</option>
+                    <option value="TRIGGER_CLOSE" selected>C日收盘</option>
                     <option value="NEXT_CLOSE">C日次日收盘</option>
                 </select>
                 <span style="color:#666; font-size:14px;">R执行价</span>
                 <select class="strategy-select" id="btSellPriceMode" style="max-width: 260px;">
-                    <option value="NEXT_OPEN" selected>R日次日开盘</option>
+                    <option value="NEXT_OPEN">R日次日开盘</option>
                     <option value="TRIGGER_OPEN">R日开盘</option>
-                    <option value="TRIGGER_CLOSE">R日收盘</option>
+                    <option value="TRIGGER_CLOSE" selected>R日收盘</option>
                     <option value="NEXT_CLOSE">R日次日收盘</option>
                 </select>
             </div>

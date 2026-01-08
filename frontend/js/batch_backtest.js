@@ -257,8 +257,8 @@ async function startBatchBacktest() {
     const startDate = document.getElementById('btStartDate')?.value || '';
     const endDate = document.getElementById('btEndDate')?.value || '';
     const onlyGoldenC = !!document.getElementById('btOnlyGolden')?.checked;
-    const buyPriceMode = document.getElementById('btBuyPriceMode')?.value || 'NEXT_OPEN';
-    const sellPriceMode = document.getElementById('btSellPriceMode')?.value || 'NEXT_OPEN';
+    const buyPriceMode = document.getElementById('btBuyPriceMode')?.value || 'TRIGGER_CLOSE';
+    const sellPriceMode = document.getElementById('btSellPriceMode')?.value || 'TRIGGER_CLOSE';
     const engine = document.getElementById('btEngine')?.value || 'legacy';
 
     const backtestConfig = {
