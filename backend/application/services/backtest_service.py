@@ -48,6 +48,55 @@ class BacktestService:
                 if conn:
                     conn.close()
 
+    @staticmethod
+    def _get_daily_close_range(table_name: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """
+        获取指定日期范围内的日K收盘价（用于计算每日市值/收益率曲线）
+        返回: [{'date': 'YYYY-MM-DD', 'close': float}, ...]
+        """
+        if not start_date or not end_date or start_date > end_date:
+            return []
+        
+        conn = None
+        cursor = None
+        try:
+            conn = DatabaseConnection.get_connection()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 日K: peroid_type='1day' and shi_jian >= start 00:00:00 and <= end 23:59:59
+            start_ts = f"{start_date} 00:00:00"
+            end_ts = f"{end_date} 23:59:59"
+            
+            query = f"""
+                SELECT shi_jian, shou_pan_jia
+                FROM {table_name}
+                WHERE peroid_type = '1day'
+                  AND shi_jian >= %s
+                  AND shi_jian <= %s
+                ORDER BY shi_jian ASC
+            """
+            cursor.execute(query, (start_ts, end_ts))
+            rows = cursor.fetchall() or []
+            
+            result = []
+            for r in rows:
+                if not r.get('shi_jian') or r.get('shou_pan_jia') is None:
+                    continue
+                d_str = str(r['shi_jian'])[:10]
+                result.append({
+                    'date': d_str,
+                    'close': float(r['shou_pan_jia'])
+                })
+            return result
+        except Exception as e:
+            logger.error(f"获取每日收盘价失败: {e}")
+            return []
+        finally:
+            try:
+                if cursor: cursor.close()
+            finally:
+                if conn: conn.close()
+
     def calculate_backtest(self, stock_code: str, table_name: str, 
                           c_points: List[Dict], r_points: List[Dict],
                           backtest_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -252,6 +301,68 @@ class BacktestService:
                         r_datetime = datetime.strptime(r_date, '%Y-%m-%d')
                         days = (r_datetime - c_datetime).days
 
+                        days = (r_datetime - c_datetime).days
+
+                        # 计算每日市值收益（Daily Mark-to-Market）
+                        daily_yields = []
+                        # 买入日期 & 卖出日期
+                        b_date = buy_time[:10]
+                        s_date = sell_time[:10]
+                        
+                        # 获取持有期内的所有日K收盘价
+                        # 范围：min(b_date, s_date) 到 max(b_date, s_date)
+                        # 注意：如果买卖是同一天，也会查出当天收盘价
+                        start_d = min(b_date, s_date)
+                        end_d = max(b_date, s_date)
+                        
+                        daily_records = self._get_daily_close_range(table_name, start_d, end_d)
+                        record_map = {item['date']: item['close'] for item in daily_records}
+                        
+                        # 按日推演持有价值变化
+                        # 逻辑：
+                        # 1. 持有第一天（可能是买入当天）：收益 = (当日收盘 - 买入价) / 买入价
+                        # 2. 中间持有日：收益 = (当日收盘 - 昨日收盘) / 昨日收盘
+                        # 3. 卖出当天：收益 = (卖出价 - 昨日收盘) / 昨日收盘
+                        #    * 若买卖同日：收益 = (卖出价 - 买入价) / 买入价 （即总收益）
+                        
+                        # 用一个由 dates 组成的序列来模拟
+                        # 注意：daily_records 包含期间所有交易日（除了周末/假期）
+                        
+                        # 补充：如果买卖同日，直接记一笔
+                        if b_date == s_date:
+                             daily_yields.append({
+                                 'date': b_date,
+                                 'value': return_rate
+                             })
+                        else:
+                            # 有跨日
+                            # 先找到买入日对应的收盘
+                            # 按照 daily_records 里的顺序遍历
+                            last_close = buy_price
+                            
+                            # 确保 daily_records 按日期升序
+                            sorted_dates = sorted(daily_records, key=lambda x: x['date'])
+                            
+                            for rec in sorted_dates:
+                                d = rec['date']
+                                c = rec['close']
+                                
+                                # 跳过买入日之前的（理论上查该区间不会有，但防止时差）
+                                if d < b_date: continue
+                                # 卖出日单独处理（用 sell_price）
+                                if d >= s_date: break 
+                                
+                                # 当日收益 = (TodayClose - LastRef) / LastRef * 100
+                                day_ret = ((c - last_close) / last_close) * 100
+                                daily_yields.append({'date': d, 'value': day_ret})
+                                last_close = c
+                            
+                            # 最后处理卖出日
+                            # 卖出收益 = (SellPrice - LastRef) / LastRef * 100
+                            # LastRef 此时是“卖出前一交易日的收盘价”（或者是买入价，如果期间无K线）
+                            final_ret = ((sell_price - last_close) / last_close) * 100
+                            daily_yields.append({'date': s_date, 'value': final_ret})
+
                         trades.append(self._build_trade_row(
                             current_c=current_c,
                             buy_price=buy_price,
@@ -263,7 +374,8 @@ class BacktestService:
                             return_rate=return_rate,
                             status='completed',
                             days=days,
-                            exit_reason=f"R点卖出({buy_price_mode}->{sell_price_mode})"
+                            exit_reason=f"R点卖出({buy_price_mode}->{sell_price_mode})",
+                            daily_yields=daily_yields
                         ))
 
                         _log_info(
@@ -320,7 +432,8 @@ class BacktestService:
                         return_rate=return_rate,
                         status='completed',
                         days=days,
-                        exit_reason=f'C点后{exit_after_days_int}个交易日卖出'
+                        exit_reason=f'C点后{exit_after_days_int}个交易日卖出',
+                        daily_yields=[] # 暂不计算 X天模式的每日波动，逻辑同上，可扩展
                     ))
                     
                     _log_info(
@@ -391,7 +504,8 @@ class BacktestService:
                                 return_rate=return_rate,
                                 status='completed',
                                 days=days,
-                                exit_reason=f"无R，按截止日{exit_day_str}强制卖出({buy_price_mode}->{sell_price_mode})"
+                                exit_reason=f"无R，按截止日{exit_day_str}强制卖出({buy_price_mode}->{sell_price_mode})",
+                                daily_yields=[] # 暂略
                             ))
                         else:
                             # 个股回测：保持原样“持仓中”，但仍输出浮盈浮亏
@@ -1275,6 +1389,7 @@ class BacktestService:
         status: str,
         days: Optional[int],
         exit_reason: str,
+        daily_yields: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         统一 trade 输出结构，方便前端展示“触发原因/插件/交易时间”
@@ -1307,6 +1422,7 @@ class BacktestService:
             'c_plugins': current_c.get('plugins', []) or [],
             'r_strategy': r_strategy,
             'r_plugins': r_plugins,
+            'daily_yields': daily_yields or []
         }
     
     def _calculate_summary(self, trades: List[Dict]) -> Dict[str, Any]:
@@ -1362,6 +1478,25 @@ class BacktestService:
                     'date': date_only,
                     'value': float(t['return_rate'])
                 })
+        
+        # 聚合所有交易的每日收益 (Daily MTM)
+        # 格式: List of { 'date': 'YYYY-MM-DD', 'value': 1.23 }
+        # value 是“当日所有持仓股票的收益率之和” (简单叠加，符合当前需求)
+        daily_yield_agg = {}
+        for t in completed_trades:
+            dys = t.get('daily_yields') or []
+            for d in dys:
+                dt = d['date']
+                val = d['value']
+                daily_yield_agg[dt] = daily_yield_agg.get(dt, 0.0) + val
+        
+        # 转 list并排序
+        daily_yields_sorted = []
+        for dt in sorted(daily_yield_agg.keys()):
+            daily_yields_sorted.append({
+                'date': dt,
+                'value': daily_yield_agg[dt]
+            })
 
         return {
             'total_trades': len(trades),
@@ -1376,6 +1511,7 @@ class BacktestService:
             'win_count': len(win_trades),
             'loss_count': len(trades_with_return) - len(win_trades),
             'holding_return': round(holding_return, 2),  # 持仓总收益
-            'trade_yields': trade_yields  # 每日收益明细
+            'trade_yields': trade_yields,  # 旧版：基于卖出日的阶梯
+            'daily_yields': daily_yields_sorted # 新版：基于持有日的每日波动
         }
 

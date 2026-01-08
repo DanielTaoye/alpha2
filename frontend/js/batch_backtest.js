@@ -623,24 +623,40 @@ function displayResults(results, successCount, failCount, skippedCount = 0, back
     let successStockCount = 0;
 
     // 2. 收集所有交易的 (日期, 收益率)
-    // 注意：这里只是收集数据，不画图
+    // 优先使用 daily_yields (每日市值法)，若无则回退 trade_yields (阶梯法)
     results.forEach(r => {
-        if (r.success && r.data && r.data.summary && Array.isArray(r.data.summary.trade_yields)) {
-            // 只有有 trade_yields 的才算"成功回测"
-            if (r.data.summary.trade_yields.length > 0) {
+        if (r.success && r.data && r.data.summary) {
+            const sum = r.data.summary;
+
+            // 模式 A: 每日市值收益 (Daily MTM)
+            if (Array.isArray(sum.daily_yields) && sum.daily_yields.length > 0) {
                 successStockCount++;
+                sum.daily_yields.forEach(item => {
+                    const d = item.date;
+                    const val = parseFloat(item.value || 0);
+                    if (!d) return;
+                    if (!minDate || d < minDate) minDate = d;
+                    if (!maxDate || d > maxDate) maxDate = d;
+
+                    if (!dateYieldMap[d]) dateYieldMap[d] = 0;
+                    dateYieldMap[d] += val;
+                });
             }
-            r.data.summary.trade_yields.forEach(item => {
-                const d = item.date;
-                const val = parseFloat(item.value || 0);
-                if (!d) return;
+            // 模式 B (回退): 旧版逻辑，仅在卖出日记账
+            else if (Array.isArray(sum.trade_yields) && sum.trade_yields.length > 0) {
+                successStockCount++;
+                sum.trade_yields.forEach(item => {
+                    const d = item.date;
+                    const val = parseFloat(item.value || 0);
+                    if (!d) return;
 
-                if (!minDate || d < minDate) minDate = d;
-                if (!maxDate || d > maxDate) maxDate = d;
+                    if (!minDate || d < minDate) minDate = d;
+                    if (!maxDate || d > maxDate) maxDate = d;
 
-                if (!dateYieldMap[d]) dateYieldMap[d] = 0;
-                dateYieldMap[d] += val;
-            });
+                    if (!dateYieldMap[d]) dateYieldMap[d] = 0;
+                    dateYieldMap[d] += val;
+                });
+            }
         }
     });
 
