@@ -422,28 +422,14 @@ class RPointPluginService:
                     prev_ma20 = ma20_list[current_index - 1]
 
             def _below_or_was_below_price(threshold: float) -> bool:
-                if not threshold or threshold <= 0:
-                    return False
-                # 今日：收/最低任一跌破
-                if (current_close and current_close < threshold) or (current_low and current_low < threshold):
-                    return True
-                # 已跌破：前一交易日收/最低任一跌破
-                if prev_data is not None:
-                    pc = getattr(prev_data, "close", 0) or 0
-                    pl = getattr(prev_data, "low", 0) or 0
-                    if (pc and pc < threshold) or (pl and pl < threshold):
-                        return True
-                return False
+                # 简化逻辑：只检查当日收盘价是否低于阈值
+                # 如果当日收盘价低于C日支撑位，就算跌破或已跌破
+                return current_close and threshold > 0 and current_close < threshold
 
             def _below_or_was_below_ma20() -> bool:
-                if ma20_today and ((current_close and current_close < ma20_today) or (current_low and current_low < ma20_today)):
-                    return True
-                if prev_data is not None and prev_ma20 and prev_ma20 > 0:
-                    pc = getattr(prev_data, "close", 0) or 0
-                    pl = getattr(prev_data, "low", 0) or 0
-                    if (pc and pc < prev_ma20) or (pl and pl < prev_ma20):
-                        return True
-                return False
+                # 简化逻辑：只检查当日收盘价是否在当日MA20以下
+                # 如果当日收盘价低于MA20，就算跌破或已跌破
+                return current_close and ma20_today and current_close < ma20_today
 
             # MACD死叉状态：DEA > DIF
             is_dead_cross = False

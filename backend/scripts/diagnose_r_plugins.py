@@ -2665,30 +2665,12 @@ def diagnose_sideways_oscillation_risk(
     today_close = float(current_data.get('close') or 0)
     today_low = float(current_data.get('low') or 0)
     ma20_today = float(ma20[target_index] or 0)
-    break_ma20 = (today_close < ma20_today) or (today_low < ma20_today)
-
-    # 近1日“已跌破”判定：用前一交易日
-    prev1 = (get_prev_daily_chances(stock_code, date_str, 1) or [])
-    prev_date = None
-    if prev1:
-        d = prev1[0].get('date')
-        prev_date = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)
-    prev_break_ma20 = False
-    if prev_date and prev_date in date_to_idx:
-        prev_k = _dd(prev_date)
-        pi = date_to_idx[prev_date]
-        pm = float(ma20[pi] or 0) if pi < len(ma20) and ma20[pi] not in [None, 0] else 0
-        if pm > 0:
-            prev_break_ma20 = (float(prev_k.get('close') or 0) < pm) or (float(prev_k.get('low') or 0) < pm)
-    break_or_was_break_ma20 = break_ma20 or prev_break_ma20
+    # 简化逻辑：只检查当日收盘价是否在当日MA20以下
+    break_or_was_break_ma20 = today_close < ma20_today
 
     lastC_support = last_support
-    break_support = (today_close < lastC_support) or (today_low < lastC_support)
-    prev_break_support = False
-    if prev_date:
-        prev_k = _dd(prev_date)
-        prev_break_support = (float(prev_k.get('close') or 0) < lastC_support) or (float(prev_k.get('low') or 0) < lastC_support)
-    break_or_was_break_support = break_support or prev_break_support
+    # 简化逻辑：只检查当日收盘价是否低于C日支撑位
+    break_or_was_break_support = today_close < lastC_support
 
     vt = (current_chance.get('volume_type') or '').strip()
     has_any_vt = bool(vt)
