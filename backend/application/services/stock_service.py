@@ -61,7 +61,7 @@ class StockApplicationService:
                 sql = """
                     SELECT code, name, nature, pin_yin, pin_yin_initial
                     FROM all_stock
-                    WHERE (`是否退市` != 1 OR `是否退市` IS NULL)
+                    WHERE (`is_delist` != 1 OR `is_delist` IS NULL)
                       AND (
                             code LIKE %s 
                          OR name LIKE %s

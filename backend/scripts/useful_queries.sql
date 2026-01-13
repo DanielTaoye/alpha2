@@ -149,7 +149,7 @@ LIMIT 30;
 -- 12. 查看all_stock表中未退市的股票总数
 SELECT COUNT(*) as active_stock_count
 FROM all_stock
-WHERE `是否退市` != 1 OR `是否退市` IS NULL;
+WHERE `is_delist` != 1 OR `is_delist` IS NULL;
 
 -- 13. 对比all_stock和b_daily_chance，找出还未同步的股票
 SELECT a.code, a.name, a.nature
@@ -158,7 +158,7 @@ LEFT JOIN (
     SELECT DISTINCT stock_code 
     FROM b_daily_chance
 ) b ON a.code = b.stock_code
-WHERE (a.`是否退市` != 1 OR a.`是否退市` IS NULL)
+WHERE (a.`is_delist` != 1 OR a.`is_delist` IS NULL)
   AND b.stock_code IS NULL
 ORDER BY a.code;
 

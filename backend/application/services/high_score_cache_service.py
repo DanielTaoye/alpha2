@@ -407,7 +407,7 @@ class HighScoreCacheService:
                 sql = """
                     SELECT code, name, nature
                     FROM all_stock
-                    WHERE (`是否退市` != 1 OR `是否退市` IS NULL)
+                    WHERE (`is_delist` != 1 OR `is_delist` IS NULL)
                     ORDER BY code
                 """
                 cursor.execute(sql)

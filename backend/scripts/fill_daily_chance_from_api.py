@@ -79,7 +79,7 @@ def load_stocks_from_db(conn, limit: Optional[int], codes: Optional[List[str]], 
     """
     cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-    where_clauses = ["(`是否退市` != 1 OR `是否退市` IS NULL)"]
+    where_clauses = ["(`is_delist` != 1 OR `is_delist` IS NULL)"]
     params: List = []
     if codes:
         placeholders = ",".join(["%s"] * len(codes))
