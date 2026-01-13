@@ -611,7 +611,7 @@ class RPointPluginService:
         4. 连续5连阳+阶段涨幅过大
         5. 前15日累计涨幅过大
         6. 前20日累计涨幅过大
-        7. 当日收盘价相对MA10偏离>15%
+        7. 当日收盘价相对MA10偏离>15%（主板）/>25%（非主板）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -683,17 +683,18 @@ class RPointPluginService:
                         f"is_bearish_3pct_line={is_bearish_3pct_line}, matched_patterns={matched_patterns}, "
                         f"has_bearish_pattern={has_bearish_pattern}")
 
-            # 子条件7：当日收盘价相对MA10偏离>15%，且放量（XYH）且出现空头分歧K线（振幅>6%/8%）
-            if deviation is not None and deviation > 0.15:
+            # 子条件7：当日收盘价相对MA10偏离，主板>15%，非主板>25%，且放量（XYH）且出现空头分歧K线（振幅>6%/8%）
+            deviation_threshold = 0.15 if is_main_board else 0.25  # 主板15%，非主板25%
+            if deviation is not None and deviation > deviation_threshold:
                 if is_volume_xyh and is_bearish_kline_with_amplitude:
                     return RPointPluginResult(
                         "乖离率偏离",
                         True,
-                        f"条件7: 收盘价偏离MA10 {deviation*100:.2f}%>15% 且放量XYH+空头分歧K线"
+                        f"条件7: 收盘价偏离MA10 {deviation*100:.2f}%>{deviation_threshold*100:.0f}% 且放量XYH+空头分歧K线"
                     )
                 else:
                     logger.debug(
-                        f"[R点-乖离率偏离-条件7未达成] {stock_code} {date_str} deviation={deviation*100:.2f}%, "
+                        f"[R点-乖离率偏离-条件7未达成] {stock_code} {date_str} deviation={deviation*100:.2f}% <= {deviation_threshold*100:.0f}%, "
                         f"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}"
                     )
 

@@ -568,16 +568,18 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         checks.append({"label": "条件6-门槛: 放量XYZH 且(空头分歧K线 或 空头组合)", "ok": cond6_gate, "detail": ""})
         checks.append({"label": "条件6-是否触发", "ok": (cond6_core and cond6_gate), "detail": ""})
 
-        # 条件7：收盘偏离MA10>15% + 放量XYH + 空头分歧K线（仅振幅类）
+        # 条件7：收盘偏离MA10>15%（主板）/>25%（非主板） + 放量XYH + 空头分歧K线（仅振幅类）
         deviation = None
         ma10_list = ma_data.get("ma10") if ma_data else None
         if ma10_list is not None and target_index is not None and target_index < len(ma10_list):
             ma10_today = ma10_list[target_index]
             if ma10_today:
                 deviation = (Cc - float(ma10_today)) / float(ma10_today)
-        cond7_core = (deviation is not None and deviation > 0.15)
+        deviation_threshold = 0.15 if is_main_board else 0.25  # 主板15%，非主板25%
+        cond7_core = (deviation is not None and deviation > deviation_threshold)
         cond7_gate = is_volume_xyh and is_bearish_kline_with_amplitude
-        checks.append({"label": "条件7-核心: 收盘偏离MA10>15%", "ok": cond7_core, "detail": f"deviation={deviation*100:.2f}%" if deviation is not None else "缺少MA10或target_index"})
+        threshold_pct = deviation_threshold * 100
+        checks.append({"label": f"条件7-核心: 收盘偏离MA10>{threshold_pct:.0f}%", "ok": cond7_core, "detail": f"deviation={deviation*100:.2f}%" if deviation is not None else "缺少MA10或target_index"})
         checks.append({"label": "条件7-门槛: 放量XYH 且 空头分歧K线(振幅类)", "ok": cond7_gate, "detail": ""})
         checks.append({"label": "条件7-是否触发", "ok": (cond7_core and cond7_gate), "detail": ""})
 
