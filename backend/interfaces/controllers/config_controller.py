@@ -76,9 +76,9 @@ class ConfigController:
                 try:
                     high_stagnation_gain_threshold = float(high_stagnation_gain_threshold)
                     if high_stagnation_gain_threshold < 0 or high_stagnation_gain_threshold > 100:
-                        return jsonify(ResponseBuilder.error('高位滞涨+空头组合-高低点涨幅阈值必须在0-100之间')), 400
+                        return jsonify(ResponseBuilder.error('高位滞涨-高低点涨幅阈值必须在0-100之间')), 400
                 except (ValueError, TypeError):
-                    return jsonify(ResponseBuilder.error('高位滞涨+空头组合-高低点涨幅阈值必须是数字')), 400
+                    return jsonify(ResponseBuilder.error('高位滞涨-高低点涨幅阈值必须是数字')), 400
 
             def parse_nature_thresholds(raw_value, label):
                 if raw_value is None:
@@ -127,7 +127,7 @@ class ConfigController:
             if high_position_gain_threshold is not None:
                 update_info_parts.append(f'高位发R涨幅阈值:{high_position_gain_threshold}%')
             if high_stagnation_gain_threshold is not None:
-                update_info_parts.append(f'高位滞涨+空头组合涨幅阈值:{high_stagnation_gain_threshold}%')
+                update_info_parts.append(f'高位滞涨涨幅阈值:{high_stagnation_gain_threshold}%')
             if strategy1_nature_thresholds:
                 update_info_parts.append(f'策略1股性阈值:{strategy1_nature_thresholds}')
             if strategy2_nature_thresholds:

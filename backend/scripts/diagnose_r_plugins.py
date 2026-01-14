@@ -1234,7 +1234,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
     checks_p12.append({"label": "Step5 价高创新高(price_h2>price_h1)", "ok": ok_price_higher, "detail": f"price_h2={price_h2}, price_h1={price_h1}"})
     checks_p12.append({"label": "Step5 DIF降低(dif_h2<dif_h1)", "ok": ok_dif_lower, "detail": f"dif_h2={h2_dif}, dif_h1={dif_h1}"})
 
-    # 插件10：高位滞涨+空头组合（按插件实现逐条列条件）
+    # 插件10：高位滞涨（按插件实现逐条列条件）
     checks_p10: List[Dict[str, Any]] = []
     all_dates = sorted(getattr(rp, "_daily_cache", {}).keys(), reverse=True)
     prev_dates_cache = [d for d in all_dates if d < date_str]
@@ -1320,7 +1320,7 @@ def generate_r_diagnosis_report(stock_info: Dict, date_str: str, api_base_url: O
         checks=checks_p12,
     )
     _run_plugin(
-        "插件10: 高位滞涨+空头组合",
+        "插件10: 高位滞涨",
         ["高位涨幅达阈值 + 当日空头组合 + 支撑/指标组合(详见插件实现)"],
         rp._check_high_stagnation_bearish,
         [stock_code, check_date, macd_data, target_index],
@@ -3047,12 +3047,12 @@ def diagnose_box_breakdown(stock_code: str, date_str: str, current_data: Dict,
             print("  前5日未发现死叉转换 ❌")
 
 
-def diagnose_high_stagnation_bearish(stock_code: str, date_str: str, current_data: Dict,
+def diagnose_high_stagnation(stock_code: str, date_str: str, current_data: Dict,
                                      current_chance: Dict, prev_chance: Dict,
                                      macd_data: Dict, kline_list: List, target_index: int):
-    """诊断高位滞涨+空头组合（插件10）"""
+    """诊断高位滞涨（插件10）"""
     print("\n" + "=" * 80)
-    print("📊 插件10: 高位滞涨+空头组合")
+    print("📊 插件10: 高位滞涨")
     print("=" * 80)
     
     # 兼容：旧诊断函数内使用了已移除的全局 config_service
@@ -3508,7 +3508,7 @@ def diagnose_stock(stock_info: Dict, date_str: str, c_point_date: str = None, la
                                    macd_data, kline_list, target_index)
             diagnose_downtrend_break(stock_code, date_str, current_data, prev_chance,
                                      ma_data, macd_data, target_index)
-            diagnose_high_stagnation_bearish(stock_code, date_str, current_data, current_chance,
+            diagnose_high_stagnation(stock_code, date_str, current_data, current_chance,
                                              prev_chance, macd_data, kline_list, target_index)
         else:
             print(f"   ❌ 在K线数据中未找到目标日期 {date_str}")

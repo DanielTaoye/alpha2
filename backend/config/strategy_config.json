@@ -28,7 +28,7 @@
     },
     "high_stagnation_bearish": {
       "gain_threshold_pct": 25.0,
-      "description": "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值"
+      "description": "高位滞涨插件-X日最高价相对Y日最低价的涨幅阈值"
     }
   },
   "market_type": "bull",

@@ -262,12 +262,12 @@ class RPointPluginService:
                 logger.info(f"[R点插件-中长线顶背离] {stock_code} {date}: {plugin12.reason}")
                 return True, triggered_plugins
 
-        # 插件10: 高位滞涨+空头组合
+        # 插件10: 高位滞涨
         if macd_data and current_index is not None:
             plugin10 = self._check_high_stagnation_bearish(stock_code, date, macd_data, current_index)
             if plugin10.triggered:
                 triggered_plugins.append(plugin10)
-                logger.info(f"[R点插件-高位滞涨+空头组合] {stock_code} {date}: {plugin10.reason}")
+                logger.info(f"[R点插件-高位滞涨] {stock_code} {date}: {plugin10.reason}")
                 return True, triggered_plugins
 
         # 插件2: 临近压力位滞涨（放最后，避免缺C点影响其他插件）
@@ -2444,7 +2444,7 @@ class RPointPluginService:
     def _check_high_stagnation_bearish(self, stock_code: str, date: datetime,
                                        macd_data: dict, current_index: int) -> RPointPluginResult:
         """
-        插件10: 高位滞涨+空头组合
+        插件10: 高位滞涨
         
         1. 从当日往前“不含当日”5个交易日，找到最高价那日X
         2. 从X日向前推20个交易日，找到最低价Y
@@ -2460,7 +2460,7 @@ class RPointPluginService:
             current_data = self._daily_cache.get(date_str)
             current_chance = self._daily_chance_cache.get(date_str)
             if not current_data or not current_chance:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             current_price = current_data.close
             
@@ -2470,7 +2470,7 @@ class RPointPluginService:
             
             # 至少需要25个交易日数据：前5日找X（不含当日），再向前20日找Y
             if len(prev_dates) < 25:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             check_dates = prev_dates[:5]  # 共5个交易日（不含当日）
             x_high = None
@@ -2478,44 +2478,44 @@ class RPointPluginService:
             for d_str in check_dates:
                 k = self._daily_cache.get(d_str)
                 if not k or k.high is None:
-                    return RPointPluginResult("高位滞涨+空头组合", False, "")
+                    return RPointPluginResult("高位滞涨", False, "")
                 if x_high is None or k.high > x_high:
                     x_high = k.high
                     x_date_str = d_str
             
             if x_high is None or x_date_str is None:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             # ===== 步骤2：从X日向前推20个交易日，找到最低价Y =====
             prev_before_x = [d for d in all_dates if d < x_date_str]
             if len(prev_before_x) < 20:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             y_low = None
             y_date_str = None
             for d_str in prev_before_x[:20]:
                 k = self._daily_cache.get(d_str)
                 if not k or k.low is None:
-                    return RPointPluginResult("高位滞涨+空头组合", False, "")
+                    return RPointPluginResult("高位滞涨", False, "")
                 if y_low is None or k.low < y_low:
                     y_low = k.low
                     y_date_str = d_str
             
             if y_low is None or y_low <= 0:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             # ===== 步骤3：高位条件（可配置阈值）=====
             gain_threshold_pct = self.config_service.get_high_stagnation_gain_threshold()
             gain_pct = (x_high - y_low) / y_low * 100
             if gain_pct <= gain_threshold_pct:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             # ===== 支撑位检查（前一交易日）=====
             is_break_support, support_price_actual, current_close, break_detail = self._is_close_break_prev_support(
                 stock_code, date_str, use_cache_only=True
             )
             if not is_break_support or support_price_actual is None or current_close is None:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             # ===== 条件A：空头组合 + 跌破支撑 =====
             has_bearish_combo = self._check_bearish_pattern(current_chance)
@@ -2524,13 +2524,13 @@ class RPointPluginService:
                           f"X-20日Y日{self._to_date_str(y_date_str)}低点{y_low:.2f}, "
                           f"涨幅{gain_pct:.2f}%>阈值{gain_threshold_pct:.2f}%, "
                           f"空头组合({current_chance.bearish_pattern.strip()})+{break_detail}")
-                return RPointPluginResult("高位滞涨+空头组合", True, reason)
+                return RPointPluginResult("高位滞涨", True, reason)
             
             # ===== 条件B：MACD死叉（含前5日内）+跌破支撑 =====
             dif_list = macd_data.get('dif', [])
             dea_list = macd_data.get('dea', [])
             if not dif_list or not dea_list or current_index >= len(dif_list) or current_index < 1:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             death_cross_found = False
             start_check_index = max(1, current_index - 5)
@@ -2551,17 +2551,17 @@ class RPointPluginService:
                     break
             
             if not death_cross_found:
-                return RPointPluginResult("高位滞涨+空头组合", False, "")
+                return RPointPluginResult("高位滞涨", False, "")
             
             reason = (f"X日{self._to_date_str(x_date_str)}高点{x_high:.2f}, "
                       f"X-20日Y日{self._to_date_str(y_date_str)}低点{y_low:.2f}, "
                       f"涨幅{gain_pct:.2f}%>阈值{gain_threshold_pct:.2f}%, "
                       f"MACD死叉+{break_detail}")
-            return RPointPluginResult("高位滞涨+空头组合", True, reason)
+            return RPointPluginResult("高位滞涨", True, reason)
         
         except Exception as e:
-            logger.error(f"插件10-高位滞涨+空头组合检查异常: {e}")
-            return RPointPluginResult("高位滞涨+空头组合", False, "")
+            logger.error(f"插件10-高位滞涨检查异常: {e}")
+            return RPointPluginResult("高位滞涨", False, "")
     
     def _is_close_break_prev_support(self, stock_code: str, check_date_str: str,
                                      use_cache_only: bool = False) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:

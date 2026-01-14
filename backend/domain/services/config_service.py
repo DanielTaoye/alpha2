@@ -128,7 +128,7 @@ class ConfigService:
                         },
                         "high_stagnation_bearish": {
                             "gain_threshold_pct": 25.0,
-                            "description": "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值"
+                            "description": "高位滞涨插件-X日最高价相对Y日最低价的涨幅阈值"
                         }
                     },
                     "market_type": "bull",
@@ -167,7 +167,7 @@ class ConfigService:
         
         high_stagnation_cfg = r_cfg.setdefault("high_stagnation_bearish", {})
         high_stagnation_cfg.setdefault("gain_threshold_pct", 25.0)
-        high_stagnation_cfg.setdefault("description", "高位滞涨+空头组合插件-X日最高价相对Y日最低价的涨幅阈值")
+        high_stagnation_cfg.setdefault("description", "高位滞涨插件-X日最高价相对Y日最低价的涨幅阈值")
     
     def _save_config(self):
         """保存配置到文件"""
@@ -275,7 +275,7 @@ class ConfigService:
         return float(config.get('r_point_plugins', {}).get('high_position_r', {}).get('gain_threshold_pct', 25.0))
     
     def get_high_stagnation_gain_threshold(self) -> float:
-        """获取高位滞涨+空头组合插件的高低点涨幅阈值（百分比）"""
+        """获取高位滞涨插件的高低点涨幅阈值（百分比）"""
         config = self.get_config()
         return float(config.get('r_point_plugins', {}).get('high_stagnation_bearish', {}).get('gain_threshold_pct', 25.0))
     
@@ -342,7 +342,7 @@ class ConfigService:
             if 'high_stagnation_bearish' not in config['r_point_plugins']:
                 config['r_point_plugins']['high_stagnation_bearish'] = {}
             config['r_point_plugins']['high_stagnation_bearish']['gain_threshold_pct'] = high_stagnation_gain_threshold
-            logger.info(f"高位滞涨+空头组合-高低点涨幅阈值更新为: {high_stagnation_gain_threshold}%")
+            logger.info(f"高位滞涨-高低点涨幅阈值更新为: {high_stagnation_gain_threshold}%")
         
         config['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
