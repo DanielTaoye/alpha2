@@ -11,6 +11,7 @@
 - 测试5个股票: python refresh_volume_and_patterns.py --test
 - 刷新全部股票: python refresh_volume_and_patterns.py --all
 - 指定股票代码: python refresh_volume_and_patterns.py --codes SZ301565,SH688701
+- 只更新空头组合: python refresh_volume_and_patterns.py --bearish-only --all
 """
 
 import sys
@@ -1349,11 +1350,12 @@ def identify_bearish_patterns(stock_code: str, daily_data: List[Dict], target_id
     return matched_patterns
 
 
-def batch_update_records(conn, updates: List[Dict]) -> int:
+def batch_update_records(conn, updates: List[Dict], update_volume_type: bool = True,
+                        update_bullish: bool = True, update_bearish: bool = True) -> int:
     """批量更新记录"""
     if not updates:
         return 0
-    
+
     # 保活一次，避免长连接在批量更新前被踢掉
     try:
         conn.ping(reconnect=True)
@@ -1368,30 +1370,44 @@ def batch_update_records(conn, updates: List[Dict]) -> int:
         logger.warning(f"⚠️ 设置锁等待超时失败: {e}")
         cursor = conn.cursor()
     conn.autocommit(False)
-    
+
     success_count = 0
     batch_size = 100
     last_commit_idx = 0
-    
+
     for idx, update in enumerate(updates, 1):
         try:
-            sql = """
-                UPDATE b_daily_chance 
-                SET volume_type = %s,
-                    bullish_pattern = %s,
-                    bearish_pattern = %s,
-                    updated_at = NOW()
+            # 动态构建SQL和参数
+            set_parts = []
+            params = []
+
+            if update_volume_type:
+                set_parts.append("volume_type = %s")
+                params.append(update['volume_type'])
+
+            if update_bullish:
+                set_parts.append("bullish_pattern = %s")
+                params.append(update['bullish_pattern'])
+
+            if update_bearish:
+                set_parts.append("bearish_pattern = %s")
+                params.append(update['bearish_pattern'])
+
+            if not set_parts:
+                # 如果没有任何字段需要更新，跳过
+                continue
+
+            set_clause = ", ".join(set_parts)
+            sql = f"""
+                UPDATE b_daily_chance
+                SET {set_clause}, updated_at = NOW()
                 WHERE stock_code = %s AND DATE(date) = %s
             """
-            cursor.execute(sql, (
-                update['volume_type'],
-                update['bullish_pattern'],
-                update['bearish_pattern'],
-                update['stock_code'],
-                update['date']
-            ))
+            params.extend([update['stock_code'], update['date']])
+
+            cursor.execute(sql, params)
             success_count += 1
-            
+
             # 分批提交，避免长事务卡住
             if idx % batch_size == 0:
                 conn.commit()
@@ -1399,14 +1415,15 @@ def batch_update_records(conn, updates: List[Dict]) -> int:
                 logger.info(f"  💾 分批提交进度: {idx}/{len(updates)}")
         except Exception as e:
             logger.debug(f"更新失败 {update['stock_code']} {update['date']}: {e}")
-    
+
     # 提交剩余
     if last_commit_idx < len(updates):
         conn.commit()
     return success_count
 
 
-def process_single_stock(master_conn, readonly_conn, stock: Dict, args) -> Dict:
+def process_single_stock(master_conn, readonly_conn, stock: Dict, args,
+                        update_volume_type: bool = True, update_bullish: bool = True, update_bearish: bool = True) -> Dict:
     """处理单只股票的所有日期
     
     Args:
@@ -1534,43 +1551,58 @@ def process_single_stock(master_conn, readonly_conn, stock: Dict, args) -> Dict:
         date_to_idx[date_str] = i
     
     # 第一轮：批量计算所有成交量类型（因为多头组合需要用到）
-    logger.info(f"  🔄 第一轮：计算成交量类型...")
     volume_type_cache = {}
-    for i in range(len(daily_data)):
-        volume_type = calculate_volume_type_for_idx(daily_data, i)
-        if volume_type:
-            volume_type_cache[i] = volume_type
-    
+    if update_volume_type or update_bullish:
+        logger.info(f"  🔄 第一轮：计算成交量类型...")
+        for i in range(len(daily_data)):
+            volume_type = calculate_volume_type_for_idx(daily_data, i)
+            if volume_type:
+                volume_type_cache[i] = volume_type
+
     # 第二轮：计算多空头组合并准备更新
-    logger.info(f"  🔄 第二轮：计算多空头组合并更新...")
+    update_desc_parts = []
+    if update_volume_type:
+        update_desc_parts.append("成交量类型")
+    if update_bullish:
+        update_desc_parts.append("多头组合")
+    if update_bearish:
+        update_desc_parts.append("空头组合")
+    update_desc = "+".join(update_desc_parts) if update_desc_parts else "无"
+    logger.info(f"  🔄 第二轮：计算{update_desc}并更新...")
+
     updates = []
     start_time = time.time()
-    
+
     for i, date_str in enumerate(dates, 1):
         try:
             idx = date_to_idx.get(date_str)
             if idx is None:
                 result['skip_count'] += 1
                 continue
-            
-            # 获取成交量类型
-            volume_type = volume_type_cache.get(idx, '')
-            
-            # 计算多头组合
-            bullish_patterns = identify_bullish_patterns(stock_code, daily_data, idx, volume_type_cache)
-            bullish_pattern = ','.join(bullish_patterns) if bullish_patterns else ''
-            
-            # 计算空头组合
-            bearish_patterns = identify_bearish_patterns(stock_code, daily_data, idx)
-            bearish_pattern = ','.join(bearish_patterns) if bearish_patterns else ''
-            
-            updates.append({
+
+            update_item = {
                 'stock_code': stock_code,
-                'date': date_str,
-                'volume_type': volume_type or '',
-                'bullish_pattern': bullish_pattern,
-                'bearish_pattern': bearish_pattern
-            })
+                'date': date_str
+            }
+
+            # 获取成交量类型
+            if update_volume_type:
+                volume_type = volume_type_cache.get(idx, '')
+                update_item['volume_type'] = volume_type or ''
+
+            # 计算多头组合
+            if update_bullish:
+                bullish_patterns = identify_bullish_patterns(stock_code, daily_data, idx, volume_type_cache)
+                bullish_pattern = ','.join(bullish_patterns) if bullish_patterns else ''
+                update_item['bullish_pattern'] = bullish_pattern
+
+            # 计算空头组合
+            if update_bearish:
+                bearish_patterns = identify_bearish_patterns(stock_code, daily_data, idx)
+                bearish_pattern = ','.join(bearish_patterns) if bearish_patterns else ''
+                update_item['bearish_pattern'] = bearish_pattern
+
+            updates.append(update_item)
             
             # 进度输出
             if i % 50 == 0 or i == len(dates):
@@ -1590,7 +1622,10 @@ def process_single_stock(master_conn, readonly_conn, stock: Dict, args) -> Dict:
     # 批量更新数据库（使用主库连接）
     if updates:
         logger.info(f"  💾 批量更新 {len(updates)} 条记录...")
-        result['success_count'] = batch_update_records(master_conn, updates)
+        result['success_count'] = batch_update_records(master_conn, updates,
+                                                     update_volume_type=update_volume_type,
+                                                     update_bullish=update_bullish,
+                                                     update_bearish=update_bearish)
     
     logger.info(f"  ✅ {stock_code} 完成: 成功={result['success_count']}, "
                 f"跳过={result['skip_count']}, 错误={result['error_count']}")
@@ -1624,6 +1659,8 @@ def main():
                         help='历史结束日期 YYYY-MM-DD（默认今天）')
     parser.add_argument('--fill-placeholders', action='store_true',
                         help='若接口回填后仍有缺失交易日，则插入占位记录补齐日期（谨慎使用）')
+    parser.add_argument('--bearish-only', action='store_true',
+                        help='只更新空头组合，其他成交量类型和多头组合不更新')
     args = parser.parse_args()
 
     # 参数校验
@@ -1644,8 +1681,14 @@ def main():
     if not KLINE_SERVICE_AVAILABLE:
         logger.warning("⚠️ KLinePatternService 不可用，多空头组合将不会计算")
     
+    # 确定更新模式
+    if args.bearish_only:
+        mode_desc = "只更新空头组合"
+    else:
+        mode_desc = "成交量类型 + 多空头组合"
+
     logger.info("=" * 80)
-    logger.info("🚀 开始刷新 b_daily_chance 表（成交量类型 + 多空头组合）")
+    logger.info(f"🚀 开始刷新 b_daily_chance 表（{mode_desc}）")
     logger.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"生产主库: {MASTER_DB_CONFIG['host']}:{MASTER_DB_CONFIG['port']}")
     logger.info("=" * 80)
@@ -1705,12 +1748,20 @@ def main():
     
     start_time = time.time()
     
+    # 根据参数设置更新选项
+    update_volume_type = not args.bearish_only
+    update_bullish = not args.bearish_only
+    update_bearish = True  # 空头组合总是需要更新（不管是否bearish_only）
+
     try:
         for i, stock in enumerate(stocks, 1):
             logger.info(f"\n[{i}/{len(stocks)}] 处理 {stock['code']} ({stock['name']})...")
-            
+
             try:
-                result = process_single_stock(master_conn, readonly_conn, stock, args)
+                result = process_single_stock(master_conn, readonly_conn, stock, args,
+                                            update_volume_type=update_volume_type,
+                                            update_bullish=update_bullish,
+                                            update_bearish=update_bearish)
                 
                 total_results['total_dates'] += result['total_dates']
                 total_results['total_success'] += result['success_count']
