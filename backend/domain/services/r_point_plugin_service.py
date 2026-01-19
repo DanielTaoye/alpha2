@@ -263,8 +263,8 @@ class RPointPluginService:
                 return True, triggered_plugins
 
         # 插件10: 高位滞涨
-        if macd_data and current_index is not None:
-            plugin10 = self._check_high_stagnation_bearish(stock_code, date, macd_data, current_index)
+        if ma_data and macd_data and current_index is not None:
+            plugin10 = self._check_high_stagnation_bearish(stock_code, date, ma_data, macd_data, current_index)
             if plugin10.triggered:
                 triggered_plugins.append(plugin10)
                 logger.info(f"[R点插件-高位滞涨] {stock_code} {date}: {plugin10.reason}")
@@ -2442,7 +2442,7 @@ class RPointPluginService:
             return RPointPluginResult(plugin_name, False, "")
 
     def _check_high_stagnation_bearish(self, stock_code: str, date: datetime,
-                                       macd_data: dict, current_index: int) -> RPointPluginResult:
+                                       ma_data: dict, macd_data: dict, current_index: int) -> RPointPluginResult:
         """
         插件10: 高位滞涨
         
@@ -2451,7 +2451,7 @@ class RPointPluginService:
         3. 若X日最高价 > Y日最低价 * (1+配置阈值)，视为高位（默认15%）
         4. 满足高位后，同时出现以下任一组合即触发：
            A. 当日空头组合 + 跌破支撑
-           B. 当日MACD已出现死叉（含前5日内） + 跌破支撑
+           B. 当日MACD已出现死叉（含前5日内） + 跌破支撑 + 当日MA5<=MA10
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -2526,7 +2526,7 @@ class RPointPluginService:
                           f"空头组合({current_chance.bearish_pattern.strip()})+{break_detail}")
                 return RPointPluginResult("高位滞涨", True, reason)
             
-            # ===== 条件B：MACD死叉（含前5日内）+跌破支撑 =====
+            # ===== 条件B：MACD死叉（含前5日内）+跌破支撑+MA5<=MA10 =====
             dif_list = macd_data.get('dif', [])
             dea_list = macd_data.get('dea', [])
             if not dif_list or not dea_list or current_index >= len(dif_list) or current_index < 1:
@@ -2553,10 +2553,24 @@ class RPointPluginService:
             if not death_cross_found:
                 return RPointPluginResult("高位滞涨", False, "")
             
+            # 增加 check: MA5 <= MA10
+            ma5_list = ma_data.get('ma5', [])
+            ma10_list = ma_data.get('ma10', [])
+            if not ma5_list or not ma10_list or current_index >= len(ma5_list) or current_index >= len(ma10_list):
+                 return RPointPluginResult("高位滞涨", False, "")
+            
+            ma5_val = ma5_list[current_index]
+            ma10_val = ma10_list[current_index]
+            if ma5_val is None or ma10_val is None:
+                return RPointPluginResult("高位滞涨", False, "")
+            
+            if ma5_val > ma10_val:
+                 return RPointPluginResult("高位滞涨", False, "")
+
             reason = (f"X日{self._to_date_str(x_date_str)}高点{x_high:.2f}, "
                       f"X-20日Y日{self._to_date_str(y_date_str)}低点{y_low:.2f}, "
                       f"涨幅{gain_pct:.2f}%>阈值{gain_threshold_pct:.2f}%, "
-                      f"MACD死叉+{break_detail}")
+                      f"MACD死叉+MA5<=MA10+{break_detail}")
             return RPointPluginResult("高位滞涨", True, reason)
         
         except Exception as e:
