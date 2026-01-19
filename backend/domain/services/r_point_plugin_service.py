@@ -187,7 +187,7 @@ class RPointPluginService:
                 return True, triggered_plugins
 
         # 插件6: 跌破支撑位
-        plugin6 = self._check_break_support(stock_code, date)
+        plugin6 = self._check_break_support(stock_code, date, c_point_date)
         if plugin6.triggered:
             triggered_plugins.append(plugin6)
             logger.info(f"[R点插件-跌破支撑位] {stock_code} {date}: {plugin6.reason}")
@@ -221,7 +221,7 @@ class RPointPluginService:
         
         # 插件7: 高位发R
         if ma_data and macd_data and current_index is not None:
-            plugin7 = self._check_high_position_r(stock_code, date, ma_data, macd_data, current_index)
+            plugin7 = self._check_high_position_r(stock_code, date, ma_data, macd_data, current_index, c_point_date)
             if plugin7.triggered:
                 triggered_plugins.append(plugin7)
                 logger.info(f"[R点插件-高位发R] {stock_code} {date}: {plugin7.reason}")
@@ -229,7 +229,7 @@ class RPointPluginService:
 
         # 插件8: 箱体回踩被跌破
         if macd_data and current_index is not None and kline_data is not None:
-            plugin8 = self._check_box_breakdown(stock_code, date, macd_data, current_index, kline_data)
+            plugin8 = self._check_box_breakdown(stock_code, date, macd_data, current_index, kline_data, c_point_date)
             if plugin8.triggered:
                 triggered_plugins.append(plugin8)
                 logger.info(f"[R点插件-箱体回踩被跌破] {stock_code} {date}: {plugin8.reason}")
@@ -248,7 +248,7 @@ class RPointPluginService:
 
         # 插件11: MACD中长线死叉+跌破支撑
         if macd_data and current_index is not None:
-            plugin11 = self._check_macd_long_dead_cross_break_support(stock_code, date, macd_data, current_index)
+            plugin11 = self._check_macd_long_dead_cross_break_support(stock_code, date, macd_data, current_index, c_point_date)
             if plugin11.triggered:
                 triggered_plugins.append(plugin11)
                 logger.info(f"[R点插件-MACD中长线死叉+跌破支撑] {stock_code} {date}: {plugin11.reason}")
@@ -264,7 +264,7 @@ class RPointPluginService:
 
         # 插件10: 高位滞涨
         if ma_data and macd_data and current_index is not None:
-            plugin10 = self._check_high_stagnation_bearish(stock_code, date, ma_data, macd_data, current_index)
+            plugin10 = self._check_high_stagnation_bearish(stock_code, date, ma_data, macd_data, current_index, c_point_date)
             if plugin10.triggered:
                 triggered_plugins.append(plugin10)
                 logger.info(f"[R点插件-高位滞涨] {stock_code} {date}: {plugin10.reason}")
@@ -444,8 +444,18 @@ class RPointPluginService:
                     if dif_v is not None and dea_v is not None:
                         is_dead_cross = dea_v > dif_v
 
+            # 获取前一日支撑位（用于动态支撑比较）
+            prev_support_val = 0.0
+            if prev_date_str:
+                prev_chance = self._daily_chance_cache.get(prev_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+                if prev_chance and prev_chance.support_price:
+                    prev_support_val = float(prev_chance.support_price) / 100.0
+
+            # 动态支撑位：MAX(最近C日支撑, 前一日支撑)
+            final_c_support = max(last_c_support, prev_support_val)
+
             break_ma20 = _below_or_was_below_ma20()
-            break_c_support = _below_or_was_below_price(last_c_support)
+            break_c_support = _below_or_was_below_price(final_c_support)
 
             # 规则1/2 需要死叉；3/4 需要任意量型
             if break_ma20 and is_dead_cross:
@@ -461,7 +471,7 @@ class RPointPluginService:
                     "横盘震荡+风险信号",
                     True,
                     f"横盘成立(firstC={first_c['date_str']},lastC={last_c['date_str']},支撑差{support_delta_pct:.2f}%,开盘差{open_delta_pct:.2f}%) "
-                    f"+ 跌破/已跌破C支撑({last_c_support:.2f}) + MACD死叉(DEA>{dea_v if dea_v is not None else 'None'},DIF={dif_v if dif_v is not None else 'None'})"
+                    f"+ 跌破/已跌破C后动态支撑({final_c_support:.2f}) + MACD死叉(DEA>{dea_v if dea_v is not None else 'None'},DIF={dif_v if dif_v is not None else 'None'})"
                 )
 
             if has_any_volume_type and break_c_support:
@@ -469,7 +479,7 @@ class RPointPluginService:
                     "横盘震荡+风险信号",
                     True,
                     f"横盘成立(firstC={first_c['date_str']},lastC={last_c['date_str']},支撑差{support_delta_pct:.2f}%,开盘差{open_delta_pct:.2f}%) "
-                    f"+ 任意量型({volume_type_str}) + 跌破/已跌破C支撑({last_c_support:.2f})"
+                    f"+ 任意量型({volume_type_str}) + 跌破/已跌破C后动态支撑({final_c_support:.2f})"
                 )
 
             if has_any_volume_type and break_ma20:
@@ -1618,8 +1628,33 @@ class RPointPluginService:
             logger.error(f"R点插件-强转弱未反转检查失败: {e}")
             return RPointPluginResult("强转弱未反转", False, "")
     
+    def _check_break_support(self, stock_code: str, date: datetime, c_point_date: Optional[datetime]) -> RPointPluginResult:
+        """
+        插件5: 跌破支撑位 (动态支撑)
+        
+        定义：
+        收盘价 < 动态支撑位（MAX(前一日支撑, 上个C日支撑)）
+        """
+        try:
+            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+            
+            # 使用公共方法判断
+            is_break, support_price, close_price, detail = self._is_break_dynamic_support(stock_code, date_str, c_point_date)
+            
+            if is_break:
+                return RPointPluginResult(
+                    "跌破支撑位",
+                    True,
+                    f"{detail}"
+                )
+            
+            return RPointPluginResult("跌破支撑位", False, "")
+        except Exception as e:
+            logger.error(f"R点插件-跌破支撑位检查失败: {e}")
+            return RPointPluginResult("跌破支撑位", False, "")
+
     def _check_high_position_r(self, stock_code: str, date: datetime, ma_data: dict, 
-                               macd_data: dict, current_index: int) -> RPointPluginResult:
+                               macd_data: dict, current_index: int, c_point_date: Optional[datetime] = None) -> RPointPluginResult:
         """
         插件6: 高位发R
         
@@ -1736,30 +1771,10 @@ class RPointPluginService:
             if current_price <= ma10_current:
                 return RPointPluginResult("高位发R", False, "")
             
-            # === 条件4: 跌破前一日支撑位 ===
-            # 获取前一交易日
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            if not prev_dates or len(prev_dates) < 1:
-                return RPointPluginResult("高位发R", False, "")
-            
-            prev_date_str = prev_dates[0]
-            
-            # 获取前一日的daily_chance（支撑位）
-            prev_chance = self._daily_chance_cache.get(prev_date_str)
-            if not prev_chance:
-                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
-            if not prev_chance:
-                return RPointPluginResult("高位发R", False, "")
-            
-            # 检查前一日是否有支撑位
-            if not prev_chance.support_price or prev_chance.support_price <= 0:
-                return RPointPluginResult("高位发R", False, "")
-            
-            # 支撑位需要除以100
-            support_price_actual = prev_chance.support_price / 100.0
-            
-            # 跌破支撑位
-            is_break_support = current_price < support_price_actual
+            # === 条件4: 跌破动态支撑位 ===
+            is_break_support, _, _, break_detail = self._is_break_dynamic_support(
+                stock_code, date_str, c_point_date, use_cache_only=True
+            )
             if not is_break_support:
                 return RPointPluginResult("高位发R", False, "")
             
@@ -1823,7 +1838,7 @@ class RPointPluginService:
             reason = (f"{ma_desc}, "
                      f"20日最低价{lowest_price:.2f}({lowest_date})涨至{current_price:.2f}涨幅{gain_from_lowest:.2f}%, "
                      f"股价({current_price:.2f})>MA10({ma10_current:.2f}), "
-                     f"跌破支撑({support_price_actual:.2f}), "
+                     f"{break_detail}, "
                      f"MACD死叉")
             
             logger.info(f"[高位发R触发] {stock_code} {date_str}: {reason}")
@@ -1834,7 +1849,7 @@ class RPointPluginService:
             return RPointPluginResult("高位发R", False, "")
     
     def _check_box_breakdown(self, stock_code: str, date: datetime, macd_data: dict, 
-                            current_index: int, kline_data: list) -> RPointPluginResult:
+                            current_index: int, kline_data: list, c_point_date: Optional[datetime] = None) -> RPointPluginResult:
         """
         插件7: 箱体回踩被跌破
         
@@ -1846,7 +1861,7 @@ class RPointPluginService:
         3. 箱体确认：
            - 有Y日：Y日最高价 - Z日最低价 > 20%
            - 无Y日：X日最高价 - Z日最低价 > 20%
-        4. 当前股价跌破前一日支撑位
+        4. 当前股价跌破动态支撑位
         5. MACD出现死叉（前5个交易日内）
         """
         try:
@@ -1938,29 +1953,11 @@ class RPointPluginService:
                 box_high_date = kline_data[x_day_index].time.strftime('%Y-%m-%d')
                 has_y_day = False
             
-            # === 步骤4: 跌破前一日支撑位 ===
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            if not prev_dates or len(prev_dates) < 1:
-                return RPointPluginResult("箱体回踩被跌破", False, "")
+            # === 步骤4: 跌破动态支撑位 ===
+            is_break_support, _, _, break_detail = self._is_break_dynamic_support(
+                stock_code, date_str, c_point_date, use_cache_only=True
+            )
             
-            prev_date_str = prev_dates[0]
-            
-            # 获取前一日的daily_chance（支撑位）
-            prev_chance = self._daily_chance_cache.get(prev_date_str)
-            if not prev_chance:
-                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
-            if not prev_chance:
-                return RPointPluginResult("箱体回踩被跌破", False, "")
-            
-            # 检查前一日是否有支撑位
-            if not prev_chance.support_price or prev_chance.support_price <= 0:
-                return RPointPluginResult("箱体回踩被跌破", False, "")
-            
-            # 支撑位需要除以100
-            support_price_actual = prev_chance.support_price / 100.0
-            
-            # 跌破支撑位
-            is_break_support = current_price < support_price_actual
             if not is_break_support:
                 return RPointPluginResult("箱体回踩被跌破", False, "")
             
@@ -2006,14 +2003,14 @@ class RPointPluginService:
                          f"Z日({z_day_date})最低{z_day_low:.2f}, "
                          f"Y-Z涨幅{box_gain_ratio*100:.1f}%, "
                          f"当前({current_price:.2f})较X日回落{drop_ratio*100:.1f}%, "
-                         f"跌破支撑({support_price_actual:.2f}), "
+                         f"{break_detail}, "
                          f"MACD死叉")
             else:
                 reason = (f"X日({x_day_date})最高{x_day_high:.2f}, "
                          f"Z日({z_day_date})最低{z_day_low:.2f}, "
                          f"X-Z涨幅{box_gain_ratio*100:.1f}%, "
                          f"当前({current_price:.2f})较X日回落{drop_ratio*100:.1f}%, "
-                         f"跌破支撑({support_price_actual:.2f}), "
+                         f"{break_detail}, "
                          f"MACD死叉")
             
             logger.info(f"[箱体回踩被跌破触发] {stock_code} {date_str}: {reason}")
@@ -2096,13 +2093,13 @@ class RPointPluginService:
             check_dates = [date_str] + all_prev_dates[:3]  # 今日 + 前3个交易日
 
             for check_date_str in check_dates:
-                is_break_support, support_price_actual, check_close, detail = self._is_close_break_prev_support(
-                    stock_code, check_date_str
+                is_break_support, support_price_actual, check_close, detail = self._is_break_dynamic_support(
+                    stock_code, check_date_str, c_point_date
                 )
                 if is_break_support:
                     break_support_recent_found = True
                     break_support_recent_detail = detail or (
-                        f"跌破前一日支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
+                        f"{detail}"
                     )
                     break
 
@@ -2173,7 +2170,8 @@ class RPointPluginService:
             return RPointPluginResult("趋势向下+未放量跌破支撑+MACD死叉", False, "")
 
     def _check_macd_long_dead_cross_break_support(self, stock_code: str, date: datetime,
-                                                   macd_data: dict, current_index: int) -> RPointPluginResult:
+                                                   macd_data: dict, current_index: int,
+                                                   c_point_date: Optional[datetime] = None) -> RPointPluginResult:
         """
         插件11: MACD中长线死叉+跌破支撑（仅中长线股性）
 
@@ -2236,16 +2234,14 @@ class RPointPluginService:
             if not dead_cross:
                 return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
 
-            # 跌破前一日支撑
-            if not prev_chance.support_price:
-                return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
-            support_price = prev_chance.support_price / 100.0
-            if current_data.close >= support_price:
+            # 跌破动态支撑
+            is_break, _, _, break_detail = self._is_break_dynamic_support(stock_code, date_str, c_point_date)
+            if not is_break:
                 return RPointPluginResult("MACD中长线死叉+跌破支撑", False, "")
 
             reason = (
                 f"中长线+MACD近3日死叉+量型({current_chance.volume_type})"
-                f"+跌破前日支撑({support_price:.2f}<收盘{current_data.close:.2f})"
+                f"+{break_detail}"
             )
             return RPointPluginResult("MACD中长线死叉+跌破支撑", True, reason)
 
@@ -2442,7 +2438,8 @@ class RPointPluginService:
             return RPointPluginResult(plugin_name, False, "")
 
     def _check_high_stagnation_bearish(self, stock_code: str, date: datetime,
-                                       ma_data: dict, macd_data: dict, current_index: int) -> RPointPluginResult:
+                                       ma_data: dict, macd_data: dict, current_index: int,
+                                       c_point_date: Optional[datetime] = None) -> RPointPluginResult:
         """
         插件10: 高位滞涨
         
@@ -2510,9 +2507,9 @@ class RPointPluginService:
             if gain_pct <= gain_threshold_pct:
                 return RPointPluginResult("高位滞涨", False, "")
             
-            # ===== 支撑位检查（前一交易日）=====
-            is_break_support, support_price_actual, current_close, break_detail = self._is_close_break_prev_support(
-                stock_code, date_str, use_cache_only=True
+            # ===== 支撑位检查（动态支撑）=====
+            is_break_support, support_price_actual, current_close, break_detail = self._is_break_dynamic_support(
+                stock_code, date_str, c_point_date, use_cache_only=True
             )
             if not is_break_support or support_price_actual is None or current_close is None:
                 return RPointPluginResult("高位滞涨", False, "")
@@ -2577,15 +2574,22 @@ class RPointPluginService:
             logger.error(f"插件10-高位滞涨检查异常: {e}")
             return RPointPluginResult("高位滞涨", False, "")
     
-    def _is_close_break_prev_support(self, stock_code: str, check_date_str: str,
+    def _is_break_dynamic_support(self, stock_code: str, check_date_str: str,
+                                     c_point_date: Optional[datetime],
                                      use_cache_only: bool = False) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
         """
-        判断某日是否以收盘价跌破前一日支撑线。
-        use_cache_only=True 时仅使用缓存数据，避免额外IO。
+        判断某日是否以收盘价跌破“动态支撑线”。
+        动态支撑线规则：MAX(前一交易日支撑位, 上个C点日支撑位)
         
+        Args:
+            stock_code: 股票代码
+            check_date_str: 检查日期（字符串）
+            c_point_date: 上个C点日期（可选）
+            use_cache_only: 是否仅使用缓存
+            
         Returns:
             Tuple[bool, Optional[float], Optional[float], Optional[str]]:
-                (是否跌破, 前一日支撑价, 当日收盘价, 详情描述)
+                (是否跌破, 最终支撑价, 当日收盘价, 详情描述)
         """
         # 当日数据
         check_data = self._daily_cache.get(check_date_str)
@@ -2596,26 +2600,61 @@ class RPointPluginService:
         
         check_close = check_data.close
         
-        # 前一交易日
+        # 1. 获取前一交易日支撑位
+        prev_support_val = 0.0
+        prev_date_str = None
+        
         prev_dates = self._get_previous_trading_dates_from_cache(check_date_str, stock_code)
-        if not prev_dates or len(prev_dates) < 1:
+        if prev_dates and len(prev_dates) > 0:
+            prev_date_str = prev_dates[0]
+            prev_chance = self._daily_chance_cache.get(prev_date_str)
+            if not prev_chance and not use_cache_only:
+                prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
+            
+            if prev_chance and prev_chance.support_price and prev_chance.support_price > 0:
+                prev_support_val = float(prev_chance.support_price) / 100.0
+
+        # 2. 获取C点日支撑位
+        c_support_val = 0.0
+        c_date_str_val = None
+        
+        if c_point_date:
+            c_date_str_val = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else str(c_point_date)
+            # 只有当C点日期早于检查日期时才有效（防止未来数据或当天）
+            # 不过通常C点都是之前的，这里简单判断一下
+            if c_date_str_val < check_date_str:
+                c_chance = self._daily_chance_cache.get(c_date_str_val)
+                if not c_chance and not use_cache_only:
+                    c_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, c_date_str_val)
+                
+                if c_chance and c_chance.support_price and c_chance.support_price > 0:
+                    c_support_val = float(c_chance.support_price) / 100.0
+        
+        # 3. 比较并取最大值（动态支撑）
+        # 只要有一个有效，就进行比较；如果都无效，则无法判断
+        if prev_support_val <= 0 and c_support_val <= 0:
             return False, None, check_close, None
+            
+        final_support = max(prev_support_val, c_support_val)
         
-        prev_date_str = prev_dates[0]
+        # 构造描述
+        detail = ""
+        if c_support_val > prev_support_val:
+            detail = f"使用C日({c_date_str_val})支撑{c_support_val:.2f}(>前日{prev_support_val:.2f})"
+        else:
+            if c_support_val > 0:
+                detail = f"使用前日({prev_date_str})支撑{prev_support_val:.2f}(>=C日{c_support_val:.2f})"
+            else:
+                detail = f"使用前日({prev_date_str})支撑{prev_support_val:.2f}(无C日支撑)"
+
+        # 4. 判断跌破
+        is_break = check_close < final_support
         
-        # 前一日支撑
-        prev_chance = self._daily_chance_cache.get(prev_date_str)
-        if not prev_chance and not use_cache_only:
-            prev_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, prev_date_str)
-        if not prev_chance or not prev_chance.support_price or prev_chance.support_price <= 0:
-            return False, None, check_close, None
-        
-        support_price_actual = prev_chance.support_price / 100.0
-        if check_close < support_price_actual:
-            detail = f"跌破支撑({check_date_str}收盘{check_close:.2f}<支撑{support_price_actual:.2f})"
-            return True, support_price_actual, check_close, detail
-        
-        return False, support_price_actual, check_close, None
+        if is_break:
+            full_detail = f"跌破支撑({check_close:.2f}<{final_support:.2f}, {detail})"
+            return True, final_support, check_close, full_detail
+        else:
+            return False, final_support, check_close, None
     
     def _check_volume_type(self, daily_chance, target_types: List[str]) -> bool:
         """检查成交量类型是否在目标类型中"""
@@ -3173,55 +3212,7 @@ class RPointPluginService:
                 A > 3 * B and 
                 C > 2 * B)
     
-    def _check_break_support(self, stock_code: str, date: datetime) -> RPointPluginResult:
-        """
-        插件5: 跌破支撑位
-        
-        条件: 日收盘价 < 前一日支撑位 + 当日放量(XYZ)
-        """
-        try:
-            date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
-            
-            # 获取当日数据
-            current_data = self._daily_cache.get(date_str)
-            if not current_data:
-                current_data = self.daily_repo.find_by_date(stock_code, date_str)
-            if not current_data:
-                return RPointPluginResult("跌破支撑位", False, "")
-            
-            # 获取当日daily_chance（成交量类型）
-            current_chance = self._daily_chance_cache.get(date_str)
-            if not current_chance:
-                current_chance = self.daily_chance_repo.find_by_stock_and_date(stock_code, date_str)
-            if not current_chance:
-                return RPointPluginResult("跌破支撑位", False, "")
-            
-            # 条件1: 当日收盘价 < 前一日支撑位（统一使用收盘价对比前日支撑线）
-            is_break_support, support_price_actual, current_close, _ = self._is_close_break_prev_support(
-                stock_code, date_str
-            )
-            
-            if not is_break_support or support_price_actual is None or current_close is None:
-                return RPointPluginResult("跌破支撑位", False, "")
-            
-            # 条件2: 当日成交量是XYZ（放量）
-            is_volume_xyz = self._check_volume_type(current_chance, ['X', 'Y', 'Z'])
-            
-            if not is_volume_xyz:
-                return RPointPluginResult("跌破支撑位", False, "")
-            
-            # 计算跌幅
-            break_ratio = ((current_close - support_price_actual) / support_price_actual) * 100
-            
-            return RPointPluginResult(
-                "跌破支撑位",
-                True,
-                f"收盘价{current_close:.2f}<前日支撑位{support_price_actual:.2f}(跌破{abs(break_ratio):.2f}%)+放量({current_chance.volume_type})"
-            )
-            
-        except Exception as e:
-            logger.error(f"R点插件-跌破支撑位检查失败: {e}")
-            return RPointPluginResult("跌破支撑位", False, "")
+
 
     def _check_stage_rally_too_high(self, stock_code: str, date: datetime, ma_data: dict,
                                     macd_data: dict, current_index: int) -> RPointPluginResult:

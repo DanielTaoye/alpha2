@@ -202,10 +202,18 @@ class CRPointService:
         for index, kline in enumerate(kline_data):
             # === 第一步：先检查R点（优先级最高）===
             t_r0 = perf_counter()
+            
+            # 【新增逻辑】如果上一个有效点是R点，说明上一轮波段已结束。
+            # 此时检查R点时，不应再参考更早之前的C点支撑（即“真实支撑”重置为前日支撑）。
+            # 因此这里根据 last_valid_point_type 决定是否传入 last_c_point_date。
+            current_c_date_for_r = last_c_point_date
+            if last_valid_point_type == 'R':
+                current_c_date_for_r = None
+
             is_r_point, r_plugins = self.r_point_service.check_r_point(
                 stock_code, 
                 kline.time, 
-                last_c_point_date,  # 传入最近的C点日期（用于"上冲乏力"判断）
+                current_c_date_for_r,  # 传入经此处修正后的C点日期
                 ma_data,  # 传入MA数据（用于高位发R插件）
                 macd_data,  # 传入MACD数据（用于高位发R插件）
                 index,  # 传入当前K线索引（用于高位发R插件）
