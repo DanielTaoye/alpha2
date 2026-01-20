@@ -254,6 +254,15 @@ class RPointPluginService:
                 logger.info(f"[R点插件-MACD中长线死叉+跌破支撑] {stock_code} {date}: {plugin11.reason}")
                 return True, triggered_plugins
 
+        # 插件15: 趋势走弱 (中长线/波段 + 放量 + MACD死叉 + 跌破MA20 + 风险信号)
+        if ma_data and macd_data and current_index is not None and kline_data is not None:
+            plugin15 = self._check_trend_weakening(stock_code, date, ma_data, macd_data, current_index, kline_data)
+            if plugin15.triggered:
+                triggered_plugins.append(plugin15)
+                logger.info(f"[R点插件-趋势走弱] {stock_code} {date}: {plugin15.reason}")
+                return True, triggered_plugins
+
+
         # 插件12: 中长线顶背离（仅中长线股性）
         if macd_data and current_index is not None and kline_data is not None:
             plugin12 = self._check_macd_long_top_divergence(stock_code, date, macd_data, current_index, kline_data)
@@ -287,6 +296,140 @@ class RPointPluginService:
             return True, triggered_plugins
 
         return False, triggered_plugins
+
+
+    # =========================
+    # 插件15：趋势走弱
+    # =========================
+    def _check_trend_weakening(
+        self,
+        stock_code: str,
+        date: datetime,
+        ma_data: dict,
+        macd_data: dict,
+        current_index: int,
+        kline_data: list
+    ) -> RPointPluginResult:
+        """
+        插件15: 趋势走弱 (仅针对中长线和波段股性)
+        
+        触发条件（必须全部满足）：
+        1. 股性为“中长线”或“波段”。
+        2. 放量：volume_type 包含 ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Z', 'Y', 'S'] 中任意一个。
+        3. MACD死叉：DIF < DEA。
+        4. 跌破均线：收盘价 <= MA20。
+        5. 风险信号（满足其一）：
+           - 出现空头组合 (bearish_pattern 非空)。
+           - 分歧K线：["冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", "冲高回落阴十字星", "高开低走"] 中任意一个。
+           - 大阴线：跌幅 (PrevClose - Close)/PrevClose > 3% 且 实体跌幅 (Open - Close)/PrevClose > 3%。
+        """
+        plugin_name = "趋势走弱"
+        
+        # 0. 准备数据
+        date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
+        daily_chance = self._daily_chance_cache.get(date_str)
+        
+        # 1. 股性检查：仅中长线和波段
+        stock_nature = "波段" # 默认为波段
+        if daily_chance and getattr(daily_chance, "stock_nature", None):
+            stock_nature = daily_chance.stock_nature
+            
+        if stock_nature not in ["中长线", "波段"]:
+             return RPointPluginResult(plugin_name, False, "")
+
+        # 2. 放量检查
+        volume_type = getattr(daily_chance, "volume_type", None)
+        if not volume_type:
+             return RPointPluginResult(plugin_name, False, "")
+             
+        valid_volume_types = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Z', 'Y', 'S'}
+        # volume_type 可能包含多个类型，如 "A,H"
+        current_types = set(t.strip() for t in volume_type.split(','))
+        if not current_types.intersection(valid_volume_types):
+             return RPointPluginResult(plugin_name, False, "")
+
+        # 3. MACD死叉检查 (DIF < DEA)
+        if not macd_data or not macd_data.get('dif') or not macd_data.get('dea'):
+             return RPointPluginResult(plugin_name, False, "")
+             
+        dif_list = macd_data['dif']
+        dea_list = macd_data['dea']
+        
+        if current_index >= len(dif_list) or current_index >= len(dea_list):
+             return RPointPluginResult(plugin_name, False, "")
+             
+        dif = dif_list[current_index]
+        dea = dea_list[current_index]
+        
+        if dif is None or dea is None or dif >= dea:
+             return RPointPluginResult(plugin_name, False, "")
+
+        # 4. 跌破均线检查 (Close <= MA20)
+        current_kline = kline_data[current_index]
+        close_price = current_kline.close
+        
+        ma20_list = ma_data.get('ma20', [])
+        if current_index >= len(ma20_list):
+             return RPointPluginResult(plugin_name, False, "")
+             
+        ma20 = ma20_list[current_index]
+        if ma20 is None or close_price > ma20:
+             return RPointPluginResult(plugin_name, False, "")
+
+        # 5. 风险信号检查 (满足其一)
+        risk_signal_found = False
+        risk_reason = ""
+
+        # 5.1 空头组合
+        bearish_pattern = getattr(daily_chance, "bearish_pattern", None)
+        if bearish_pattern:
+            risk_signal_found = True
+            risk_reason = f"空头组合: {bearish_pattern}"
+
+        # 5.2 分歧K线
+        if not risk_signal_found:
+            divergence_patterns = {
+                "冲高回落阳线", "冲高回落阴线", "冲高回落阳十字星", 
+                "冲高回落阴十字星", "高开低走"
+            }
+            # K线形态通常也在 bearish_pattern 或 bullish_pattern 中体现，或者需要单独计算
+            # 这里假设如果 bearish_pattern 中包含了这些描述，或者我们需要额外检查形态
+            # 由于 daily_chance.bearish_pattern 已经包含了识别出的空头形态，
+            # 如果这里的“分歧K线”是 daily_chance 里的标准形态，那上一条已经覆盖。
+            # 这里为了保险，检查 bearish_pattern 是否包含这些特定字符串
+            if bearish_pattern and any(p in bearish_pattern for p in divergence_patterns):
+                 risk_signal_found = True
+                 risk_reason = f"分歧K线: {bearish_pattern}"
+
+        # 5.3 大阴线 (跌幅 > 3% 且 实体跌幅 > 3%)
+        if not risk_signal_found:
+            prev_close = 0
+            if current_index > 0:
+                prev_close = kline_data[current_index - 1].close
+            elif 'prev_close' in kline_data[current_index].__dict__: # 尝试从对象属性获取
+                 prev_close = kline_data[current_index].prev_close
+            
+            if prev_close > 0:
+                drop_pct = (prev_close - close_price) / prev_close
+                open_price = current_kline.open
+                # 实体跌幅: (Open - Close) / PrevClose (严格来说应该是实体长度相对于昨收)
+                # 用户描述: "跌幅（相对于昨收）大于3%的阴线（且B＞3%）"
+                # B通常指实体 (Body)。在这里理解为实体长度 > 3% 昨收。
+                # 且必须是阴线 (Open > Close)
+                if open_price > close_price:
+                    body_pct = (open_price - close_price) / prev_close
+                    if drop_pct > 0.03 and body_pct > 0.03:
+                        risk_signal_found = True
+                        risk_reason = f"大阴线(跌幅{drop_pct*100:.1f}%, 实体{body_pct*100:.1f}%)"
+
+        if risk_signal_found:
+            return RPointPluginResult(
+                plugin_name, 
+                True, 
+                f"放量+MACD死叉+跌破MA20+风险信号({risk_reason})"
+            )
+            
+        return RPointPluginResult(plugin_name, False, "")
 
     # =========================
     # 插件14：横盘震荡+风险信号
@@ -2091,17 +2234,37 @@ class RPointPluginService:
             break_support_recent_detail = None
             all_prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
             check_dates = [date_str] + all_prev_dates[:3]  # 今日 + 前3个交易日
-
-            for check_date_str in check_dates:
-                is_break_support, support_price_actual, check_close, detail = self._is_break_dynamic_support(
-                    stock_code, check_date_str, c_point_date
-                )
-                if is_break_support:
-                    break_support_recent_found = True
-                    break_support_recent_detail = detail or (
-                        f"{detail}"
+            
+            # 【新逻辑】如果最近3个交易日内有C点（即 c_point_date 在 check_dates 中），
+            # 则按照C当日的支撑线作为今天真实支撑线。如果不满足此条件，则走原有逻辑。
+            c_date_in_range = False
+            if c_point_date:
+                c_date_str = c_point_date.strftime('%Y-%m-%d') if isinstance(c_point_date, datetime) else str(c_point_date)
+                # 检查 c_date_str 是否在 check_dates 范围内
+                # check_dates 包含 [今天, 昨, 前, 大前]
+                if c_date_str in check_dates:
+                    c_date_in_range = True
+                    # 获取C点当日支撑
+                    c_chance = self._daily_chance_cache.get(c_date_str) or self.daily_chance_repo.find_by_stock_and_date(stock_code, c_date_str)
+                    c_support_raw = getattr(c_chance, "support_price", None) if c_chance else None
+                    if c_support_raw and c_support_raw > 0:
+                        c_support_val = float(c_support_raw) / 100.0
+                        if current_price < c_support_val:
+                            break_support_recent_found = True
+                            break_support_recent_detail = f"近3日有C({c_date_str})且今日收盘{current_price}跌破C日支撑{c_support_val}"
+            
+            if not c_date_in_range:
+                # 原有逻辑：遍历检查每一天是否跌破了动态支撑
+                for check_date_str in check_dates:
+                    is_break_support, support_price_actual, check_close, detail = self._is_break_dynamic_support(
+                        stock_code, check_date_str, c_point_date
                     )
-                    break
+                    if is_break_support:
+                        break_support_recent_found = True
+                        break_support_recent_detail = detail or (
+                            f"{detail}"
+                        )
+                        break
 
             break_low_c_support_found = False
             break_low_c_support_detail = None
