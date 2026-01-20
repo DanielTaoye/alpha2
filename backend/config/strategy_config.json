@@ -33,7 +33,7 @@
   },
   "market_type": "bull",
   "market_type_description": "市场类型由日期自动判定：2025-02-05（不含）前为熊市，含当天及之后为牛市",
-  "last_updated": "2026-01-19 15:41:12",
+  "last_updated": "2026-01-20 18:17:28",
   "market_type_rule": {
     "mode": "date_rule",
     "rule_text": "2025-02-05（不含）之前为熊市，含当天及之后为牛市",

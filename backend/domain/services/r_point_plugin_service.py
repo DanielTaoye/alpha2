@@ -165,7 +165,9 @@ class RPointPluginService:
             return True, triggered_plugins
 
         # 插件3: 强转弱且未反转
-        plugin3_strong_to_weak = self._check_strong_to_weak_not_reversed(stock_code, date)
+        plugin3_strong_to_weak = self._check_strong_to_weak_not_reversed(
+            stock_code, date, ma_data, macd_data, current_index
+        )
         if plugin3_strong_to_weak.triggered:
             triggered_plugins.append(plugin3_strong_to_weak)
             logger.info(f"[R点插件-强转弱未反转] {stock_code} {date}: {plugin3_strong_to_weak.reason}")
@@ -1801,13 +1803,20 @@ class RPointPluginService:
         except Exception:
             return None
 
-    def _check_strong_to_weak_not_reversed(self, stock_code: str, date: datetime) -> RPointPluginResult:
+    def _check_strong_to_weak_not_reversed(self, stock_code: str, date: datetime,
+                                           ma_data: Optional[dict] = None, macd_data: Optional[dict] = None, 
+                                           current_index: Optional[int] = None) -> RPointPluginResult:
         """
-        插件：强转弱且未反转
+        插件3：强转弱且未反转
         条件：
         - 前一日空头组合包含“强转弱”
         - 今日未修复：close < (前日收盘+前日开盘)/2
         - 今日成交量类型包含 G
+        
+        【新增中长线限制】：
+        - 如果股性是"中长线"，需额外满足：
+          1. MACD死叉（DIF < DEA，今天往前5日内出现过都算）
+          2. 当日或已跌破20日均线（当日收盘价 < 当日MA20）
         """
         try:
             date_str = date.strftime('%Y-%m-%d') if isinstance(date, datetime) else date
@@ -1824,22 +1833,60 @@ class RPointPluginService:
             if not prev_chance or not prev_data or not current_chance or not current_data:
                 return RPointPluginResult("强转弱未反转", False, "")
             
+            # 基础条件1：前一日是“强转弱”
             if not prev_chance.bearish_pattern or "强转弱" not in prev_chance.bearish_pattern:
                 return RPointPluginResult("强转弱未反转", False, "")
             
+            # 基础条件2：今日未修复
             mid_prev = (prev_data.close + prev_data.open) / 2
             if current_data.close >= mid_prev:
                 return RPointPluginResult("强转弱未反转", False, "")
             
+            # 基础条件3：今日G型放量
             vol_today = current_chance.volume_type or ""
             vols = [v.strip() for v in vol_today.split(",") if v.strip()]
             if "G" not in vols:
                 return RPointPluginResult("强转弱未反转", False, "")
             
+            # 【中长线特有条件】
+            stock_nature = getattr(current_chance, "stock_nature", None) or "波段"
+            if stock_nature == "中长线":
+                # 检查数据完备性
+                if not ma_data or not macd_data or current_index is None:
+                    # 数据不足，保守起见不触发 R
+                    return RPointPluginResult("强转弱未反转", False, "")
+                
+                # 额外条件1：跌破MA20 (收盘 < MA20)
+                ma20_list = ma_data.get('ma20', [])
+                if current_index >= len(ma20_list):
+                    return RPointPluginResult("强转弱未反转", False, "")
+                ma20_today = ma20_list[current_index]
+                if ma20_today is None or current_data.close >= ma20_today:
+                     return RPointPluginResult("强转弱未反转", False, "")
+
+                # 额外条件2：MACD死叉 (5日内出现过 DIF < DEA)
+                # 检查区间: [current_index-4, current_index] (共5天)
+                dif_list = macd_data.get('dif', [])
+                dea_list = macd_data.get('dea', [])
+                
+                dead_cross_found = False
+                start_check = max(0, current_index - 4)
+                for i in range(start_check, current_index + 1):
+                    if i < len(dif_list) and i < len(dea_list):
+                        d_dif = dif_list[i]
+                        d_dea = dea_list[i]
+                        if d_dif is not None and d_dea is not None and d_dif < d_dea:
+                            dead_cross_found = True
+                            break
+                
+                if not dead_cross_found:
+                    return RPointPluginResult("强转弱未反转", False, "")
+            
+            suffix = "(中长线限制通过)" if stock_nature == "中长线" else ""
             return RPointPluginResult(
                 "强转弱未反转",
                 True,
-                f"前一日强转弱未修复，今日收盘<{mid_prev:.2f}，且G型放量({vol_today})"
+                f"前一日强转弱未修复，今日收盘<{mid_prev:.2f}，且G型放量{suffix}"
             )
         except Exception as e:
             logger.error(f"R点插件-强转弱未反转检查失败: {e}")
