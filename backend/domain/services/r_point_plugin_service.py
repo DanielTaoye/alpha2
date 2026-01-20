@@ -789,8 +789,91 @@ class RPointPluginService:
                 logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 无daily_chance数据，跳过检查")
                 return RPointPluginResult("乖离率偏离", False, "")
             
-            # 短线股前置条件检查：阳线 + 换手率 > 前一日 × 1.5 + 换手率 >= 9%
+            # 获取历史数据（提前获取，供 Condition 8 和后续使用）
+            # 需要至少21个前序交易日，用于“前20日+1”基准价（Condition 6）
+            # 虽然 Condition 8 只需要 5-6 天，但统一下载避免重复
+            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
+            
+            # 获取前N日数据
+            prev_data_list = []
+            if prev_dates:
+               for prev_date in prev_dates[:25]:
+                   data = self._daily_cache.get(prev_date)
+                   if not data:
+                       data = self.daily_repo.find_by_date(stock_code, prev_date)
+                   if data:
+                       prev_data_list.append(data)
+            
             stock_nature = current_chance.stock_nature or "波段"
+
+            # 子条件8（优先检查）：前5日涨幅过大（20%/25%）或（5连阳+涨幅过大）+（G型放量+大阴线 或 2日阴+累计跌幅>6%）
+            # 仅针对短线/波段股。如果是短线股，此条件可豁免"前置条件(阳线)"检查，因此放在由于。
+            if stock_nature in ["短线", "波段"]:
+                if len(prev_data_list) >= 5:
+                    prev_1_day = prev_data_list[0] # T-1
+                    prev_5_day = prev_data_list[4] # T-5
+                    base_price = None
+                    if len(prev_data_list) >= 6:
+                        base_price = prev_data_list[5].close # T-6 收盘
+                    elif prev_5_day.open and prev_5_day.open > 0:
+                        base_price = prev_5_day.open # T-5 开盘
+                    
+                    hist_rise_ok = False
+                    if prev_1_day.close and prev_1_day.close > 0 and base_price and base_price > 0:
+                        gain_5d = (prev_1_day.close - base_price) / base_price * 100
+                        thresh_5d = 20.0 if is_main_board else 25.0
+                        
+                        # A. 单纯涨幅达标
+                        if gain_5d > thresh_5d:
+                            hist_rise_ok = True
+                        # B. 5连阳 + 涨幅达标
+                        else:
+                            all_red = True
+                            for i in range(5):
+                                d = prev_data_list[i]
+                                if d.close < d.open:
+                                    all_red = False
+                                    break
+                            if all_red and gain_5d > thresh_5d:
+                                hist_rise_ok = True
+                    
+                    if hist_rise_ok:
+                        reason_8 = ""
+                        trigger_8 = False
+                        
+                        # 触发1：G型放量 + 今日大阴线
+                        is_volume_g = self._check_volume_type(current_chance, ['G'])
+                        if is_volume_g:
+                            curr_close = current_data.close
+                            curr_open = current_data.open
+                            last_close = prev_1_day.close
+                            if curr_close and curr_open and last_close:
+                                drop_pct = (last_close - curr_close) / last_close * 100
+                                body_pct = (curr_open - curr_close) / last_close * 100
+                                if drop_pct > 5.0 and body_pct > 5.0:
+                                    trigger_8 = True
+                                    reason_8 = f"G型放量+大阴线(跌{drop_pct:.1f}%/实体{body_pct:.1f}%)"
+                        
+                        # 触发2：连续2日阴线（含今日）+ 累计跌幅>6%
+                        if not trigger_8:
+                            is_today_green = current_data.close < current_data.open
+                            is_prev_green = prev_1_day.close < prev_1_day.open
+                            
+                            if is_today_green and is_prev_green:
+                                if len(prev_data_list) >= 2:
+                                    prev_2_day = prev_data_list[1]
+                                    if prev_2_day.close and prev_2_day.close > 0:
+                                        cum_drop = (prev_2_day.close - current_data.close) / prev_2_day.close * 100
+                                        if cum_drop > 6.0:
+                                            trigger_8 = True
+                                            reason_8 = f"2连阴+累计跌幅{cum_drop:.1f}%"
+                        
+                        if trigger_8:
+                            logger.info(f"[R点插件-乖离率偏离-条件8] {stock_code} {date_str} 触发: {reason_8}")
+                            return RPointPluginResult("乖离率偏离", True, f"条件8: 前5日涨幅过大+{reason_8}")
+
+            # 短线股前置条件检查：阳线 + 换手率 > 前一日 × 1.5 + 换手率 >= 9%
+            # (如果上面条件8触发，则不会执行到这里；未触发则继续执行常规检查)
             if stock_nature == "短线":
                 precondition_passed, precondition_reason = self._check_short_term_stock_precondition(
                     stock_code, date_str, current_data, stock_nature
@@ -798,6 +881,7 @@ class RPointPluginService:
                 if not precondition_passed:
                     logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 短线股前置条件未满足: {precondition_reason}")
                     return RPointPluginResult("乖离率偏离", False, "")
+
 
             
             # 预计算当日相对MA10的乖离度
@@ -851,20 +935,7 @@ class RPointPluginService:
                         f"is_volume_xyh={is_volume_xyh}, is_bearish_kline_with_amplitude={is_bearish_kline_with_amplitude}"
                     )
 
-            # 获取历史数据（需要至少21个前序交易日，用于“前20日+1”基准价）
-            prev_dates = self._get_previous_trading_dates_from_cache(date_str, stock_code)
-            if len(prev_dates) < 21:
-                logger.debug(f"[R点-乖离率偏离] {stock_code} {date_str} 历史数据不足21天({len(prev_dates)}天)")
-                return RPointPluginResult("乖离率偏离", False, "")
-            
-            # 获取前N日数据
-            prev_data_list = []
-            for prev_date in prev_dates[:25]:
-                data = self._daily_cache.get(prev_date)
-                if not data:
-                    data = self.daily_repo.find_by_date(stock_code, prev_date)
-                if data:
-                    prev_data_list.append(data)
+            # (历史数据获取代码已按需提前到前置条件检查之前，此处无需再次获取)
             
             if len(prev_data_list) < 6:
                 return RPointPluginResult("乖离率偏离", False, "")
@@ -1051,6 +1122,9 @@ class RPointPluginService:
                                 f"条件6: 前20日涨幅{gain_20days:.2f}%+放量+{signal_desc}"
                             )
             
+
+
+
             return RPointPluginResult("乖离率偏离", False, "")
             
         except Exception as e:
